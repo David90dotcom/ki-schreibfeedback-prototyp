@@ -1,24 +1,47 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.pyright/
+.coverage
+.coverage.*
+htmlcov/
 
-# Virtual environment
+# Virtuelle Umgebungen
 .venv/
 venv/
 env/
 
-# Environment variables
+# Lokale Umgebungsvariablen und Secrets
 .env
+.env.*
+!.env.example
+
+# Lokale Datenbanken und Messdaten
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite-*
+data/*.sqlite3
+data/*.sqlite3-*
+data/exports/
+
+# Build- und Paketdateien
+build/
+dist/
+*.egg-info/
 
 # IDE
 .vscode/
+.idea/
 
-# OS
+# Betriebssystem
 .DS_Store
 Thumbs.db
 
 # Logs
 *.log
+logs/
