@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<section class="card">
+    <h2>Textanalyse</h2>
+
+    <form method="post" action="/analyze">
+        <label for="provider">Modellanbieter</label>
+        <select id="provider" name="provider">
+            {% for value, label in provider_options %}
+                <option value="{{ value }}" {% if value == selected_provider %}selected{% endif %}>
+                    {{ label }}
+                </option>
+            {% endfor %}
+        </select>
+
+        <label for="student_text">Abgetippter Beispieltext</label>
+        <textarea
+            id="student_text"
+            name="student_text"
+            rows="14"
+            placeholder="Hier den anonymisierten, abgetippten Schülertext einfügen..."
+        >{{ student_text }}</textarea>
+
+        <p class="hint">
+            Bitte keine Namen, Schulbezüge, Ortsangaben oder sonstigen personenbezogenen Daten eingeben.
+        </p>
+
+        <button type="submit">Feedback generieren</button>
+    </form>
+</section>
+
+{% if error %}
+<section class="card error">
+    <h2>Fehler</h2>
+    <p>{{ error }}</p>
+</section>
+{% endif %}
+
+{% if result %}
+<section class="card result">
+    <h2>Ergebnis</h2>
+
+    <dl class="metadata">
+        <div>
+            <dt>Anbieter</dt>
+            <dd>{{ result.provider }}</dd>
+        </div>
+        <div>
+            <dt>Modell</dt>
+            <dd>{{ result.model }}</dd>
+        </div>
+        <div>
+            <dt>Antwortzeit</dt>
+            <dd>{{ result.duration_ms }} ms</dd>
+        </div>
+    </dl>
+
+    <pre class="feedback">{{ result.feedback }}</pre>
+</section>
+{% endif %}
+
+{% endblock %}
