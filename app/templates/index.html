@@ -5,17 +5,226 @@
 <section class="card">
     <h2>Textanalyse</h2>
 
-    <form method="post" action="/analyze">
+    <form id="analysis-form" method="post" action="/analyze">
         <label for="provider">Modellanbieter</label>
+
         <select id="provider" name="provider">
             {% for value, label in provider_options %}
-                <option value="{{ value }}" {% if value == selected_provider %}selected{% endif %}>
+                <option
+                    value="{{ value }}"
+                    {% if value == selected_provider %}selected{% endif %}
+                >
                     {{ label }}
                 </option>
             {% endfor %}
         </select>
 
-        <label for="student_text">Abgetippter Beispieltext</label>
+        <section
+            id="ollama-settings"
+            class="provider-settings"
+            data-provider-panel="ollama"
+        >
+            <h3>Lokales Ollama-Modell</h3>
+
+            <label for="ollama-base-url">
+                Ollama-API-Adresse
+            </label>
+
+            <input
+                id="ollama-base-url"
+                name="ollama_base_url"
+                type="url"
+                value="{{ ollama_base_url }}"
+                maxlength="2048"
+                placeholder="http://localhost:11434"
+            >
+
+            <p class="hint">
+                Vorausgefüllter Standard:
+                {{ ollama_fallback_base_url }}.
+                Ändere die Adresse nur, wenn dein Ollama-Dienst
+                tatsächlich unter einem anderen Host oder Port läuft.
+            </p>
+
+            <label for="ollama-model">
+                Ollama-Modell
+            </label>
+
+            <select
+                id="ollama-model"
+                name="ollama_model"
+                data-model-select
+                data-default-model="{{ ollama_default_model }}"
+            >
+                {% for model_name in ollama_model_options %}
+                    <option
+                        value="{{ model_name }}"
+                        {% if model_name == selected_ollama_model %}selected{% endif %}
+                    >
+                        {{ model_name }}
+                        {% if model_name == ollama_default_model %}
+                            (Standard aus .env)
+                        {% endif %}
+                    </option>
+                {% endfor %}
+
+                <option
+                    value="{{ custom_model_value }}"
+                    {% if selected_ollama_model == custom_model_value %}selected{% endif %}
+                >
+                    Andere Modell-ID …
+                </option>
+            </select>
+
+            <div
+                class="custom-model"
+                data-custom-model-group
+            >
+                <label for="ollama-custom-model">
+                    Eigene Ollama-Modell-ID
+                </label>
+
+                <input
+                    id="ollama-custom-model"
+                    name="ollama_custom_model"
+                    type="text"
+                    value="{{ ollama_custom_model }}"
+                    maxlength="200"
+                    autocomplete="off"
+                    placeholder="zum Beispiel qwen3:30b"
+                    data-custom-model-input
+                >
+
+                <p class="hint">
+                    Für ein installiertes Modell, das nicht
+                    in der Liste erscheint.
+                </p>
+            </div>
+
+            <button
+                id="load-ollama-models"
+                class="secondary-button"
+                type="button"
+            >
+                Verbindung prüfen / Modelle laden
+            </button>
+
+            <p
+                id="ollama-model-status"
+                class="status-message"
+                role="status"
+                aria-live="polite"
+            ></p>
+        </section>
+
+        <section
+            id="openai-settings"
+            class="provider-settings"
+            data-provider-panel="openai"
+        >
+            <h3>OpenAI-Cloudmodell</h3>
+
+            {% if openai_env_key_configured %}
+                <p class="configuration-status configuration-success">
+                    OPENAI_API_KEY aus der .env-Datei ist
+                    hinterlegt und wird standardmäßig verwendet.
+                </p>
+            {% else %}
+                <p class="configuration-status configuration-warning">
+                    In der .env-Datei ist kein OPENAI_API_KEY
+                    hinterlegt. Gib unten einen Key ein oder
+                    ergänze die .env-Datei.
+                </p>
+            {% endif %}
+
+            {% if openai_override_used %}
+                <p class="configuration-status configuration-info">
+                    Für den letzten Aufruf wurde der eingegebene
+                    alternative Key verwendet. Er wurde nicht gespeichert.
+                </p>
+            {% endif %}
+
+            <label for="openai-api-key">
+                Anderer OpenAI-API-Key (optional)
+            </label>
+
+            <input
+                id="openai-api-key"
+                name="openai_api_key"
+                type="password"
+                value=""
+                maxlength="500"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="Leer lassen = OPENAI_API_KEY aus .env verwenden"
+            >
+
+            <p class="hint">
+                Ein hier eingetragener Key gilt nur für diesen
+                Aufruf, wird nicht in die .env-Datei geschrieben
+                und nach dem Absenden nicht erneut angezeigt.
+            </p>
+
+            <label for="openai-model">
+                OpenAI-Modell
+            </label>
+
+            <select
+                id="openai-model"
+                name="openai_model"
+                data-model-select
+                data-default-model="{{ openai_default_model }}"
+            >
+                {% for model_name, label in openai_model_options %}
+                    <option
+                        value="{{ model_name }}"
+                        {% if model_name == selected_openai_model %}selected{% endif %}
+                    >
+                        {{ label }}
+                        {% if model_name == openai_default_model %}
+                            (Standard aus .env)
+                        {% endif %}
+                    </option>
+                {% endfor %}
+
+                <option
+                    value="{{ custom_model_value }}"
+                    {% if selected_openai_model == custom_model_value %}selected{% endif %}
+                >
+                    Andere Modell-ID …
+                </option>
+            </select>
+
+            <div
+                class="custom-model"
+                data-custom-model-group
+            >
+                <label for="openai-custom-model">
+                    Eigene OpenAI-Modell-ID
+                </label>
+
+                <input
+                    id="openai-custom-model"
+                    name="openai_custom_model"
+                    type="text"
+                    value="{{ openai_custom_model }}"
+                    maxlength="200"
+                    autocomplete="off"
+                    placeholder="zum Beispiel gpt-…"
+                    data-custom-model-input
+                >
+
+                <p class="hint">
+                    Für ein zukünftiges oder nicht aufgelistetes
+                    OpenAI-Modell.
+                </p>
+            </div>
+        </section>
+
+        <label for="student_text">
+            Abgetippter Beispieltext
+        </label>
+
         <textarea
             id="student_text"
             name="student_text"
@@ -24,10 +233,46 @@
         >{{ student_text }}</textarea>
 
         <p class="hint">
-            Bitte keine Namen, Schulbezüge, Ortsangaben oder sonstigen personenbezogenen Daten eingeben.
+            Bitte keine Namen, Schulbezüge, Ortsangaben oder
+            sonstigen personenbezogenen Daten eingeben.
         </p>
 
-        <button type="submit">Feedback generieren</button>
+        <button
+            id="submit-button"
+            type="submit"
+            data-default-label="Feedback generieren"
+        >
+            Feedback generieren
+        </button>
+
+        <section
+            id="analysis-loading"
+            class="loading-indicator"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            hidden
+        >
+            <div
+                class="loading-bar"
+                role="progressbar"
+                aria-label="Feedback wird generiert"
+            >
+                <span></span>
+            </div>
+
+            <p
+                id="loading-message"
+                class="loading-message"
+            >
+                Feedback wird generiert …
+            </p>
+
+            <p
+                id="loading-hint"
+                class="loading-hint"
+            ></p>
+        </section>
     </form>
 </section>
 
@@ -39,7 +284,7 @@
 {% endif %}
 
 {% if result %}
-<section class="card result">
+<section class class="card result">
     <h2>Ergebnis</h2>
 
     <dl class="metadata">
@@ -47,10 +292,12 @@
             <dt>Anbieter</dt>
             <dd>{{ result.provider }}</dd>
         </div>
+
         <div>
             <dt>Modell</dt>
             <dd>{{ result.model }}</dd>
         </div>
+
         <div>
             <dt>Antwortzeit</dt>
             <dd>{{ result.duration_ms }} ms</dd>
