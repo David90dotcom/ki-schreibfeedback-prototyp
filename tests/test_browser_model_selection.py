@@ -3,11 +3,10 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, patch
 
+import httpx
 from fastapi.testclient import TestClient
 
 from app import main
-from app.llm.base import DiscoveredModel
-from app.llm.errors import ProviderConnectionError
 from app.services.feedback_service import FeedbackResult
 
 
@@ -53,8 +52,8 @@ class BrowserModelSelectionTests(unittest.TestCase):
                     "student_text": "Ein kurzer Beispieltext.",
                     "provider": "ollama",
                     "ollama_base_url": "http://127.0.0.1:11500/",
-                    "model": main.CUSTOM_MODEL_VALUE,
-                    "custom_model": "llama4:latest",
+                    "ollama_model": main.CUSTOM_MODEL_VALUE,
+                    "ollama_custom_model": "llama4:latest",
                 },
             )
 
@@ -89,7 +88,8 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 data={
                     "student_text": "Ein kurzer Beispieltext.",
                     "provider": "openai",
-                    "model": "gpt-5.6-terra",
+                    "openai_model": "gpt-5.6-terra",
+                    "openai_api_key": "test-api-key",
                 },
             )
 
@@ -105,13 +105,13 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 "student_text": "Ein kurzer Beispieltext.",
                 "provider": "ollama",
                 "ollama_base_url": "localhost:11434",
-                "model": main.settings.ollama_model,
+                "ollama_model": main.settings.ollama_model,
             },
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(
-            "muss mit http:// oder https:// beginnen",
+            "muss eine vollständige HTTP-Adresse sein",
             response.text,
         )
 
@@ -121,27 +121,23 @@ class BrowserModelSelectionTests(unittest.TestCase):
             data={
                 "student_text": "Ein kurzer Beispieltext.",
                 "provider": "openai",
-                "model": main.CUSTOM_MODEL_VALUE,
-                "custom_model": "",
+                "openai_model": main.CUSTOM_MODEL_VALUE,
+                "openai_custom_model": "",
+                "openai_api_key": "test-api-key",
             },
         )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(
-            "Bitte wähle ein Modell aus oder gib eine Modell-ID ein.",
+            "Bitte gib die gewünschte Modell-ID "
+            "in das Freitextfeld ein.",
             response.text,
         )
 
-    def test_ollama_model_discovery_returns_sorted_models(self) -> None:
+    def test_ollama_model_discovery_returns_models(self) -> None:
         discovered_models = [
-            DiscoveredModel(
-                provider_id="ollama",
-                model_name="qwen3:30b",
-            ),
-            DiscoveredModel(
-                provider_id="ollama",
-                model_name="gemma3:12b",
-            ),
+            "gemma3:12b",
+            "qwen3:30b",
         ]
 
         with patch.object(
@@ -160,7 +156,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         payload = response.json()
         self.assertEqual(
             payload["models"],
-            ["gemma3:12b", "qwen3:30b"],
+            discovered_models,
         )
         self.assertEqual(
             payload["base_url"],
@@ -168,9 +164,8 @@ class BrowserModelSelectionTests(unittest.TestCase):
         )
 
     def test_ollama_discovery_connection_error_is_understandable(self) -> None:
-        error = ProviderConnectionError(
-            "Die Ollama-Modellliste konnte nicht geladen werden.",
-            provider_id="ollama",
+        error = httpx.ConnectError(
+            "Ollama ist nicht erreichbar."
         )
 
         with patch.object(
@@ -185,10 +180,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(response.status_code, 503)
-        self.assertEqual(
+        self.assertEqual(response.status_code, 502)
+        self.assertIn(
+            "nicht erreichbar",
             response.json()["detail"]["message"],
-            "Die Ollama-Modellliste konnte nicht geladen werden.",
         )
 
 
