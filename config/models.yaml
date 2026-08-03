@@ -43,11 +43,26 @@ providers:
         - time_to_first_token
         - cost_tracking
 
+  - id: runpod
+    display_name: RunPod Serverless
+    processing_location: cloud
+    enabled: true
+    capabilities:
+      health_check: true
+      model_discovery: false
+      supported_model_capabilities:
+        - structured_output
+        - native_json_schema
+        - input_token_usage
+        - output_token_usage
+        - provider_timing
+        - cost_tracking
+
 models:
-  - id: ollama-qwen3-30b
+  - id: ollama-ministral-3-14b-instruct-2512-q8-0
     provider_id: ollama
-    provider_model_name: "qwen3:30b"
-    display_name: Qwen 3 30B
+    provider_model_name: "ministral-3:14b-instruct-2512-q8_0"
+    display_name: Ministral 3 14B Instruct Q8_0 (lokal)
     description: Lokales Modell für die kriterienbasierte Schreibfeedbackanalyse.
     role: feedback
     enabled: true
@@ -56,7 +71,7 @@ models:
       streaming: true
       structured_output: true
       native_json_schema: true
-      reasoning: true
+      reasoning: false
       reasoning_efforts: []
       input_token_usage: true
       output_token_usage: true
@@ -68,8 +83,36 @@ models:
       cost_tracking: false
 
     default_parameters:
-      temperature: 0.2
-      max_output_tokens: null
+      temperature: 0.15
+      max_output_tokens: 4000
+      reasoning_effort: null
+
+  - id: runpod-ministral-3-14b-instruct-2512-q8-0
+    provider_id: runpod
+    provider_model_name: "ministral-3:14b-instruct-2512-q8_0"
+    display_name: Ministral 3 14B Instruct Q8_0 (RunPod)
+    description: Zentral verfügbares Ministral-Modell über einen RunPod-Serverless-Worker.
+    role: feedback
+    enabled: true
+
+    capabilities:
+      streaming: false
+      structured_output: true
+      native_json_schema: true
+      reasoning: false
+      reasoning_efforts: []
+      input_token_usage: true
+      output_token_usage: true
+      reasoning_token_usage: false
+      cached_input_token_usage: false
+      cache_write_token_usage: false
+      provider_timing: true
+      time_to_first_token: false
+      cost_tracking: true
+
+    default_parameters:
+      temperature: 0.15
+      max_output_tokens: 4000
       reasoning_effort: null
 
   - id: openai-gpt-5.6-luna

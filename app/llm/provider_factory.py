@@ -9,6 +9,7 @@ from app.config import Settings
 from app.llm.base import ModelProvider
 from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
+from app.llm.runpod_client import RunPodProvider
 
 
 ProviderBuilder = Callable[[], ModelProvider]
@@ -340,6 +341,29 @@ def create_default_provider_factory(
         configuration_error=(
             "OPENAI_API_KEY ist nicht gesetzt. "
             "Prüfe die lokale .env-Datei."
+        ),
+    )
+
+    factory.register(
+        provider_id="runpod",
+        builder=lambda: RunPodProvider(
+            api_key=settings.runpod_api_key,
+            endpoint_id=settings.runpod_endpoint_id,
+            model_name=settings.runpod_model,
+            job_timeout_seconds=(
+                settings.runpod_job_timeout_seconds
+            ),
+            poll_interval_seconds=(
+                settings.runpod_poll_interval_seconds
+            ),
+        ),
+        configuration_check=lambda: bool(
+            settings.runpod_api_key
+            and settings.runpod_endpoint_id
+        ),
+        configuration_error=(
+            "RUNPOD_API_KEY oder RUNPOD_ENDPOINT_ID ist nicht "
+            "gesetzt. Prüfe die lokale .env-Datei."
         ),
     )
 

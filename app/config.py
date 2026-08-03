@@ -33,7 +33,7 @@ class Settings:
     ollama_model: str = _first_configured_value(
         "OLLAMA_DEFAULT_MODEL",
         "OLLAMA_MODEL",
-        fallback="llama3.1:8b",
+        fallback="ministral-3:14b-instruct-2512-q8_0",
     )
 
     openai_api_key: str | None = (
@@ -44,6 +44,28 @@ class Settings:
         "OPENAI_DEFAULT_MODEL",
         "OPENAI_MODEL",
         fallback="gpt-5.6-luna",
+    )
+
+    runpod_api_key: str | None = (
+        os.getenv("RUNPOD_API_KEY", "").strip() or None
+    )
+
+    runpod_endpoint_id: str | None = (
+        os.getenv("RUNPOD_ENDPOINT_ID", "").strip() or None
+    )
+
+    runpod_model: str = _first_configured_value(
+        "RUNPOD_DEFAULT_MODEL",
+        "RUNPOD_MODEL",
+        fallback="ministral-3:14b-instruct-2512-q8_0",
+    )
+
+    runpod_job_timeout_seconds: float = float(
+        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "900")
+    )
+
+    runpod_poll_interval_seconds: float = float(
+        os.getenv("RUNPOD_POLL_INTERVAL_SECONDS", "1")
     )
 
     max_input_chars: int = int(

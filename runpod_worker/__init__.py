@@ -1,0 +1,1 @@
+"""RunPod Serverless worker for the writing-feedback prototype."""

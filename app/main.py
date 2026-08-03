@@ -17,6 +17,7 @@ from app.config import settings
 from app.llm.base import LLMProvider
 from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
+from app.llm.runpod_client import RunPodProvider
 from app.services.feedback_service import (
     FeedbackResult,
     FeedbackService,
@@ -56,6 +57,17 @@ feedback_service = FeedbackService(
         "openai": OpenAIProvider(
             api_key=settings.openai_api_key,
             model_name=settings.openai_model,
+        ),
+        "runpod": RunPodProvider(
+            api_key=settings.runpod_api_key,
+            endpoint_id=settings.runpod_endpoint_id,
+            model_name=settings.runpod_model,
+            job_timeout_seconds=(
+                settings.runpod_job_timeout_seconds
+            ),
+            poll_interval_seconds=(
+                settings.runpod_poll_interval_seconds
+            ),
         ),
     },
     max_input_chars=settings.max_input_chars,
@@ -279,6 +291,19 @@ def _provider_for_request(
                 openai_model,
                 openai_custom_model,
                 settings.openai_model,
+            ),
+        )
+
+    if provider_key == "runpod":
+        return RunPodProvider(
+            api_key=settings.runpod_api_key,
+            endpoint_id=settings.runpod_endpoint_id,
+            model_name=settings.runpod_model,
+            job_timeout_seconds=(
+                settings.runpod_job_timeout_seconds
+            ),
+            poll_interval_seconds=(
+                settings.runpod_poll_interval_seconds
             ),
         )
 

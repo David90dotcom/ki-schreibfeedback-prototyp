@@ -22,8 +22,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('id="ollama-base-url"', response.text)
         self.assertIn('id="ollama-model"', response.text)
         self.assertIn('id="openai-model"', response.text)
+        self.assertIn('value="runpod"', response.text)
         self.assertIn(main.settings.ollama_base_url, response.text)
         self.assertIn(main.settings.openai_model, response.text)
+        self.assertIn("Cloud: RunPod Serverless", response.text)
         self.assertIn("Andere Modell-ID", response.text)
 
     def test_custom_ollama_settings_apply_only_to_request(self) -> None:
@@ -58,7 +60,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(captured["base_url"], "http://127.0.0.1:11500")
+        self.assertEqual(
+            captured["base_url"],
+            "http://127.0.0.1:11500",
+        )
         self.assertEqual(captured["model"], "llama4:latest")
         self.assertIn("Lokales Testfeedback", response.text)
         self.assertIn("llama4:latest", response.text)
@@ -69,11 +74,19 @@ class BrowserModelSelectionTests(unittest.TestCase):
 
         async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
             provider = kwargs["provider_override"]
-            captured["model"] = provider.model_name  # type: ignore[attr-defined]
+
+            if not isinstance(provider, main.OpenAIProvider):
+                raise AssertionError(
+                    "Es wurde kein OpenAIProvider übergeben."
+                )
+
+            captured["provider_key"] = str(kwargs["provider_key"])
+            captured["provider_name"] = provider.provider_name
+            captured["model"] = provider.model_name
 
             return FeedbackResult(
                 provider="openai",
-                model=provider.model_name,  # type: ignore[attr-defined]
+                model=provider.model_name,
                 feedback="Cloud-Testfeedback",
                 duration_ms=45,
             )
@@ -94,9 +107,57 @@ class BrowserModelSelectionTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["provider_key"], "openai")
+        self.assertEqual(captured["provider_name"], "openai")
         self.assertEqual(captured["model"], "gpt-5.6-terra")
         self.assertIn("Cloud-Testfeedback", response.text)
         self.assertIn("gpt-5.6-terra", response.text)
+
+    def test_selected_runpod_provider_is_used(self) -> None:
+        captured: dict[str, str] = {}
+
+        async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
+            provider = kwargs["provider_override"]
+
+            if not isinstance(provider, main.RunPodProvider):
+                raise AssertionError(
+                    "Es wurde kein RunPodProvider übergeben."
+                )
+
+            captured["provider_key"] = str(kwargs["provider_key"])
+            captured["provider_id"] = provider.provider_id
+            captured["model"] = provider.model_name
+
+            return FeedbackResult(
+                provider="runpod",
+                model=provider.model_name,
+                feedback="RunPod-Testfeedback",
+                duration_ms=67,
+            )
+
+        with patch.object(
+            main.feedback_service,
+            "analyze_text",
+            new=AsyncMock(side_effect=fake_analyze_text),
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "runpod",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["provider_key"], "runpod")
+        self.assertEqual(captured["provider_id"], "runpod")
+        self.assertEqual(
+            captured["model"],
+            main.settings.runpod_model,
+        )
+        self.assertIn("RunPod-Testfeedback", response.text)
+        self.assertIn(main.settings.runpod_model, response.text)
+        self.assertIn("67 ms", response.text)
 
     def test_invalid_ollama_url_returns_understandable_error(self) -> None:
         response = self.client.post(

@@ -1,0 +1,25 @@
+{
+  "input": {
+    "model": "ministral-3:14b-instruct-2512-q8_0",
+    "prompt": "Die Schule sollte später beginnen, weil viele Jugendliche morgens noch müde sind.",
+    "system": "Gib kurzes, konstruktives Schreibfeedback auf Deutsch.",
+    "stream": false,
+    "options": {
+      "temperature": 0.15,
+      "num_predict": 128,
+      "seed": 7
+    },
+    "format": {
+      "type": "object",
+      "properties": {
+        "feedback": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "feedback"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

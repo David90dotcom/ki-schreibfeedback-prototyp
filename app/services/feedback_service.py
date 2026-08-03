@@ -25,6 +25,7 @@ class FeedbackService:
         return [
             ("ollama", "Lokal: Ollama"),
             ("openai", "Cloud: OpenAI API"),
+            ("runpod", "Cloud: RunPod Serverless"),
         ]
 
     async def analyze_text(
