@@ -97,7 +97,7 @@ class RunPodProvider:
 
         if request.stream:
             raise ProviderInvalidRequestError(
-                "RunPod-Streaming ist in Version 0.3a nicht aktiviert.",
+                "RunPod-Streaming ist in Version 0.3 nicht aktiviert.",
                 provider_id=self.provider_id,
                 model_name=request.model_name,
             )
