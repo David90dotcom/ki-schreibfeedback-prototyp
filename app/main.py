@@ -25,6 +25,7 @@ from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
 from app.llm.runpod_client import RunPodProvider
 from app.security import (
+    LoginRateLimiter,
     authenticated_username,
     end_authenticated_session,
     is_authenticated,
@@ -118,6 +119,13 @@ feedback_service = FeedbackService(
         ),
     },
     max_input_chars=settings.max_input_chars,
+)
+
+login_rate_limiter = LoginRateLimiter(
+    max_attempts=settings.login_rate_limit_attempts,
+    window_seconds=(
+        settings.login_rate_limit_window_seconds
+    ),
 )
 
 
@@ -231,6 +239,14 @@ def _redirect_to_login() -> RedirectResponse:
         url="/login",
         status_code=303,
     )
+
+
+def _login_client_key(request: Request) -> str:
+    """Verwendet die von ASGI ermittelte Client-Adresse."""
+    if request.client is None:
+        return "unknown-client"
+
+    return request.client.host
 
 
 def _validate_model_name(
@@ -407,12 +423,38 @@ async def login(
     username: str = Form(..., max_length=200),
     password: str = Form(..., max_length=512),
 ) -> Response:
+    client_key = _login_client_key(request)
+    retry_after = login_rate_limiter.retry_after_seconds(
+        client_key
+    )
+
+    if retry_after is not None:
+        return templates.TemplateResponse(
+            name="login.html",
+            request=request,
+            context={
+                "app_name": settings.app_name,
+                "authenticated_user": None,
+                "username": settings.auth_username,
+                "error": (
+                    "Zu viele fehlgeschlagene "
+                    "Anmeldeversuche. Bitte versuche es "
+                    "später erneut."
+                ),
+            },
+            status_code=429,
+            headers={
+                "Retry-After": str(retry_after),
+            },
+        )
+
     if verify_credentials(
         username=username.strip(),
         password=password,
         expected_username=settings.auth_username,
         password_hash=settings.auth_password_hash,
     ):
+        login_rate_limiter.reset(client_key)
         start_authenticated_session(
             request.session,
             settings.auth_username,
@@ -422,6 +464,8 @@ async def login(
             url="/",
             status_code=303,
         )
+
+    login_rate_limiter.record_failure(client_key)
 
     return templates.TemplateResponse(
         name="login.html",

@@ -6,14 +6,29 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from app import main
+from app.security import LoginRateLimiter
 
 
 class WebAuthenticationTests(unittest.TestCase):
     def setUp(self) -> None:
+        self.rate_limiter_patcher = patch.object(
+            main,
+            "login_rate_limiter",
+            LoginRateLimiter(
+                max_attempts=(
+                    main.settings.login_rate_limit_attempts
+                ),
+                window_seconds=(
+                    main.settings.login_rate_limit_window_seconds
+                ),
+            ),
+        )
+        self.rate_limiter_patcher.start()
         self.client = TestClient(main.app)
 
     def tearDown(self) -> None:
         self.client.close()
+        self.rate_limiter_patcher.stop()
 
     def _login(self) -> object:
         with patch.object(
@@ -88,6 +103,99 @@ class WebAuthenticationTests(unittest.TestCase):
             response.text,
         )
         self.assertNotIn('value="falsch"', response.text)
+
+    def test_repeated_wrong_credentials_are_rate_limited(
+        self,
+    ) -> None:
+        limiter = LoginRateLimiter(
+            max_attempts=2,
+            window_seconds=60,
+        )
+
+        with (
+            patch.object(
+                main,
+                "login_rate_limiter",
+                limiter,
+            ),
+            patch.object(
+                main,
+                "verify_credentials",
+                return_value=False,
+            ) as verify_mock,
+        ):
+            first_response = self.client.post(
+                "/login",
+                data={
+                    "username": "falsch",
+                    "password": "falsch",
+                },
+            )
+            second_response = self.client.post(
+                "/login",
+                data={
+                    "username": "falsch",
+                    "password": "falsch",
+                },
+            )
+            blocked_response = self.client.post(
+                "/login",
+                data={
+                    "username": main.settings.auth_username,
+                    "password": "richtig",
+                },
+            )
+
+        self.assertEqual(first_response.status_code, 401)
+        self.assertEqual(second_response.status_code, 401)
+        self.assertEqual(blocked_response.status_code, 429)
+        self.assertEqual(
+            blocked_response.headers["retry-after"],
+            "60",
+        )
+        self.assertIn(
+            "Zu viele fehlgeschlagene Anmeldeversuche.",
+            blocked_response.text,
+        )
+        self.assertEqual(verify_mock.call_count, 2)
+
+    def test_successful_login_resets_failed_attempts(
+        self,
+    ) -> None:
+        limiter = LoginRateLimiter(
+            max_attempts=2,
+            window_seconds=60,
+        )
+
+        with (
+            patch.object(
+                main,
+                "login_rate_limiter",
+                limiter,
+            ),
+            patch.object(
+                main,
+                "verify_credentials",
+                side_effect=(False, True, False, False),
+            ) as verify_mock,
+        ):
+            responses = [
+                self.client.post(
+                    "/login",
+                    data={
+                        "username": main.settings.auth_username,
+                        "password": "testwert",
+                    },
+                    follow_redirects=False,
+                )
+                for _ in range(4)
+            ]
+
+        self.assertEqual(
+            [response.status_code for response in responses],
+            [401, 303, 401, 401],
+        )
+        self.assertEqual(verify_mock.call_count, 4)
 
     def test_login_and_logout_control_the_session(self) -> None:
         login_response = self._login()

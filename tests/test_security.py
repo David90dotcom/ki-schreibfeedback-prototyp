@@ -6,6 +6,7 @@ from pwdlib import PasswordHash
 
 from app.security import (
     AUTHENTICATED_USER_SESSION_KEY,
+    LoginRateLimiter,
     authenticated_username,
     end_authenticated_session,
     is_authenticated,
@@ -92,7 +93,72 @@ class SecurityTests(unittest.TestCase):
         self.assertEqual(session, {})
         self.assertIsNone(authenticated_username(session))
 
+    def test_rate_limiter_blocks_after_maximum(self) -> None:
+        now = [100.0]
+        limiter = LoginRateLimiter(
+            max_attempts=2,
+            window_seconds=60,
+            clock=lambda: now[0],
+        )
+
+        self.assertIsNone(
+            limiter.retry_after_seconds("client-a")
+        )
+
+        limiter.record_failure("client-a")
+        self.assertIsNone(
+            limiter.retry_after_seconds("client-a")
+        )
+
+        limiter.record_failure("client-a")
+        self.assertEqual(
+            limiter.retry_after_seconds("client-a"),
+            60,
+        )
+
+        self.assertIsNone(
+            limiter.retry_after_seconds("client-b")
+        )
+
+    def test_rate_limiter_releases_after_window(self) -> None:
+        now = [100.0]
+        limiter = LoginRateLimiter(
+            max_attempts=1,
+            window_seconds=60,
+            clock=lambda: now[0],
+        )
+
+        limiter.record_failure("client-a")
+        now[0] += 30
+
+        self.assertEqual(
+            limiter.retry_after_seconds("client-a"),
+            30,
+        )
+
+        now[0] += 30
+
+        self.assertIsNone(
+            limiter.retry_after_seconds("client-a")
+        )
+
+    def test_rate_limiter_resets_after_success(self) -> None:
+        limiter = LoginRateLimiter(
+            max_attempts=1,
+            window_seconds=60,
+        )
+
+        limiter.record_failure("client-a")
+        self.assertIsNotNone(
+            limiter.retry_after_seconds("client-a")
+        )
+
+        limiter.reset("client-a")
+
+        self.assertIsNone(
+            limiter.retry_after_seconds("client-a")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-    
