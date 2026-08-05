@@ -1,12 +1,26 @@
 from __future__ import annotations
 
+import re
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app import main
 from app.security import LoginRateLimiter
+
+
+def _csrf_token_from(response: Response) -> str:
+    match = re.search(
+        r'name="csrf_token"\s+value="([^"]+)"',
+        response.text,
+    )
+
+    if match is None:
+        raise AssertionError("CSRF-Token fehlt in der Antwort.")
+
+    return match.group(1)
 
 
 class WebAuthenticationTests(unittest.TestCase):
@@ -30,7 +44,11 @@ class WebAuthenticationTests(unittest.TestCase):
         self.client.close()
         self.rate_limiter_patcher.stop()
 
-    def _login(self) -> object:
+    def _login(self) -> Response:
+        csrf_token = _csrf_token_from(
+            self.client.get("/login")
+        )
+
         with patch.object(
             main,
             "verify_credentials",
@@ -41,6 +59,7 @@ class WebAuthenticationTests(unittest.TestCase):
                 data={
                     "username": main.settings.auth_username,
                     "password": "nur-fuer-den-integrationstest",
+                    "csrf_token": csrf_token,
                 },
                 follow_redirects=False,
             )
@@ -51,6 +70,7 @@ class WebAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn('name="username"', response.text)
         self.assertIn('name="password"', response.text)
+        self.assertIn('name="csrf_token"', response.text)
 
     def test_start_page_redirects_to_login(self) -> None:
         response = self.client.get(
@@ -84,6 +104,10 @@ class WebAuthenticationTests(unittest.TestCase):
         )
 
     def test_wrong_credentials_are_rejected(self) -> None:
+        csrf_token = _csrf_token_from(
+            self.client.get("/login")
+        )
+
         with patch.object(
             main,
             "verify_credentials",
@@ -94,6 +118,7 @@ class WebAuthenticationTests(unittest.TestCase):
                 data={
                     "username": "falsch",
                     "password": "falsch",
+                    "csrf_token": csrf_token,
                 },
             )
 
@@ -104,12 +129,45 @@ class WebAuthenticationTests(unittest.TestCase):
         )
         self.assertNotIn('value="falsch"', response.text)
 
+    def test_login_rejects_missing_or_invalid_csrf_token(
+        self,
+    ) -> None:
+        self.client.get("/login")
+
+        with patch.object(
+            main,
+            "verify_credentials",
+            return_value=True,
+        ) as verify_mock:
+            missing_response = self.client.post(
+                "/login",
+                data={
+                    "username": main.settings.auth_username,
+                    "password": "testwert",
+                },
+            )
+            invalid_response = self.client.post(
+                "/login",
+                data={
+                    "username": main.settings.auth_username,
+                    "password": "testwert",
+                    "csrf_token": "falsches-token",
+                },
+            )
+
+        self.assertEqual(missing_response.status_code, 403)
+        self.assertEqual(invalid_response.status_code, 403)
+        verify_mock.assert_not_called()
+
     def test_repeated_wrong_credentials_are_rate_limited(
         self,
     ) -> None:
         limiter = LoginRateLimiter(
             max_attempts=2,
             window_seconds=60,
+        )
+        csrf_token = _csrf_token_from(
+            self.client.get("/login")
         )
 
         with (
@@ -129,6 +187,7 @@ class WebAuthenticationTests(unittest.TestCase):
                 data={
                     "username": "falsch",
                     "password": "falsch",
+                    "csrf_token": csrf_token,
                 },
             )
             second_response = self.client.post(
@@ -136,6 +195,7 @@ class WebAuthenticationTests(unittest.TestCase):
                 data={
                     "username": "falsch",
                     "password": "falsch",
+                    "csrf_token": csrf_token,
                 },
             )
             blocked_response = self.client.post(
@@ -143,6 +203,7 @@ class WebAuthenticationTests(unittest.TestCase):
                 data={
                     "username": main.settings.auth_username,
                     "password": "richtig",
+                    "csrf_token": csrf_token,
                 },
             )
 
@@ -167,6 +228,10 @@ class WebAuthenticationTests(unittest.TestCase):
             window_seconds=60,
         )
 
+        csrf_token = _csrf_token_from(
+            self.client.get("/login")
+        )
+
         with (
             patch.object(
                 main,
@@ -179,20 +244,55 @@ class WebAuthenticationTests(unittest.TestCase):
                 side_effect=(False, True, False, False),
             ) as verify_mock,
         ):
-            responses = [
-                self.client.post(
-                    "/login",
-                    data={
-                        "username": main.settings.auth_username,
-                        "password": "testwert",
-                    },
-                    follow_redirects=False,
-                )
-                for _ in range(4)
-            ]
+            first_response = self.client.post(
+                "/login",
+                data={
+                    "username": main.settings.auth_username,
+                    "password": "testwert",
+                    "csrf_token": csrf_token,
+                },
+                follow_redirects=False,
+            )
+            successful_response = self.client.post(
+                "/login",
+                data={
+                    "username": main.settings.auth_username,
+                    "password": "testwert",
+                    "csrf_token": csrf_token,
+                },
+                follow_redirects=False,
+            )
+
+            authenticated_csrf_token = _csrf_token_from(
+                self.client.get("/")
+            )
+
+            third_response = self.client.post(
+                "/login",
+                data={
+                    "username": main.settings.auth_username,
+                    "password": "testwert",
+                    "csrf_token": authenticated_csrf_token,
+                },
+                follow_redirects=False,
+            )
+            fourth_response = self.client.post(
+                "/login",
+                data={
+                    "username": main.settings.auth_username,
+                    "password": "testwert",
+                    "csrf_token": authenticated_csrf_token,
+                },
+                follow_redirects=False,
+            )
 
         self.assertEqual(
-            [response.status_code for response in responses],
+            [
+                first_response.status_code,
+                successful_response.status_code,
+                third_response.status_code,
+                fourth_response.status_code,
+            ],
             [401, 303, 401, 401],
         )
         self.assertEqual(verify_mock.call_count, 4)
@@ -224,6 +324,11 @@ class WebAuthenticationTests(unittest.TestCase):
 
         logout_response = self.client.post(
             "/logout",
+            data={
+                "csrf_token": _csrf_token_from(
+                    protected_response
+                ),
+            },
             follow_redirects=False,
         )
 
@@ -239,6 +344,29 @@ class WebAuthenticationTests(unittest.TestCase):
         )
 
         self.assertEqual(protected_after_logout.status_code, 303)
+
+    def test_authenticated_posts_require_csrf_token(self) -> None:
+        self._login()
+
+        with patch.object(
+            main.feedback_service,
+            "analyze_text",
+            new=AsyncMock(),
+        ) as analyze_mock:
+            analyze_response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Testtext",
+                    "provider": "ollama",
+                },
+            )
+
+        logout_response = self.client.post("/logout")
+
+        self.assertEqual(analyze_response.status_code, 403)
+        self.assertEqual(logout_response.status_code, 403)
+        analyze_mock.assert_not_awaited()
+        self.assertEqual(self.client.get("/").status_code, 200)
 
 
 if __name__ == "__main__":

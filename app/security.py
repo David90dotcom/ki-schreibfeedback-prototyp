@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 import math
+import secrets
 import time
 from collections import deque
 from collections.abc import Callable, Mapping, MutableMapping
@@ -12,8 +13,45 @@ from pwdlib.exceptions import UnknownHashError
 
 
 AUTHENTICATED_USER_SESSION_KEY = "authenticated_user"
+CSRF_TOKEN_SESSION_KEY = "csrf_token"
 
 _PASSWORD_HASHER = PasswordHash.recommended()
+
+
+def get_or_create_csrf_token(
+    session: MutableMapping[str, object],
+) -> str:
+    """Liefert das CSRF-Token der Sitzung oder erzeugt eines."""
+    token = session.get(CSRF_TOKEN_SESSION_KEY)
+
+    if isinstance(token, str) and token:
+        return token
+
+    token = secrets.token_urlsafe(32)
+    session[CSRF_TOKEN_SESSION_KEY] = token
+
+    return token
+
+
+def is_valid_csrf_token(
+    session: Mapping[str, object],
+    submitted_token: str | None,
+) -> bool:
+    """Vergleicht Formular- und Sitzungstoken sicher."""
+    expected_token = session.get(CSRF_TOKEN_SESSION_KEY)
+
+    if (
+        not isinstance(expected_token, str)
+        or not expected_token
+        or not isinstance(submitted_token, str)
+        or not submitted_token
+    ):
+        return False
+
+    return hmac.compare_digest(
+        submitted_token.encode("utf-8"),
+        expected_token.encode("utf-8"),
+    )
 
 
 class LoginRateLimiter:

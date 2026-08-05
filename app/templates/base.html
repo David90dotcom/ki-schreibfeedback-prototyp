@@ -39,6 +39,12 @@
                     </span>
 
                     <form method="post" action="/logout">
+                        <input
+                            type="hidden"
+                            name="csrf_token"
+                            value="{{ csrf_token }}"
+                        >
+
                         <button
                             class="secondary-button logout-button"
                             type="submit"

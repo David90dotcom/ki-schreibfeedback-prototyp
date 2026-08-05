@@ -1,19 +1,36 @@
 from __future__ import annotations
 
+import re
 import unittest
 from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi.testclient import TestClient
+from httpx import Response
 
 from app import main
 from app.services.feedback_service import FeedbackResult
+
+
+def _csrf_token_from(response: Response) -> str:
+    match = re.search(
+        r'name="csrf_token"\s+value="([^"]+)"',
+        response.text,
+    )
+
+    if match is None:
+        raise AssertionError("CSRF-Token fehlt in der Antwort.")
+
+    return match.group(1)
 
 
 class BrowserModelSelectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.client = TestClient(main.app)
+        login_csrf_token = _csrf_token_from(
+            cls.client.get("/login")
+        )
 
         with patch.object(
             main,
@@ -25,6 +42,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 data={
                     "username": main.settings.auth_username,
                     "password": "nur-fuer-den-integrationstest",
+                    "csrf_token": login_csrf_token,
                 },
                 follow_redirects=False,
             )
@@ -33,6 +51,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
             raise AssertionError(
                 "Die Testanmeldung ist fehlgeschlagen."
             )
+
+        cls.csrf_token = _csrf_token_from(
+            cls.client.get("/")
+        )
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -76,6 +98,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 data={
                     "student_text": "Ein kurzer Beispieltext.",
                     "provider": "ollama",
+                    "csrf_token": self.csrf_token,
                     "ollama_base_url": "http://127.0.0.1:11500/",
                     "ollama_model": main.CUSTOM_MODEL_VALUE,
                     "ollama_custom_model": "llama4:latest",
@@ -124,6 +147,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 data={
                     "student_text": "Ein kurzer Beispieltext.",
                     "provider": "openai",
+                    "csrf_token": self.csrf_token,
                     "openai_model": "gpt-5.6-terra",
                     "openai_api_key": "test-api-key",
                 },
@@ -168,6 +192,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 data={
                     "student_text": "Ein kurzer Beispieltext.",
                     "provider": "runpod",
+                    "csrf_token": self.csrf_token,
                 },
             )
 
@@ -188,6 +213,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
             data={
                 "student_text": "Ein kurzer Beispieltext.",
                 "provider": "ollama",
+                "csrf_token": self.csrf_token,
                 "ollama_base_url": "localhost:11434",
                 "ollama_model": main.settings.ollama_model,
             },
@@ -205,6 +231,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
             data={
                 "student_text": "Ein kurzer Beispieltext.",
                 "provider": "openai",
+                "csrf_token": self.csrf_token,
                 "openai_model": main.CUSTOM_MODEL_VALUE,
                 "openai_custom_model": "",
                 "openai_api_key": "test-api-key",

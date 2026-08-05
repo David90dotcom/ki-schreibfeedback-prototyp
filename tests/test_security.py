@@ -6,9 +6,12 @@ from pwdlib import PasswordHash
 
 from app.security import (
     AUTHENTICATED_USER_SESSION_KEY,
+    CSRF_TOKEN_SESSION_KEY,
     LoginRateLimiter,
     authenticated_username,
     end_authenticated_session,
+    get_or_create_csrf_token,
+    is_valid_csrf_token,
     is_authenticated,
     start_authenticated_session,
     verify_credentials,
@@ -92,6 +95,29 @@ class SecurityTests(unittest.TestCase):
 
         self.assertEqual(session, {})
         self.assertIsNone(authenticated_username(session))
+
+    def test_csrf_token_is_stored_and_verified(self) -> None:
+        session: dict[str, object] = {}
+
+        token = get_or_create_csrf_token(session)
+
+        self.assertEqual(
+            session[CSRF_TOKEN_SESSION_KEY],
+            token,
+        )
+        self.assertEqual(
+            get_or_create_csrf_token(session),
+            token,
+        )
+        self.assertTrue(
+            is_valid_csrf_token(session, token)
+        )
+        self.assertFalse(
+            is_valid_csrf_token(session, "falsches-token")
+        )
+        self.assertFalse(
+            is_valid_csrf_token(session, None)
+        )
 
     def test_rate_limiter_blocks_after_maximum(self) -> None:
         now = [100.0]

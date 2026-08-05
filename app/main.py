@@ -28,6 +28,8 @@ from app.security import (
     LoginRateLimiter,
     authenticated_username,
     end_authenticated_session,
+    get_or_create_csrf_token,
+    is_valid_csrf_token,
     is_authenticated,
     start_authenticated_session,
     verify_credentials,
@@ -155,6 +157,7 @@ def _openai_model_options() -> list[tuple[str, str]]:
 
 def _template_context(
     *,
+    csrf_token: str,
     authenticated_user: str | None = None,
     selected_provider: str = "ollama",
     student_text: str = "",
@@ -185,6 +188,7 @@ def _template_context(
     return {
         "app_name": settings.app_name,
         "authenticated_user": authenticated_user,
+        "csrf_token": csrf_token,
         "provider_options": (
             feedback_service.get_provider_options()
         ),
@@ -247,6 +251,23 @@ def _login_client_key(request: Request) -> str:
         return "unknown-client"
 
     return request.client.host
+
+
+def _require_valid_csrf_token(
+    request: Request,
+    submitted_token: str,
+) -> None:
+    """Lehnt schreibende Browseranfragen ohne Sitzungstoken ab."""
+    if is_valid_csrf_token(
+        request.session,
+        submitted_token,
+    ):
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail="Ungültige oder fehlende Formularbestätigung.",
+    )
 
 
 def _validate_model_name(
@@ -412,6 +433,9 @@ async def login_page(
             "app_name": settings.app_name,
             "authenticated_user": None,
             "username": settings.auth_username,
+            "csrf_token": get_or_create_csrf_token(
+                request.session
+            ),
             "error": None,
         },
     )
@@ -422,7 +446,10 @@ async def login(
     request: Request,
     username: str = Form(..., max_length=200),
     password: str = Form(..., max_length=512),
+    csrf_token: str = Form("", max_length=256),
 ) -> Response:
+    _require_valid_csrf_token(request, csrf_token)
+
     client_key = _login_client_key(request)
     retry_after = login_rate_limiter.retry_after_seconds(
         client_key
@@ -436,6 +463,9 @@ async def login(
                 "app_name": settings.app_name,
                 "authenticated_user": None,
                 "username": settings.auth_username,
+                "csrf_token": get_or_create_csrf_token(
+                    request.session
+                ),
                 "error": (
                     "Zu viele fehlgeschlagene "
                     "Anmeldeversuche. Bitte versuche es "
@@ -474,6 +504,9 @@ async def login(
             "app_name": settings.app_name,
             "authenticated_user": None,
             "username": settings.auth_username,
+            "csrf_token": get_or_create_csrf_token(
+                request.session
+            ),
             "error": "Benutzername oder Passwort ist falsch.",
         },
         status_code=401,
@@ -483,7 +516,9 @@ async def login(
 @app.post("/logout")
 async def logout(
     request: Request,
+    csrf_token: str = Form("", max_length=256),
 ) -> RedirectResponse:
+    _require_valid_csrf_token(request, csrf_token)
     end_authenticated_session(request.session)
 
     return _redirect_to_login()
@@ -502,6 +537,9 @@ async def index(
         name="index.html",
         request=request,
         context=_template_context(
+            csrf_token=get_or_create_csrf_token(
+                request.session
+            ),
             authenticated_user=authenticated_user,
         ),
     )
@@ -566,6 +604,7 @@ async def analyze(
     request: Request,
     student_text: str = Form(...),
     provider: str = Form(...),
+    csrf_token: str = Form("", max_length=256),
     ollama_base_url: str = Form(""),
     ollama_model: str = Form(""),
     ollama_custom_model: str = Form(""),
@@ -577,6 +616,8 @@ async def analyze(
 
     if authenticated_user is None:
         return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
 
     result: FeedbackResult | None = None
     error: str | None = None
@@ -609,6 +650,9 @@ async def analyze(
         name="index.html",
         request=request,
         context=_template_context(
+            csrf_token=get_or_create_csrf_token(
+                request.session
+            ),
             authenticated_user=authenticated_user,
             selected_provider=provider,
             student_text=student_text,
