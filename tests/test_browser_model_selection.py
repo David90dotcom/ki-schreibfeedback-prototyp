@@ -15,6 +15,29 @@ class BrowserModelSelectionTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.client = TestClient(main.app)
 
+        with patch.object(
+            main,
+            "verify_credentials",
+            return_value=True,
+        ):
+            response = cls.client.post(
+                "/login",
+                data={
+                    "username": main.settings.auth_username,
+                    "password": "nur-fuer-den-integrationstest",
+                },
+                follow_redirects=False,
+            )
+
+        if response.status_code != 303:
+            raise AssertionError(
+                "Die Testanmeldung ist fehlgeschlagen."
+            )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.client.close()
+
     def test_start_page_contains_defaults_and_custom_fields(self) -> None:
         response = self.client.get("/")
 
