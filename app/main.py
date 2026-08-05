@@ -1,3 +1,4 @@
+import secrets
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -9,15 +10,30 @@ from fastapi import (
     Query,
     Request,
 )
-from fastapi.responses import HTMLResponse
+from fastapi.responses import (
+    HTMLResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import settings
+from app.config import APP_MODE_LOCAL, settings
 from app.llm.base import LLMProvider
 from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
 from app.llm.runpod_client import RunPodProvider
+from app.security import (
+    LoginRateLimiter,
+    authenticated_username,
+    end_authenticated_session,
+    get_or_create_csrf_token,
+    is_valid_csrf_token,
+    is_authenticated,
+    start_authenticated_session,
+    verify_credentials,
+)
 from app.services.feedback_service import (
     FeedbackResult,
     FeedbackService,
@@ -28,6 +44,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CUSTOM_MODEL_VALUE = "__custom__"
 OLLAMA_FALLBACK_BASE_URL = "http://localhost:11434"
 MAX_MODEL_NAME_CHARS = 200
+SESSION_COOKIE_NAME = "ki-schreibfeedback-session"
 
 OPENAI_MODEL_CATALOG = (
     ("gpt-5.6-luna", "GPT-5.6 Luna – günstig"),
@@ -35,7 +52,40 @@ OPENAI_MODEL_CATALOG = (
     ("gpt-5.6-sol", "GPT-5.6 Sol – höchste Leistung"),
 )
 
-app = FastAPI(title=settings.app_name)
+
+def _runtime_session_secret() -> str:
+    """Verlangt außerhalb der lokalen Entwicklung ein festes Secret."""
+    if settings.session_secret:
+        return settings.session_secret
+
+    if settings.app_mode == APP_MODE_LOCAL:
+        return secrets.token_urlsafe(48)
+
+    raise RuntimeError(
+        "SESSION_SECRET muss für diesen Betriebsmodus "
+        "konfiguriert sein."
+    )
+
+
+app = FastAPI(
+    title=settings.app_name,
+    docs_url=("/docs" if settings.api_docs_enabled else None),
+    redoc_url=("/redoc" if settings.api_docs_enabled else None),
+    openapi_url=(
+        "/openapi.json"
+        if settings.api_docs_enabled
+        else None
+    ),
+)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_runtime_session_secret(),
+    session_cookie=SESSION_COOKIE_NAME,
+    max_age=settings.session_max_age_seconds,
+    same_site="lax",
+    https_only=settings.session_cookie_secure,
+)
 
 app.mount(
     "/static",
@@ -73,6 +123,13 @@ feedback_service = FeedbackService(
     max_input_chars=settings.max_input_chars,
 )
 
+login_rate_limiter = LoginRateLimiter(
+    max_attempts=settings.login_rate_limit_attempts,
+    window_seconds=(
+        settings.login_rate_limit_window_seconds
+    ),
+)
+
 
 def _openai_model_options() -> list[tuple[str, str]]:
     """
@@ -100,6 +157,8 @@ def _openai_model_options() -> list[tuple[str, str]]:
 
 def _template_context(
     *,
+    csrf_token: str,
+    authenticated_user: str | None = None,
     selected_provider: str = "ollama",
     student_text: str = "",
     ollama_base_url: str | None = None,
@@ -128,6 +187,8 @@ def _template_context(
 
     return {
         "app_name": settings.app_name,
+        "authenticated_user": authenticated_user,
+        "csrf_token": csrf_token,
         "provider_options": (
             feedback_service.get_provider_options()
         ),
@@ -164,6 +225,49 @@ def _template_context(
         ),
         "openai_override_used": openai_override_used,
     }
+
+
+def _authenticated_user(request: Request) -> str | None:
+    """Liefert nur das konfigurierte, gültig angemeldete Konto."""
+    if not is_authenticated(
+        request.session,
+        settings.auth_username,
+    ):
+        return None
+
+    return authenticated_username(request.session)
+
+
+def _redirect_to_login() -> RedirectResponse:
+    return RedirectResponse(
+        url="/login",
+        status_code=303,
+    )
+
+
+def _login_client_key(request: Request) -> str:
+    """Verwendet die von ASGI ermittelte Client-Adresse."""
+    if request.client is None:
+        return "unknown-client"
+
+    return request.client.host
+
+
+def _require_valid_csrf_token(
+    request: Request,
+    submitted_token: str,
+) -> None:
+    """Lehnt schreibende Browseranfragen ohne Sitzungstoken ab."""
+    if is_valid_csrf_token(
+        request.session,
+        submitted_token,
+    ):
+        return
+
+    raise HTTPException(
+        status_code=403,
+        detail="Ungültige oder fehlende Formularbestätigung.",
+    )
 
 
 def _validate_model_name(
@@ -312,24 +416,149 @@ def _provider_for_request(
     )
 
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(
+    request: Request,
+) -> Response:
+    if _authenticated_user(request) is not None:
+        return RedirectResponse(
+            url="/",
+            status_code=303,
+        )
+
+    return templates.TemplateResponse(
+        name="login.html",
+        request=request,
+        context={
+            "app_name": settings.app_name,
+            "authenticated_user": None,
+            "username": settings.auth_username,
+            "csrf_token": get_or_create_csrf_token(
+                request.session
+            ),
+            "error": None,
+        },
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login(
+    request: Request,
+    username: str = Form(..., max_length=200),
+    password: str = Form(..., max_length=512),
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    _require_valid_csrf_token(request, csrf_token)
+
+    client_key = _login_client_key(request)
+    retry_after = login_rate_limiter.retry_after_seconds(
+        client_key
+    )
+
+    if retry_after is not None:
+        return templates.TemplateResponse(
+            name="login.html",
+            request=request,
+            context={
+                "app_name": settings.app_name,
+                "authenticated_user": None,
+                "username": settings.auth_username,
+                "csrf_token": get_or_create_csrf_token(
+                    request.session
+                ),
+                "error": (
+                    "Zu viele fehlgeschlagene "
+                    "Anmeldeversuche. Bitte versuche es "
+                    "später erneut."
+                ),
+            },
+            status_code=429,
+            headers={
+                "Retry-After": str(retry_after),
+            },
+        )
+
+    if verify_credentials(
+        username=username.strip(),
+        password=password,
+        expected_username=settings.auth_username,
+        password_hash=settings.auth_password_hash,
+    ):
+        login_rate_limiter.reset(client_key)
+        start_authenticated_session(
+            request.session,
+            settings.auth_username,
+        )
+
+        return RedirectResponse(
+            url="/",
+            status_code=303,
+        )
+
+    login_rate_limiter.record_failure(client_key)
+
+    return templates.TemplateResponse(
+        name="login.html",
+        request=request,
+        context={
+            "app_name": settings.app_name,
+            "authenticated_user": None,
+            "username": settings.auth_username,
+            "csrf_token": get_or_create_csrf_token(
+                request.session
+            ),
+            "error": "Benutzername oder Passwort ist falsch.",
+        },
+        status_code=401,
+    )
+
+
+@app.post("/logout")
+async def logout(
+    request: Request,
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    _require_valid_csrf_token(request, csrf_token)
+    end_authenticated_session(request.session)
+
+    return _redirect_to_login()
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(
     request: Request,
-) -> HTMLResponse:
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
     return templates.TemplateResponse(
         name="index.html",
         request=request,
-        context=_template_context(),
+        context=_template_context(
+            csrf_token=get_or_create_csrf_token(
+                request.session
+            ),
+            authenticated_user=authenticated_user,
+        ),
     )
 
 
 @app.get("/api/ollama/models")
 async def ollama_models(
+    request: Request,
     base_url: str = Query(
         default=OLLAMA_FALLBACK_BASE_URL,
         max_length=2048,
     ),
 ) -> dict[str, object]:
+    if _authenticated_user(request) is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"message": "Anmeldung erforderlich."},
+        )
+
     try:
         validated_base_url = (
             _validate_ollama_base_url(base_url)
@@ -375,13 +604,21 @@ async def analyze(
     request: Request,
     student_text: str = Form(...),
     provider: str = Form(...),
+    csrf_token: str = Form("", max_length=256),
     ollama_base_url: str = Form(""),
     ollama_model: str = Form(""),
     ollama_custom_model: str = Form(""),
     openai_model: str = Form(""),
     openai_custom_model: str = Form(""),
     openai_api_key: str = Form(""),
-) -> HTMLResponse:
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
     result: FeedbackResult | None = None
     error: str | None = None
 
@@ -413,6 +650,10 @@ async def analyze(
         name="index.html",
         request=request,
         context=_template_context(
+            csrf_token=get_or_create_csrf_token(
+                request.session
+            ),
+            authenticated_user=authenticated_user,
             selected_provider=provider,
             student_text=student_text,
             ollama_base_url=ollama_base_url,

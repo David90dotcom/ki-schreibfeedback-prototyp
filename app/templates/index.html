@@ -6,6 +6,12 @@
     <h2>Textanalyse</h2>
 
     <form id="analysis-form" method="post" action="/analyze">
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="{{ csrf_token }}"
+        >
+
         <label for="provider">Modellanbieter</label>
 
         <select id="provider" name="provider">
