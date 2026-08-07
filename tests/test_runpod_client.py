@@ -30,6 +30,15 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
             poll_interval_seconds=0.01,
         )
 
+    def test_default_job_timeout_allows_long_cold_start(self) -> None:
+        provider = RunPodProvider(
+            api_key=self.API_KEY,
+            endpoint_id=self.ENDPOINT_ID,
+            model_name=self.MODEL_NAME,
+        )
+
+        self.assertEqual(provider.job_timeout_seconds, 1800.0)
+
     @staticmethod
     def _request() -> ModelRequest:
         return ModelRequest(

@@ -142,7 +142,7 @@ class Settings:
     )
 
     runpod_job_timeout_seconds: float = float(
-        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "900")
+        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "1800")
     )
 
     runpod_poll_interval_seconds: float = float(

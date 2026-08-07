@@ -50,7 +50,7 @@ class RunPodProvider:
         api_key: str | None,
         endpoint_id: str | None,
         model_name: str,
-        job_timeout_seconds: float = 900.0,
+        job_timeout_seconds: float = 1800.0,
         poll_interval_seconds: float = 1.0,
     ) -> None:
         self.api_key = api_key.strip() if api_key else None
