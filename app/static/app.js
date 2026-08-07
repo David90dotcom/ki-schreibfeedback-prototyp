@@ -374,10 +374,12 @@
         );
     });
 
-    loadOllamaModelsButton.addEventListener(
-        "click",
-        loadOllamaModels
-    );
+    if (loadOllamaModelsButton) {
+        loadOllamaModelsButton.addEventListener(
+            "click",
+            loadOllamaModels
+        );
+    }
 
     form.addEventListener(
         "submit",
