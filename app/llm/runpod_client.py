@@ -36,7 +36,11 @@ from app.llm.errors import (
 
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 ACTIVE_JOB_STATUSES = {"IN_QUEUE", "IN_PROGRESS", "RUNNING"}
-
+TERMINAL_JOB_STATUSES = {
+    "FAILED",
+    "CANCELLED",
+    "TIMED_OUT",
+}
 
 class RunPodProvider:
     """Adapter für einen RunPod-Serverless-Queue-Endpunkt."""
@@ -125,15 +129,55 @@ class RunPodProvider:
                     "run",
                 )
 
-            completed = await self._wait_for_job(
-                client=client,
-                job_id=job_id.strip(),
-                payload=submitted,
-                model_name=request.model_name,
-                deadline=deadline,
-            )
+            job_id = job_id.strip()
 
-        return self._model_response(request, job_id.strip(), completed)
+            try:
+                completed = await self._wait_for_job(
+                    client=client,
+                    job_id=job_id,
+                    payload=submitted,
+                    model_name=request.model_name,
+                    deadline=deadline,
+                )
+            except asyncio.CancelledError:
+                await asyncio.shield(
+                    self._cancel_job_safely(
+                        client,
+                        job_id,
+                        request.model_name,
+                    )
+                )
+                raise
+            except ProviderError as exc:
+                raw_job_status = exc.details.get("job_status")
+
+                job_status = (
+                    raw_job_status.strip().upper()
+                    if isinstance(raw_job_status, str)
+                    else None
+                )
+
+                if job_status not in TERMINAL_JOB_STATUSES:
+                    await self._cancel_job_safely(
+                        client,
+                        job_id,
+                        request.model_name,
+                    )
+
+                raise
+            except Exception:
+                await self._cancel_job_safely(
+                    client,
+                    job_id,
+                    request.model_name,
+                )
+                raise
+
+        return self._model_response(
+            request,
+            job_id,
+            completed,
+        )
 
     async def check_health(self) -> ProviderHealthResult:
         """Prüft den Endpunkt, ohne einen Modelljob auszulösen."""
@@ -291,25 +335,72 @@ class RunPodProvider:
                 )
 
             remaining_seconds = deadline - loop.time()
+
             if remaining_seconds <= 0:
-                await self._cancel_job_safely(client, job_id, model_name)
-                raise ProviderTimeoutError(
-                    "Der RunPod-Auftrag hat das Zeitlimit überschritten.",
-                    provider_id=self.provider_id,
+                raise self._job_timeout_error(
+                    job_id=job_id,
                     model_name=model_name,
-                    details={"request_id": job_id, "job_status": status},
+                    status=status,
                 )
 
             await asyncio.sleep(
-                min(self.poll_interval_seconds, remaining_seconds)
+                min(
+                    self.poll_interval_seconds,
+                    remaining_seconds,
+                )
             )
-            payload = await self._request_json(
-                client=client,
-                method="GET",
-                url=self._url("status", job_id),
-                model_name=model_name,
-                operation="status",
+
+            remaining_seconds = deadline - loop.time()
+
+            if remaining_seconds <= 0:
+                raise self._job_timeout_error(
+                    job_id=job_id,
+                    model_name=model_name,
+                    status=status,
+                )
+
+            try:
+                async with asyncio.timeout(remaining_seconds):
+                    payload = await self._request_json(
+                        client=client,
+                        method="GET",
+                        url=self._url("status", job_id),
+                        model_name=model_name,
+                        operation="status",
+                    )
+            except TimeoutError as exc:
+                raise self._job_timeout_error(
+                    job_id=job_id,
+                    model_name=model_name,
+                    status=status,
+                ) from exc
+
+    def _job_timeout_error(
+        self,
+        *,
+        job_id: str,
+        model_name: str,
+        status: str,
+    ) -> ProviderTimeoutError:
+        message = (
+            "RunPod hat innerhalb des Zeitlimits keinen "
+            "Worker für den Auftrag bereitgestellt."
+            if status == "IN_QUEUE"
+            else (
+                "Der RunPod-Auftrag hat das "
+                "Zeitlimit überschritten."
             )
+        )
+
+        return ProviderTimeoutError(
+            message,
+            provider_id=self.provider_id,
+            model_name=model_name,
+            details={
+                "request_id": job_id,
+                "job_status": status,
+            },
+        )
 
     async def _cancel_job_safely(
         self,
@@ -394,48 +485,177 @@ class RunPodProvider:
         raw_output = payload.get("output")
 
         if isinstance(raw_output, str):
-            output: dict[str, Any] = {"text": raw_output}
+            output: dict[str, Any] = {
+                "text": raw_output,
+            }
         elif isinstance(raw_output, dict):
             output = raw_output
+        elif (
+            isinstance(raw_output, list)
+            and len(raw_output) == 1
+            and isinstance(raw_output[0], dict)
+        ):
+            output = raw_output[0]
+        elif (
+            isinstance(raw_output, list)
+            and raw_output
+            and all(
+                isinstance(part, str)
+                for part in raw_output
+            )
+        ):
+            output = {
+                "text": "".join(raw_output),
+            }
         else:
             raise self._invalid_response(
-                "Der abgeschlossene RunPod-Auftrag enthält keine Ausgabe.",
+                (
+                    "Der abgeschlossene RunPod-Auftrag "
+                    "enthält keine Ausgabe."
+                ),
                 request.model_name,
                 "output",
             )
 
-        text_value = output.get("text", output.get("response"))
-        if isinstance(text_value, list) and all(
-            isinstance(part, str) for part in text_value
+        error = output.get("error")
+        if error is not None:
+            raise ProviderUnavailableError(
+                (
+                    "Der RunPod-vLLM-Worker konnte den "
+                    "Auftrag nicht ausführen."
+                ),
+                provider_id=self.provider_id,
+                model_name=request.model_name,
+                details={
+                    "request_id": job_id,
+                    "job_status": payload.get("status"),
+                },
+            )
+
+        choices = output.get("choices")
+        first_choice: dict[str, Any] | None = None
+
+        if (
+            isinstance(choices, list)
+            and choices
+            and isinstance(choices[0], dict)
+        ):
+            first_choice = choices[0]
+
+        text_value = output.get(
+            "text",
+            output.get("response"),
+        )
+
+        if (
+            text_value is None
+            and first_choice is not None
+        ):
+            message = first_choice.get("message")
+
+            if isinstance(message, dict):
+                text_value = message.get("content")
+
+            if text_value is None:
+                text_value = first_choice.get("text")
+
+            if text_value is None:
+                text_value = first_choice.get("tokens")
+
+        if (
+            isinstance(text_value, list)
+            and all(
+                isinstance(part, str)
+                for part in text_value
+            )
         ):
             text_value = "".join(text_value)
-        if not isinstance(text_value, str) or not text_value.strip():
+
+        if (
+            not isinstance(text_value, str)
+            or not text_value.strip()
+        ):
             raise self._invalid_response(
                 "Die RunPod-Modellantwort ist leer.",
                 request.model_name,
                 "output",
             )
 
+        finish_reason: str | None = None
+
+        if first_choice is not None:
+            raw_finish_reason = first_choice.get(
+                "finish_reason"
+            )
+
+            if isinstance(raw_finish_reason, str):
+                finish_reason = raw_finish_reason
+
         actual_model = output.get("model")
-        if not isinstance(actual_model, str) or not actual_model.strip():
+
+        if (
+            not isinstance(actual_model, str)
+            or not actual_model.strip()
+        ):
             actual_model = request.model_name
 
+        usage = output.get("usage")
+
+        if not isinstance(usage, dict):
+            usage = {}
+
         input_tokens = self._integer(
-            output.get("input_tokens", output.get("prompt_eval_count"))
+            usage.get("prompt_tokens")
         )
+
+        if input_tokens is None:
+            input_tokens = self._integer(
+                usage.get(
+                    "input",
+                    output.get(
+                        "input_tokens",
+                        output.get("prompt_eval_count"),
+                    ),
+                )
+            )
+
         output_tokens = self._integer(
-            output.get("output_tokens", output.get("eval_count"))
+            usage.get("completion_tokens")
         )
-        total_tokens = self._integer(output.get("total_tokens"))
+
+        if output_tokens is None:
+            output_tokens = self._integer(
+                usage.get(
+                    "output",
+                    output.get(
+                        "output_tokens",
+                        output.get("eval_count"),
+                    ),
+                )
+            )
+
+        total_tokens = self._integer(
+            usage.get(
+                "total_tokens",
+                output.get("total_tokens"),
+            )
+        )
+
         if (
             total_tokens is None
             and input_tokens is not None
             and output_tokens is not None
         ):
-            total_tokens = input_tokens + output_tokens
+            total_tokens = (
+                input_tokens + output_tokens
+            )
 
-        delay_time = self._number(payload.get("delayTime"))
-        execution_time = self._number(payload.get("executionTime"))
+        delay_time = self._number(
+            payload.get("delayTime")
+        )
+        execution_time = self._number(
+            payload.get("executionTime")
+        )
 
         return ModelResponse(
             provider_id=self.provider_id,
@@ -445,17 +665,29 @@ class RunPodProvider:
             status="completed",
             provider_request_id=job_id,
             token_usage=TokenUsage(
-                input_tokens=self._integer_metric(input_tokens),
-                output_tokens=self._integer_metric(output_tokens),
-                total_tokens=self._integer_metric(total_tokens),
+                input_tokens=self._integer_metric(
+                    input_tokens
+                ),
+                output_tokens=self._integer_metric(
+                    output_tokens
+                ),
+                total_tokens=self._integer_metric(
+                    total_tokens
+                ),
             ),
             provider_timing=ProviderTiming(
-                queue_duration_ms=self._float_metric(delay_time),
+                queue_duration_ms=self._float_metric(
+                    delay_time
+                ),
+                execution_duration_ms=self._float_metric(
+                    execution_time
+                ),
             ),
             raw_metadata={
                 "job_status": payload.get("status"),
                 "delay_time_ms": delay_time,
                 "execution_time_ms": execution_time,
+                "finish_reason": finish_reason,
             },
         )
 

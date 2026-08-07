@@ -377,6 +377,26 @@ class MetricsService:
                 unit="tokens/s",
             )
 
+        execution_duration_ms = (
+            provider_timing.execution_duration_ms.value
+        )
+
+        if (
+            execution_duration_ms is not None
+            and execution_duration_ms > 0
+        ):
+            value = round(
+                output_tokens
+                / (execution_duration_ms / 1000),
+                3,
+            )
+
+            return FloatMetric(
+                value=value,
+                source=MetricSource.ESTIMATED,
+                unit="tokens/s",
+            )
+
         if total_duration_ms > 0:
             value = round(
                 output_tokens
