@@ -197,6 +197,9 @@ def _template_context(
         "result": result,
         "error": error,
         "custom_model_value": CUSTOM_MODEL_VALUE,
+        "browser_overrides_allowed": (
+            settings.browser_overrides_allowed
+        ),
         "ollama_default_base_url": (
             settings.ollama_base_url
         ),
@@ -204,8 +207,12 @@ def _template_context(
             OLLAMA_FALLBACK_BASE_URL
         ),
         "ollama_base_url": (
-            ollama_base_url
-            or settings.ollama_base_url
+            (
+                ollama_base_url
+                or settings.ollama_base_url
+            )
+            if settings.browser_overrides_allowed
+            else ""
         ),
         "ollama_default_model": settings.ollama_model,
         "ollama_model_options": ollama_model_options,
@@ -364,9 +371,15 @@ def _provider_for_request(
     openai_api_key: str,
 ) -> LLMProvider:
     if provider_key == "ollama":
+        effective_base_url = (
+            ollama_base_url
+            if settings.browser_overrides_allowed
+            else settings.ollama_base_url
+        )
+
         return OllamaProvider(
             base_url=_validate_ollama_base_url(
-                ollama_base_url
+                effective_base_url
             ),
             model_name=_validate_model_name(
                 ollama_model,
@@ -376,18 +389,30 @@ def _provider_for_request(
         )
 
     if provider_key == "openai":
-        api_key = (
-            openai_api_key.strip()
-            or settings.openai_api_key
-        )
+        api_key = settings.openai_api_key
+
+        if settings.browser_overrides_allowed:
+            api_key = (
+                openai_api_key.strip()
+                or api_key
+            )
 
         if not api_key:
-            raise ValueError(
+            error_message = (
                 "Kein OpenAI-API-Key verfügbar. "
                 "Hinterlege OPENAI_API_KEY in der "
-                ".env-Datei oder gib im optionalen "
-                "Key-Feld einen Key für diesen Aufruf ein."
+                ".env-Datei."
             )
+
+            if settings.browser_overrides_allowed:
+                error_message = (
+                    "Kein OpenAI-API-Key verfügbar. "
+                    "Hinterlege OPENAI_API_KEY in der "
+                    ".env-Datei oder gib im optionalen "
+                    "Key-Feld einen Key für diesen Aufruf ein."
+                )
+
+            raise ValueError(error_message)
 
         return OpenAIProvider(
             api_key=api_key,
@@ -560,8 +585,13 @@ async def ollama_models(
         )
 
     try:
+        effective_base_url = (
+            base_url
+            if settings.browser_overrides_allowed
+            else settings.ollama_base_url
+        )
         validated_base_url = (
-            _validate_ollama_base_url(base_url)
+            _validate_ollama_base_url(effective_base_url)
         )
     except ValueError as exc:
         raise HTTPException(
@@ -577,19 +607,28 @@ async def ollama_models(
     try:
         models = await provider.discover_models()
     except (httpx.HTTPError, ValueError) as exc:
+        location = (
+            f" unter {validated_base_url}"
+            if settings.browser_overrides_allowed
+            else ""
+        )
         raise HTTPException(
             status_code=502,
             detail={
                 "message": (
-                    f"Ollama ist unter {validated_base_url} "
+                    f"Ollama ist{location} "
                     "nicht erreichbar. Prüfe, ob Ollama "
-                    "läuft und die Adresse stimmt."
+                    "läuft und korrekt konfiguriert ist."
                 )
             },
         ) from exc
 
     return {
-        "base_url": validated_base_url,
+        "base_url": (
+            validated_base_url
+            if settings.browser_overrides_allowed
+            else None
+        ),
         "models": models,
         "default_model": settings.ollama_model,
         "message": (
@@ -623,7 +662,8 @@ async def analyze(
     error: str | None = None
 
     openai_override_used = (
-        provider == "openai"
+        settings.browser_overrides_allowed
+        and provider == "openai"
         and bool(openai_api_key.strip())
     )
 
