@@ -159,7 +159,11 @@ class ProviderTiming(DomainModel):
             unit="ms"
         )
     )
-
+    execution_duration_ms: FloatMetric = Field(
+        default_factory=lambda: FloatMetric(
+            unit="ms"
+        )
+    )
 
 class PerformanceMetrics(DomainModel):
     """Technische Messwerte eines einzelnen Modellaufrufs."""

@@ -205,7 +205,7 @@
 
     async function loadOllamaModels() {
         const baseUrl =
-            ollamaBaseUrlInput.value.trim();
+            ollamaBaseUrlInput?.value.trim();
 
         setOllamaStatus(
             "Verbindung zu Ollama wird geprüft …",
@@ -216,9 +216,14 @@
 
         try {
             const parameters =
-                new URLSearchParams({
-                    base_url: baseUrl,
-                });
+                new URLSearchParams();
+
+            if (baseUrl) {
+                parameters.set(
+                    "base_url",
+                    baseUrl
+                );
+            }
 
             const response = await fetch(
                 `/api/ollama/models?${parameters}`,
@@ -247,8 +252,10 @@
                 );
             }
 
-            ollamaBaseUrlInput.value =
-                payload.base_url;
+            if (ollamaBaseUrlInput) {
+                ollamaBaseUrlInput.value =
+                    payload.base_url;
+            }
 
             replaceOllamaModelOptions(
                 payload.models,
@@ -367,10 +374,12 @@
         );
     });
 
-    loadOllamaModelsButton.addEventListener(
-        "click",
-        loadOllamaModels
-    );
+    if (loadOllamaModelsButton) {
+        loadOllamaModelsButton.addEventListener(
+            "click",
+            loadOllamaModels
+        );
+    }
 
     form.addEventListener(
         "submit",

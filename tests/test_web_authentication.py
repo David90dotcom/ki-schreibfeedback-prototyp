@@ -72,6 +72,20 @@ class WebAuthenticationTests(unittest.TestCase):
         self.assertIn('name="password"', response.text)
         self.assertIn('name="csrf_token"', response.text)
 
+        username_input_match = re.search(
+            r'<input[^>]*name="username"[^>]*>',
+            response.text,
+            re.DOTALL,
+        )
+
+        self.assertIsNotNone(username_input_match)
+        username_input = (
+            username_input_match.group(0)
+            if username_input_match is not None
+            else ""
+        )
+        self.assertNotIn("value=", username_input)
+
     def test_start_page_redirects_to_login(self) -> None:
         response = self.client.get(
             "/",

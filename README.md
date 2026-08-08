@@ -1,54 +1,58 @@
-# KI-Schreibfeedback-Prototyp 0.4
+# KI-Schreibfeedback-Prototyp 0.5.0
 
-Web-App-Prototyp zur geschützten, vergleichenden Erzeugung von Schreibfeedback mit einem lokal betriebenen Ollama-Modell, der OpenAI API und einem selbst betriebenen Ministral-Modell über RunPod Serverless.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.5.0 stellt die Anwendung produktiv per HTTPS bereit und verwendet für RunPod einen vLLM-Worker.
 
-> **Aktueller Projektstand: Version 0.4.** Serverseitige Anmeldung, Sitzungsschutz, Login-Begrenzung und CSRF-Schutz sind implementiert und automatisiert getestet. Das öffentliche Online-Deployment ist noch nicht Bestandteil dieser Version.
+> **Aktueller Projektstand: Version 0.5.0.** Das geschützte Online-Deployment auf DigitalOcean sowie die serverlose GPU-Inferenz auf RunPod wurden automatisiert und Ende-zu-Ende getestet. Das [Abnahmeprotokoll](docs/abnahme-v0.5.0.md) dokumentiert den geprüften Release-Stand.
 
 ## Versionsstand und Ziel
 
 | Version | Status | Inhalt |
 |---|---|---|
 | **0.3** | abgeschlossen | Provider-Auswahl für Ollama, OpenAI und RunPod, RunPod-Worker, Konfiguration und automatisierte Tests |
-| **0.4** | aktuell | Serverseitige Anmeldung, geschützte Web- und Modellrouten, sichere Sitzungen, Login-Begrenzung und CSRF-Schutz |
-| **0.5** | Online-Ziel | Geschützte und getestete Bereitstellung der Web-App auf DigitalOcean und des Modells auf RunPod |
+| **0.4** | abgeschlossen | Serverseitige Anmeldung, geschützte Web- und Modellrouten, sichere Sitzungen, Login-Begrenzung und CSRF-Schutz |
+| **0.5.0** | aktuell | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
 
-Version 0.4 ist damit ein funktionsfähiger, lokal getesteter Sicherheitsstand, aber noch nicht für eine frei erreichbare Bereitstellung vorgesehen. Weitere Funktionen und Designänderungen können nach Version 0.5 in nachfolgenden Versionen ergänzt werden.
+Version 0.5.0 ist der erste produktiv bereitgestellte und Ende-zu-Ende abgenommene Stand. Weitere Funktionen und Designänderungen werden in nachfolgenden Versionen ergänzt.
 
 ## Architektur
 
 ```mermaid
 flowchart TD
-    A["Browser"] --> B["FastAPI: Login und Sitzungsschutz"]
-    B --> C["Feedback-Service"]
-    C --> D["Lokales Ollama"]
-    C --> E["OpenAI API"]
-    C --> F["RunPod Serverless"]
-    F --> G["Worker: Ollama + Ministral"]
+    A["Browser: HTTPS"] --> B["Caddy: TLS und Reverse Proxy"]
+    B --> C["FastAPI: Login und Sitzungsschutz"]
+    C --> D["Feedback-Service"]
+    D --> E["RunPod Serverless: vLLM + Ministral"]
+    D --> F["OpenAI API (optional)"]
+    D --> G["Ollama (nur lokal)"]
 ```
 
-Die Startseite, die Analysefunktion und die Ollama-Modellabfrage sind nur nach erfolgreicher Anmeldung erreichbar. Zugangsdaten werden serverseitig gegen einen Argon2-Passworthash geprüft. Der RunPod-API-Key und die RunPod-Endpoint-ID werden ausschließlich serverseitig aus der `.env` gelesen und nicht an den Browser übertragen.
+Startseite und Analysefunktion sind nur nach erfolgreicher Anmeldung erreichbar. Zugangsdaten werden serverseitig gegen einen Argon2-Passworthash geprüft. RunPod-API-Key, Endpoint-ID und weitere Secrets werden ausschließlich serverseitig aus der `.env` gelesen und nicht an den Browser übertragen.
 
-Für OpenAI kann ebenfalls ein serverseitiger Standard-Key in der `.env` hinterlegt werden. Version 0.4 erlaubt für lokale Entwicklungstests zusätzlich die einmalige Eingabe eines alternativen OpenAI-Keys im Browser. Dieser wird nicht gespeichert oder erneut angezeigt, aber an das FastAPI-Backend übertragen. Diese lokale Testfunktion ist nicht für ein öffentliches Deployment vorgesehen und wird vor dem Onlinegang entfernt oder geschützt.
+Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI kann ein serverseitiger Standard-Key hinterlegt werden. Browserseitige Provider- und Key-Overrides sind ausschließlich im lokalen Entwicklungsmodus erlaubt. RunPod ist im produktiven Abnahmeszenario vorausgewählt.
 
-## Funktionsumfang von Version 0.4
+## Funktionsumfang von Version 0.5.0
 
 - serverseitige Anmeldung mit einem konfigurierbaren Prüferkonto
 - Argon2-Passworthash statt Klartextpasswort in der Konfiguration
 - signierte Sitzungscookies mit begrenzter Gültigkeit, `HttpOnly` und `SameSite=Lax`
-- Zugriffsschutz für Startseite, Analyse und Ollama-Modellabfrage
+- Zugriffsschutz für Startseite und Analysefunktion
 - Begrenzung wiederholter fehlgeschlagener Loginversuche pro erkanntem Client
 - CSRF-Schutz für Login, Logout und Analyseformular
 - Eingabe eines anonymisierten, abgetippten Beispieltexts
-- Auswahl zwischen lokalem Ollama, OpenAI und RunPod Serverless
+- Auswahl zwischen lokalem Ollama, OpenAI und RunPod Serverless im Entwicklungsmodus
+- Deaktivierung lokaler Ollama-Aufrufe im Produktionsmodus
 - konfigurierbare Standardmodelle für alle drei Provider
 - dynamisches Laden der lokal installierten Ollama-Modelle
 - optionale Modell-ID für künftige oder nicht aufgelistete Ollama- und OpenAI-Modelle
 - optional änderbare Ollama-API-Adresse für die lokale Entwicklung
 - optionaler OpenAI-Key für einen einzelnen lokalen Testaufruf
 - asynchrone RunPod-Aufträge mit Statusabfrage, Zeitlimit und Abbruch bei Zeitüberschreitung
-- eigener RunPod-Worker mit Ollama und eingebettetem Ministral-Modell
+- RunPod-Serverless-Worker mit vLLM und `mistralai/Ministral-3-14B-Instruct-2512`
 - Validierung von Modell, Eingabe, Ausgabeformat und erlaubten Generierungsoptionen im Worker
 - Anzeige von Provider, tatsächlich verwendetem Modell und Gesamtdauer
+- Docker-Image für die FastAPI-Webanwendung und reproduzierbare Docker-Compose-Konfiguration
+- Caddy-Reverse-Proxy mit automatischem HTTPS und permanenter `www`-Weiterleitung
+- Container-Healthcheck, automatische Neustarts und begrenzte Logdateigrößen
 - verständliche Fehlermeldungen bei fehlender Konfiguration oder nicht erreichbaren Providern
 - Registry-, Modellkatalog-, Metrik- und SQLite-Architektur als Grundlage für weitere Ausbaustufen
 
@@ -61,6 +65,8 @@ Für OpenAI kann ebenfalls ein serverseitiger Standard-Key in der `.env` hinterl
 | `runpod_worker/` | Docker-Image, Serverless-Handler, Worker und Testeingabe für RunPod |
 | `tests/` | Automatisierte Tests für Browserauswahl, RunPod, Anmeldung, Sitzungen, Login-Begrenzung und CSRF-Schutz |
 | `scripts/` | Zusätzliche Architektur- und Verbindungsprüfungen |
+| `Dockerfile`, `compose.yaml`, `Caddyfile` | Reproduzierbares Produktionsdeployment mit Web-App und HTTPS-Reverse-Proxy |
+| `docs/` | Abnahmeprotokolle und bekannte, nicht blockierende Einschränkungen |
 
 ## Installation unter Windows
 
@@ -133,11 +139,11 @@ Standardmäßig wird der serverseitig konfigurierte OpenAI-Key verwendet. Für l
 
 ### RunPod Serverless
 
-Für RunPod werden ein aus `runpod_worker/Dockerfile` gebauter Serverless-Endpoint sowie `RUNPOD_API_KEY` und `RUNPOD_ENDPOINT_ID` in der lokalen `.env` benötigt.
+Für RunPod werden ein vLLM-kompatibler Serverless-Endpoint sowie `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID` und `RUNPOD_DEFAULT_MODEL` in der `.env` benötigt.
 
-Das Modell ist für diesen Provider fest konfiguriert. Die Datei `runpod_worker/test_input.json` dient als direkte Testeingabe für den Worker.
+Das produktiv geprüfte Modell lautet `mistralai/Ministral-3-14B-Instruct-2512`. Die Datei `runpod_worker/test_input.json` dient als direkte Testeingabe für den Worker.
 
-Der Docker- und Worker-Code ist Bestandteil des aktuellen Projektstands. Der reale Container-Build, die Einrichtung des Endpoints und der vollständige End-to-End-Test folgen vor dem Online-Stand 0.5.
+Container-Build, Endpoint, Queue-Verarbeitung, Scale-to-zero-Kaltstart und Rückgabe des Schreibfeedbacks an die Webanwendung wurden für Version 0.5.0 produktiv geprüft.
 
 ## Tests
 
@@ -149,7 +155,14 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der geprüfte Stand von Version 0.4 umfasst 33 erfolgreiche automatisierte Tests. Sie decken die Browser- und Providerauswahl, RunPod-Client und -Worker sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab.
+Der geprüfte Stand von Version 0.5.0 umfasst 38 erfolgreiche Tests und 3 erfolgreiche Subtests. Sie decken Browser- und Providerauswahl, Produktionsbeschränkungen, RunPod-Client und -Worker sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JSON-Prüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+
+## Abnahme und bekannte Einschränkungen
+
+- [Abnahmeprotokoll für Version 0.5.0](docs/abnahme-v0.5.0.md)
+- [Bekannte Einschränkungen](docs/known-issues.md)
+
+Die Modellantwort wird derzeit sicher als reiner Text dargestellt. Enthält sie Markdown-Syntax wie `###`, `**` oder `---`, bleiben diese Zeichen sichtbar. Diese Darstellungsabweichung ist für Version 0.5.0 als nicht blockierende UI-Verbesserung vorgemerkt.
 
 ## Sicherheit und Datenschutz
 
@@ -160,4 +173,5 @@ Der geprüfte Stand von Version 0.4 umfasst 33 erfolgreiche automatisierte Tests
 - Für Tests dürfen ausschließlich erfundene oder vollständig anonymisierte Texte verwendet werden.
 - Der RunPod-Key, die Endpoint-ID und der standardmäßig verwendete OpenAI-Key gehören ausschließlich in die lokale beziehungsweise serverseitige `.env`.
 - Die frei änderbare Ollama-Adresse und das optionale OpenAI-Key-Feld sind nur für die lokale Entwicklung vorgesehen.
-- Version 0.4 ist trotz des umgesetzten Anwendungsschutzes nicht für eine ungeschützte öffentliche Bereitstellung freigegeben. HTTPS, Firewall, Produktionskonfiguration und die geschützte Online-Bereitstellung werden für Version 0.5 abgeschlossen.
+- Das Produktionsdeployment veröffentlicht ausschließlich Caddy auf Port 80/443; der Webcontainer ist nur an `127.0.0.1:8000` gebunden.
+- Die Modellantwort wird escaped als Text ausgegeben. Eine spätere Markdown-Darstellung muss weiterhin verhindern, dass Modellinhalt ungeprüft als HTML ausgeführt wird.

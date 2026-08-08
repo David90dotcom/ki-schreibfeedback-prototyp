@@ -1,0 +1,4 @@
+*
+!runpod_worker/
+!runpod_worker/Dockerfile
+!runpod_worker/Dockerfile.dockerignore

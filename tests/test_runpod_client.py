@@ -17,7 +17,10 @@ from app.llm.runpod_client import RunPodProvider
 
 
 class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
-    MODEL_NAME = "ministral-3:14b-instruct-2512-q8_0"
+    MODEL_NAME = (
+        "mistralai/"
+        "Ministral-3-14B-Instruct-2512"
+    )
     ENDPOINT_ID = "test-endpoint"
     API_KEY = "test-runpod-api-key"
 
@@ -29,6 +32,15 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
             job_timeout_seconds=30.0,
             poll_interval_seconds=0.01,
         )
+
+    def test_default_job_timeout_is_bounded(self) -> None:
+        provider = RunPodProvider(
+            api_key=self.API_KEY,
+            endpoint_id=self.ENDPOINT_ID,
+            model_name=self.MODEL_NAME,
+        )
+
+        self.assertEqual(provider.job_timeout_seconds, 600.0)
 
     @staticmethod
     def _request() -> ModelRequest:
@@ -80,12 +92,26 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
                         "delayTime": 12,
                         "executionTime": 345,
                         "output": {
-                            "response": (
-                                "Simuliertes RunPod-Feedback"
-                            ),
+                            "id": "chatcmpl-test-123",
+                            "object": "chat.completion",
                             "model": self.MODEL_NAME,
-                            "prompt_eval_count": 21,
-                            "eval_count": 9,
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "message": {
+                                        "role": "assistant",
+                                        "content": (
+                                            "Simuliertes RunPod-Feedback"
+                                        ),
+                                    },
+                                    "finish_reason": "stop",
+                                }
+                            ],
+                            "usage": {
+                                "prompt_tokens": 21,
+                                "completion_tokens": 9,
+                                "total_tokens": 30,
+                            },
                         },
                     },
                 )
@@ -142,29 +168,43 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
         worker_input = request_body["input"]
 
         self.assertEqual(
-            worker_input["model"],
-            self.MODEL_NAME,
-        )
-        self.assertEqual(
-            worker_input["prompt"],
-            "Ein kurzer Beispieltext.",
-        )
-        self.assertEqual(
-            worker_input["system"],
-            "Gib lernförderliches Schreibfeedback.",
-        )
-        self.assertFalse(worker_input["stream"])
-        self.assertEqual(
-            worker_input["options"],
+            worker_input,
             {
-                "temperature": 0.15,
-                "num_predict": 4000,
-                "seed": 7,
+                "route": "/v1/chat/completions",
+                "method": "POST",
+                "body": {
+                    "model": self.MODEL_NAME,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Gib lernförderliches "
+                                "Schreibfeedback."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                "Ein kurzer Beispieltext."
+                            ),
+                        },
+                    ],
+                    "stream": False,
+                    "temperature": 0.15,
+                    "max_tokens": 4000,
+                    "seed": 7,
+                    "response_format": {
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "structured_response",
+                            "schema": (
+                                self._request()
+                                .response_schema
+                            ),
+                        },
+                    },
+                },
             },
-        )
-        self.assertEqual(
-            worker_input["format"],
-            self._request().response_schema,
         )
 
         self.assertEqual(

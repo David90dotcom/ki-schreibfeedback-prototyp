@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import unittest
+from dataclasses import replace
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -73,6 +74,57 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn("Cloud: RunPod Serverless", response.text)
         self.assertIn("Andere Modell-ID", response.text)
 
+    def test_production_page_hides_ollama_and_override_fields(self) -> None:
+        production_settings = replace(
+            main.settings,
+            app_mode="production",
+        )
+
+        with patch.object(
+            main,
+            "settings",
+            production_settings,
+        ):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(
+            'value="ollama"',
+            response.text,
+        )
+        self.assertNotIn(
+            'id="ollama-settings"',
+            response.text,
+        )
+        self.assertNotIn(
+            'id="ollama-base-url"',
+            response.text,
+        )
+        self.assertNotIn(
+            'name="ollama_base_url"',
+            response.text,
+        )
+        self.assertNotIn(
+            'id="openai-api-key"',
+            response.text,
+        )
+        self.assertNotIn(
+            'name="openai_api_key"',
+            response.text,
+        )
+        self.assertNotIn(
+            production_settings.ollama_base_url,
+            response.text,
+        )
+        self.assertIn(
+            'id="openai-model"',
+            response.text,
+        )
+        self.assertRegex(
+            response.text,
+            r'value="runpod"\s+selected',
+        )
+
     def test_custom_ollama_settings_apply_only_to_request(self) -> None:
         captured: dict[str, str] = {}
 
@@ -114,6 +166,52 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn("Lokales Testfeedback", response.text)
         self.assertIn("llama4:latest", response.text)
         self.assertIn("123 ms", response.text)
+
+    def test_production_rejects_ollama_analysis(self) -> None:
+        production_settings = replace(
+            main.settings,
+            app_mode="production",
+            ollama_base_url="http://127.0.0.1:11434",
+        )
+
+        with (
+            patch.object(
+                main,
+                "settings",
+                production_settings,
+            ),
+            patch.object(
+                main,
+                "OllamaProvider",
+            ) as provider_class,
+            patch.object(
+                main.feedback_service,
+                "analyze_text",
+                new=AsyncMock(),
+            ) as analyze_mock,
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "ollama",
+                    "csrf_token": self.csrf_token,
+                    "ollama_base_url": "https://manipulated.example",
+                    "ollama_model": production_settings.ollama_model,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        provider_class.assert_not_called()
+        analyze_mock.assert_not_awaited()
+        self.assertIn(
+            "Ollama ist im Produktionsbetrieb deaktiviert.",
+            response.text,
+        )
+        self.assertNotIn(
+            "manipulated.example",
+            response.text,
+        )
 
     def test_selected_openai_model_is_used(self) -> None:
         captured: dict[str, str] = {}
@@ -159,6 +257,63 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertEqual(captured["model"], "gpt-5.6-terra")
         self.assertIn("Cloud-Testfeedback", response.text)
         self.assertIn("gpt-5.6-terra", response.text)
+
+    def test_production_ignores_browser_openai_api_key(self) -> None:
+        production_settings = replace(
+            main.settings,
+            app_mode="production",
+            openai_api_key="configured-production-key",
+        )
+
+        async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
+            return FeedbackResult(
+                provider="openai",
+                model="gpt-5.6-terra",
+                feedback="Produktions-Cloudfeedback",
+                duration_ms=52,
+            )
+
+        with (
+            patch.object(
+                main,
+                "settings",
+                production_settings,
+            ),
+            patch.object(
+                main,
+                "OpenAIProvider",
+            ) as provider_class,
+            patch.object(
+                main.feedback_service,
+                "analyze_text",
+                new=AsyncMock(side_effect=fake_analyze_text),
+            ),
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "openai",
+                    "csrf_token": self.csrf_token,
+                    "openai_model": "gpt-5.6-terra",
+                    "openai_api_key": "browser-manipulated-key",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider_class.call_count, 1)
+        self.assertEqual(
+            provider_class.call_args.kwargs["api_key"],
+            "configured-production-key",
+        )
+        self.assertNotIn(
+            "browser-manipulated-key",
+            response.text,
+        )
+        self.assertNotIn(
+            "configured-production-key",
+            response.text,
+        )
 
     def test_selected_runpod_provider_is_used(self) -> None:
         captured: dict[str, str] = {}
@@ -272,6 +427,38 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertEqual(
             payload["base_url"],
             "http://localhost:11434",
+        )
+
+    def test_production_rejects_ollama_discovery(self) -> None:
+        production_settings = replace(
+            main.settings,
+            app_mode="production",
+            ollama_base_url="http://127.0.0.1:11434",
+        )
+
+        with (
+            patch.object(
+                main,
+                "settings",
+                production_settings,
+            ),
+            patch.object(
+                main,
+                "OllamaProvider",
+            ) as provider_class,
+        ):
+            response = self.client.get(
+                "/api/ollama/models",
+                params={
+                    "base_url": "https://manipulated.example",
+                },
+            )
+
+        self.assertEqual(response.status_code, 403)
+        provider_class.assert_not_called()
+        self.assertEqual(
+            response.json()["detail"]["message"],
+            "Ollama ist im Produktionsbetrieb deaktiviert.",
         )
 
     def test_ollama_discovery_connection_error_is_understandable(self) -> None:

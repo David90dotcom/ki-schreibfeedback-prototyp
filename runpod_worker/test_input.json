@@ -1,25 +1,41 @@
 {
   "input": {
-    "model": "ministral-3:14b-instruct-2512-q8_0",
-    "prompt": "Die Schule sollte später beginnen, weil viele Jugendliche morgens noch müde sind.",
-    "system": "Gib kurzes, konstruktives Schreibfeedback auf Deutsch.",
-    "stream": false,
-    "options": {
-      "temperature": 0.15,
-      "num_predict": 128,
-      "seed": 7
-    },
-    "format": {
-      "type": "object",
-      "properties": {
-        "feedback": {
-          "type": "string"
+    "route": "/v1/chat/completions",
+    "method": "POST",
+    "body": {
+      "model": "mistralai/Ministral-3-14B-Instruct-2512",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Gib kurzes, konstruktives Schreibfeedback auf Deutsch."
+        },
+        {
+          "role": "user",
+          "content": "Die Schule sollte später beginnen, weil viele Jugendliche morgens noch müde sind."
         }
-      },
-      "required": [
-        "feedback"
       ],
-      "additionalProperties": false
+      "temperature": 0.15,
+      "max_tokens": 128,
+      "seed": 7,
+      "stream": false,
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "feedback_response",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "feedback": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "feedback"
+            ],
+            "additionalProperties": false
+          }
+        }
+      }
     }
   }
 }

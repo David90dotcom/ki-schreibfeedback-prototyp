@@ -16,6 +16,13 @@ VALID_APP_MODES = {
     APP_MODE_PRODUCTION,
 }
 
+RUNPOD_VLLM_MODEL = (
+    "mistralai/Ministral-3-14B-Instruct-2512"
+)
+
+LEGACY_RUNPOD_OLLAMA_MODEL = (
+    "ministral-3:14b-instruct-2512-q8_0"
+)
 
 def _first_configured_value(*names: str, fallback: str) -> str:
     """Liefert den ersten nicht leeren Wert aus der .env-Datei."""
@@ -27,6 +34,19 @@ def _first_configured_value(*names: str, fallback: str) -> str:
 
     return fallback
 
+def _configured_runpod_model() -> str:
+    """Migriert die frühere Ollama-ID auf die vLLM-Modell-ID."""
+
+    value = _first_configured_value(
+        "RUNPOD_DEFAULT_MODEL",
+        "RUNPOD_MODEL",
+        fallback=RUNPOD_VLLM_MODEL,
+    )
+
+    if value == LEGACY_RUNPOD_OLLAMA_MODEL:
+        return RUNPOD_VLLM_MODEL
+
+    return value
 
 def _configured_app_mode() -> str:
     """Liest und validiert den zentralen Betriebsmodus."""
@@ -135,14 +155,10 @@ class Settings:
         os.getenv("RUNPOD_ENDPOINT_ID", "").strip() or None
     )
 
-    runpod_model: str = _first_configured_value(
-        "RUNPOD_DEFAULT_MODEL",
-        "RUNPOD_MODEL",
-        fallback="ministral-3:14b-instruct-2512-q8_0",
-    )
+    runpod_model: str = _configured_runpod_model()
 
     runpod_job_timeout_seconds: float = float(
-        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "900")
+        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "600")
     )
 
     runpod_poll_interval_seconds: float = float(

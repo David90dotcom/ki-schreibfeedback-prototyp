@@ -1,0 +1,8 @@
+www.llm-lernlabor.de {
+	redir https://llm-lernlabor.de{uri} permanent
+}
+
+llm-lernlabor.de {
+	encode zstd gzip
+	reverse_proxy web:8000
+}

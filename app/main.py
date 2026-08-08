@@ -19,7 +19,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.config import APP_MODE_LOCAL, settings
+from app.config import (
+    APP_MODE_LOCAL,
+    APP_MODE_PRODUCTION,
+    settings,
+)
 from app.llm.base import LLMProvider
 from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
@@ -155,11 +159,30 @@ def _openai_model_options() -> list[tuple[str, str]]:
     return options
 
 
+def _ollama_available() -> bool:
+    """Erlaubt Ollama außerhalb des Produktionsbetriebs."""
+    return settings.app_mode != APP_MODE_PRODUCTION
+
+
+def _provider_options() -> list[tuple[str, str]]:
+    """Blendet lokale Provider im Produktionsbetrieb aus."""
+    options = feedback_service.get_provider_options()
+
+    if _ollama_available():
+        return options
+
+    return [
+        option
+        for option in options
+        if option[0] != "ollama"
+    ]
+
+
 def _template_context(
     *,
     csrf_token: str,
     authenticated_user: str | None = None,
-    selected_provider: str = "ollama",
+    selected_provider: str | None = None,
     student_text: str = "",
     ollama_base_url: str | None = None,
     selected_ollama_model: str | None = None,
@@ -170,6 +193,19 @@ def _template_context(
     result: FeedbackResult | None = None,
     error: str | None = None,
 ) -> dict[str, object]:
+    provider_options = _provider_options()
+    available_provider_keys = {
+        provider_key
+        for provider_key, _ in provider_options
+    }
+
+    if selected_provider not in available_provider_keys:
+        selected_provider = (
+            "runpod"
+            if "runpod" in available_provider_keys
+            else provider_options[0][0]
+        )
+
     current_ollama_model = (
         selected_ollama_model
         or settings.ollama_model
@@ -189,14 +225,16 @@ def _template_context(
         "app_name": settings.app_name,
         "authenticated_user": authenticated_user,
         "csrf_token": csrf_token,
-        "provider_options": (
-            feedback_service.get_provider_options()
-        ),
+        "provider_options": provider_options,
         "selected_provider": selected_provider,
         "student_text": student_text,
         "result": result,
         "error": error,
         "custom_model_value": CUSTOM_MODEL_VALUE,
+        "browser_overrides_allowed": (
+            settings.browser_overrides_allowed
+        ),
+        "ollama_available": _ollama_available(),
         "ollama_default_base_url": (
             settings.ollama_base_url
         ),
@@ -204,8 +242,12 @@ def _template_context(
             OLLAMA_FALLBACK_BASE_URL
         ),
         "ollama_base_url": (
-            ollama_base_url
-            or settings.ollama_base_url
+            (
+                ollama_base_url
+                or settings.ollama_base_url
+            )
+            if settings.browser_overrides_allowed
+            else ""
         ),
         "ollama_default_model": settings.ollama_model,
         "ollama_model_options": ollama_model_options,
@@ -364,9 +406,20 @@ def _provider_for_request(
     openai_api_key: str,
 ) -> LLMProvider:
     if provider_key == "ollama":
+        if not _ollama_available():
+            raise ValueError(
+                "Ollama ist im Produktionsbetrieb deaktiviert."
+            )
+
+        effective_base_url = (
+            ollama_base_url
+            if settings.browser_overrides_allowed
+            else settings.ollama_base_url
+        )
+
         return OllamaProvider(
             base_url=_validate_ollama_base_url(
-                ollama_base_url
+                effective_base_url
             ),
             model_name=_validate_model_name(
                 ollama_model,
@@ -376,18 +429,30 @@ def _provider_for_request(
         )
 
     if provider_key == "openai":
-        api_key = (
-            openai_api_key.strip()
-            or settings.openai_api_key
-        )
+        api_key = settings.openai_api_key
+
+        if settings.browser_overrides_allowed:
+            api_key = (
+                openai_api_key.strip()
+                or api_key
+            )
 
         if not api_key:
-            raise ValueError(
+            error_message = (
                 "Kein OpenAI-API-Key verfügbar. "
                 "Hinterlege OPENAI_API_KEY in der "
-                ".env-Datei oder gib im optionalen "
-                "Key-Feld einen Key für diesen Aufruf ein."
+                ".env-Datei."
             )
+
+            if settings.browser_overrides_allowed:
+                error_message = (
+                    "Kein OpenAI-API-Key verfügbar. "
+                    "Hinterlege OPENAI_API_KEY in der "
+                    ".env-Datei oder gib im optionalen "
+                    "Key-Feld einen Key für diesen Aufruf ein."
+                )
+
+            raise ValueError(error_message)
 
         return OpenAIProvider(
             api_key=api_key,
@@ -559,9 +624,24 @@ async def ollama_models(
             detail={"message": "Anmeldung erforderlich."},
         )
 
+    if not _ollama_available():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "message": (
+                    "Ollama ist im Produktionsbetrieb deaktiviert."
+                )
+            },
+        )
+
     try:
+        effective_base_url = (
+            base_url
+            if settings.browser_overrides_allowed
+            else settings.ollama_base_url
+        )
         validated_base_url = (
-            _validate_ollama_base_url(base_url)
+            _validate_ollama_base_url(effective_base_url)
         )
     except ValueError as exc:
         raise HTTPException(
@@ -577,19 +657,28 @@ async def ollama_models(
     try:
         models = await provider.discover_models()
     except (httpx.HTTPError, ValueError) as exc:
+        location = (
+            f" unter {validated_base_url}"
+            if settings.browser_overrides_allowed
+            else ""
+        )
         raise HTTPException(
             status_code=502,
             detail={
                 "message": (
-                    f"Ollama ist unter {validated_base_url} "
+                    f"Ollama ist{location} "
                     "nicht erreichbar. Prüfe, ob Ollama "
-                    "läuft und die Adresse stimmt."
+                    "läuft und korrekt konfiguriert ist."
                 )
             },
         ) from exc
 
     return {
-        "base_url": validated_base_url,
+        "base_url": (
+            validated_base_url
+            if settings.browser_overrides_allowed
+            else None
+        ),
         "models": models,
         "default_model": settings.ollama_model,
         "message": (
@@ -623,7 +712,8 @@ async def analyze(
     error: str | None = None
 
     openai_override_used = (
-        provider == "openai"
+        settings.browser_overrides_allowed
+        and provider == "openai"
         and bool(openai_api_key.strip())
     )
 
