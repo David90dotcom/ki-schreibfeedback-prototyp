@@ -2,8 +2,3 @@
 !runpod_worker/
 !runpod_worker/Dockerfile
 !runpod_worker/Dockerfile.dockerignore
-!runpod_worker/requirements.txt
-!runpod_worker/__init__.py
-!runpod_worker/worker.py
-!runpod_worker/handler.py
-!runpod_worker/start.sh
