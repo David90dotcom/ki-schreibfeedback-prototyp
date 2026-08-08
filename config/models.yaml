@@ -87,11 +87,11 @@ models:
       max_output_tokens: 4000
       reasoning_effort: null
 
-  - id: runpod-ministral-3-14b-instruct-2512-q8-0
+  - id: runpod-ministral-3-14b-instruct-2512
     provider_id: runpod
-    provider_model_name: "ministral-3:14b-instruct-2512-q8_0"
-    display_name: Ministral 3 14B Instruct Q8_0 (RunPod)
-    description: Zentral verfügbares Ministral-Modell über einen RunPod-Serverless-Worker.
+    provider_model_name: "mistralai/Ministral-3-14B-Instruct-2512"
+    display_name: Ministral 3 14B Instruct (RunPod)
+    description: Zentral verfügbares Ministral-Modell über RunPod Serverless mit vLLM.
     role: feedback
     enabled: true
 

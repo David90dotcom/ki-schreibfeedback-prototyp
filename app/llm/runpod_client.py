@@ -54,7 +54,7 @@ class RunPodProvider:
         api_key: str | None,
         endpoint_id: str | None,
         model_name: str,
-        job_timeout_seconds: float = 1800.0,
+        job_timeout_seconds: float = 600.0,
         poll_interval_seconds: float = 1.0,
     ) -> None:
         self.api_key = api_key.strip() if api_key else None
@@ -259,28 +259,64 @@ class RunPodProvider:
         return url
 
     @staticmethod
-    def _worker_input(request: ModelRequest) -> dict[str, Any]:
-        worker_input: dict[str, Any] = {
-            "model": request.model_name,
-            "prompt": request.input_text,
-            "stream": False,
-        }
-        options: dict[str, Any] = {}
+    def _worker_input(
+        request: ModelRequest,
+    ) -> dict[str, Any]:
+        messages: list[dict[str, str]] = []
 
         if request.instructions:
-            worker_input["system"] = request.instructions
-        if request.parameters.temperature is not None:
-            options["temperature"] = request.parameters.temperature
-        if request.parameters.max_output_tokens is not None:
-            options["num_predict"] = request.parameters.max_output_tokens
-        if request.parameters.seed is not None:
-            options["seed"] = request.parameters.seed
-        if options:
-            worker_input["options"] = options
-        if request.response_schema is not None:
-            worker_input["format"] = request.response_schema
+            messages.append(
+                {
+                    "role": "system",
+                    "content": request.instructions,
+                }
+            )
 
-        return worker_input
+        messages.append(
+            {
+                "role": "user",
+                "content": request.input_text,
+            }
+        )
+
+        body: dict[str, Any] = {
+            "model": request.model_name,
+            "messages": messages,
+            "stream": False,
+        }
+
+        if request.parameters.temperature is not None:
+            body["temperature"] = (
+                request.parameters.temperature
+            )
+
+        if (
+            request.parameters.max_output_tokens
+            is not None
+        ):
+            body["max_tokens"] = (
+                request.parameters.max_output_tokens
+            )
+
+        if request.parameters.seed is not None:
+            body["seed"] = request.parameters.seed
+
+        if request.response_schema is not None:
+            body["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": (
+                        request.response_schema_name
+                    ),
+                    "schema": request.response_schema,
+                },
+            }
+
+        return {
+            "route": "/v1/chat/completions",
+            "method": "POST",
+            "body": body,
+        }
 
     async def _wait_for_job(
         self,
@@ -360,15 +396,17 @@ class RunPodProvider:
                 )
 
             try:
-                async with asyncio.timeout(remaining_seconds):
-                    payload = await self._request_json(
+                payload = await asyncio.wait_for(
+                    self._request_json(
                         client=client,
                         method="GET",
                         url=self._url("status", job_id),
                         model_name=model_name,
                         operation="status",
-                    )
-            except TimeoutError as exc:
+                    ),
+                    timeout=remaining_seconds,
+                )
+            except asyncio.TimeoutError as exc:
                 raise self._job_timeout_error(
                     job_id=job_id,
                     model_name=model_name,
