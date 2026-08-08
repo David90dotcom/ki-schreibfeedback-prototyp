@@ -74,7 +74,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn("Cloud: RunPod Serverless", response.text)
         self.assertIn("Andere Modell-ID", response.text)
 
-    def test_production_page_hides_browser_override_fields(self) -> None:
+    def test_production_page_hides_ollama_and_override_fields(self) -> None:
         production_settings = replace(
             main.settings,
             app_mode="production",
@@ -88,6 +88,14 @@ class BrowserModelSelectionTests(unittest.TestCase):
             response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
+        self.assertNotIn(
+            'value="ollama"',
+            response.text,
+        )
+        self.assertNotIn(
+            'id="ollama-settings"',
+            response.text,
+        )
         self.assertNotIn(
             'id="ollama-base-url"',
             response.text,
@@ -109,12 +117,12 @@ class BrowserModelSelectionTests(unittest.TestCase):
             response.text,
         )
         self.assertIn(
-            'id="ollama-model"',
-            response.text,
-        )
-        self.assertIn(
             'id="openai-model"',
             response.text,
+        )
+        self.assertRegex(
+            response.text,
+            r'value="runpod"\s+selected',
         )
 
     def test_custom_ollama_settings_apply_only_to_request(self) -> None:
@@ -159,20 +167,12 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn("llama4:latest", response.text)
         self.assertIn("123 ms", response.text)
 
-    def test_production_ignores_browser_ollama_base_url(self) -> None:
+    def test_production_rejects_ollama_analysis(self) -> None:
         production_settings = replace(
             main.settings,
             app_mode="production",
             ollama_base_url="http://127.0.0.1:11434",
         )
-
-        async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
-            return FeedbackResult(
-                provider="ollama",
-                model=production_settings.ollama_model,
-                feedback="Produktions-Testfeedback",
-                duration_ms=81,
-            )
 
         with (
             patch.object(
@@ -187,8 +187,8 @@ class BrowserModelSelectionTests(unittest.TestCase):
             patch.object(
                 main.feedback_service,
                 "analyze_text",
-                new=AsyncMock(side_effect=fake_analyze_text),
-            ),
+                new=AsyncMock(),
+            ) as analyze_mock,
         ):
             response = self.client.post(
                 "/analyze",
@@ -202,10 +202,11 @@ class BrowserModelSelectionTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(provider_class.call_count, 1)
-        self.assertEqual(
-            provider_class.call_args.kwargs["base_url"],
-            production_settings.ollama_base_url,
+        provider_class.assert_not_called()
+        analyze_mock.assert_not_awaited()
+        self.assertIn(
+            "Ollama ist im Produktionsbetrieb deaktiviert.",
+            response.text,
         )
         self.assertNotIn(
             "manipulated.example",
@@ -428,7 +429,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
             "http://localhost:11434",
         )
 
-    def test_production_ollama_discovery_ignores_browser_url(self) -> None:
+    def test_production_rejects_ollama_discovery(self) -> None:
         production_settings = replace(
             main.settings,
             app_mode="production",
@@ -446,10 +447,6 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 "OllamaProvider",
             ) as provider_class,
         ):
-            provider_class.return_value.discover_models = AsyncMock(
-                return_value=["qwen3:30b"],
-            )
-
             response = self.client.get(
                 "/api/ollama/models",
                 params={
@@ -457,21 +454,11 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 },
             )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(provider_class.call_count, 1)
+        self.assertEqual(response.status_code, 403)
+        provider_class.assert_not_called()
         self.assertEqual(
-            provider_class.call_args.kwargs["base_url"],
-            production_settings.ollama_base_url,
-        )
-
-        payload = response.json()
-
-        self.assertIsNone(payload["base_url"])
-        self.assertEqual(payload["models"], ["qwen3:30b"])
-        self.assertNotIn("manipulated.example", response.text)
-        self.assertNotIn(
-            production_settings.ollama_base_url,
-            response.text,
+            response.json()["detail"]["message"],
+            "Ollama ist im Produktionsbetrieb deaktiviert.",
         )
 
     def test_ollama_discovery_connection_error_is_understandable(self) -> None:
