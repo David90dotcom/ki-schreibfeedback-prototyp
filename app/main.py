@@ -56,6 +56,35 @@ OPENAI_MODEL_CATALOG = (
     ("gpt-5.6-sol", "GPT-5.6 Sol – höchste Leistung"),
 )
 
+RUNPOD_DEFAULT_ENDPOINT_KEY = "standard"
+
+RUNPOD_ENDPOINT_CATALOG = (
+    (
+        RUNPOD_DEFAULT_ENDPOINT_KEY,
+        "RunPod Standard – automatischer 48-GB-GPU-Pool",
+        "runpod_endpoint_id",
+        "RUNPOD_ENDPOINT_ID",
+    ),
+    (
+        "rtx4090_24gb",
+        "RTX 4090 – 24 GB",
+        "runpod_endpoint_rtx4090_id",
+        "RUNPOD_ENDPOINT_RTX4090_ID",
+    ),
+    (
+        "rtx5090_32gb",
+        "RTX 5090 – 32 GB",
+        "runpod_endpoint_rtx5090_id",
+        "RUNPOD_ENDPOINT_RTX5090_ID",
+    ),
+    (
+        "rtx6000ada_48gb",
+        "RTX 6000 Ada – 48 GB",
+        "runpod_endpoint_rtx6000_ada_id",
+        "RUNPOD_ENDPOINT_RTX6000_ADA_ID",
+    ),
+)
+
 
 def _runtime_session_secret() -> str:
     """Verlangt außerhalb der lokalen Entwicklung ein festes Secret."""
@@ -178,6 +207,41 @@ def _provider_options() -> list[tuple[str, str]]:
     ]
 
 
+def _runpod_endpoint_options() -> list[dict[str, object]]:
+    """Gibt nur sichere Auswahldaten an das Template weiter."""
+    return [
+        {
+            "key": key,
+            "label": label,
+            "configured": bool(
+                getattr(settings, settings_attribute)
+            ),
+        }
+        for (
+            key,
+            label,
+            settings_attribute,
+            _environment_variable,
+        ) in RUNPOD_ENDPOINT_CATALOG
+    ]
+
+
+def _selected_runpod_endpoint_key(
+    raw_endpoint_key: str | None,
+) -> str:
+    """Gibt an das Template niemals unbekannte Browserwerte zurück."""
+    endpoint_key = (raw_endpoint_key or "").strip().lower()
+    allowed_keys = {
+        option[0]
+        for option in RUNPOD_ENDPOINT_CATALOG
+    }
+
+    if endpoint_key in allowed_keys:
+        return endpoint_key
+
+    return RUNPOD_DEFAULT_ENDPOINT_KEY
+
+
 def _template_context(
     *,
     csrf_token: str,
@@ -190,6 +254,7 @@ def _template_context(
     selected_openai_model: str | None = None,
     openai_custom_model: str = "",
     openai_override_used: bool = False,
+    selected_runpod_endpoint: str | None = None,
     result: FeedbackResult | None = None,
     error: str | None = None,
 ) -> dict[str, object]:
@@ -266,6 +331,12 @@ def _template_context(
             settings.openai_api_key
         ),
         "openai_override_used": openai_override_used,
+        "runpod_endpoint_options": _runpod_endpoint_options(),
+        "selected_runpod_endpoint": (
+            _selected_runpod_endpoint_key(
+                selected_runpod_endpoint
+            )
+        ),
     }
 
 
@@ -404,6 +475,7 @@ def _provider_for_request(
     openai_model: str,
     openai_custom_model: str,
     openai_api_key: str,
+    runpod_endpoint: str,
 ) -> LLMProvider:
     if provider_key == "ollama":
         if not _ollama_available():
@@ -464,9 +536,42 @@ def _provider_for_request(
         )
 
     if provider_key == "runpod":
+        endpoint_key = (
+            runpod_endpoint.strip().lower()
+            or RUNPOD_DEFAULT_ENDPOINT_KEY
+        )
+
+        for (
+            allowed_key,
+            label,
+            settings_attribute,
+            environment_variable,
+        ) in RUNPOD_ENDPOINT_CATALOG:
+            if endpoint_key != allowed_key:
+                continue
+
+            endpoint_id = getattr(
+                settings,
+                settings_attribute,
+            )
+
+            if not endpoint_id:
+                raise ValueError(
+                    f"{label} ist noch nicht konfiguriert. "
+                    f"Hinterlege {environment_variable} in der "
+                    ".env-Datei."
+                )
+
+            break
+        else:
+            raise ValueError(
+                "Die ausgewählte RunPod-Hardwarekonfiguration "
+                "ist nicht erlaubt."
+            )
+
         return RunPodProvider(
             api_key=settings.runpod_api_key,
-            endpoint_id=settings.runpod_endpoint_id,
+            endpoint_id=endpoint_id,
             model_name=settings.runpod_model,
             job_timeout_seconds=(
                 settings.runpod_job_timeout_seconds
@@ -700,6 +805,7 @@ async def analyze(
     openai_model: str = Form(""),
     openai_custom_model: str = Form(""),
     openai_api_key: str = Form(""),
+    runpod_endpoint: str = Form("", max_length=64),
 ) -> Response:
     authenticated_user = _authenticated_user(request)
 
@@ -726,6 +832,7 @@ async def analyze(
             openai_model=openai_model,
             openai_custom_model=openai_custom_model,
             openai_api_key=openai_api_key,
+            runpod_endpoint=runpod_endpoint,
         )
 
         result = await feedback_service.analyze_text(
@@ -752,6 +859,7 @@ async def analyze(
             selected_openai_model=openai_model,
             openai_custom_model=openai_custom_model,
             openai_override_used=openai_override_used,
+            selected_runpod_endpoint=runpod_endpoint,
             result=result,
             error=error,
         ),

@@ -68,7 +68,12 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('id="ollama-base-url"', response.text)
         self.assertIn('id="ollama-model"', response.text)
         self.assertIn('id="openai-model"', response.text)
+        self.assertIn('id="runpod-endpoint"', response.text)
         self.assertIn('value="runpod"', response.text)
+        self.assertIn('value="standard"', response.text)
+        self.assertIn('value="rtx4090_24gb"', response.text)
+        self.assertIn('value="rtx5090_32gb"', response.text)
+        self.assertIn('value="rtx6000ada_48gb"', response.text)
         self.assertIn(main.settings.ollama_base_url, response.text)
         self.assertIn(main.settings.openai_model, response.text)
         self.assertIn("Cloud: RunPod Serverless", response.text)
@@ -317,6 +322,11 @@ class BrowserModelSelectionTests(unittest.TestCase):
 
     def test_selected_runpod_provider_is_used(self) -> None:
         captured: dict[str, str] = {}
+        standard_endpoint_id = "standard-endpoint-test-only"
+        runpod_settings = replace(
+            main.settings,
+            runpod_endpoint_id=standard_endpoint_id,
+        )
 
         async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
             provider = kwargs["provider_override"]
@@ -329,6 +339,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
             captured["provider_key"] = str(kwargs["provider_key"])
             captured["provider_id"] = provider.provider_id
             captured["model"] = provider.model_name
+            captured["endpoint_id"] = provider.endpoint_id
 
             return FeedbackResult(
                 provider="runpod",
@@ -337,10 +348,17 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 duration_ms=67,
             )
 
-        with patch.object(
-            main.feedback_service,
-            "analyze_text",
-            new=AsyncMock(side_effect=fake_analyze_text),
+        with (
+            patch.object(
+                main,
+                "settings",
+                runpod_settings,
+            ),
+            patch.object(
+                main.feedback_service,
+                "analyze_text",
+                new=AsyncMock(side_effect=fake_analyze_text),
+            ),
         ):
             response = self.client.post(
                 "/analyze",
@@ -355,12 +373,114 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertEqual(captured["provider_key"], "runpod")
         self.assertEqual(captured["provider_id"], "runpod")
         self.assertEqual(
+            captured["endpoint_id"],
+            standard_endpoint_id,
+        )
+        self.assertEqual(
             captured["model"],
             main.settings.runpod_model,
         )
         self.assertIn("RunPod-Testfeedback", response.text)
         self.assertIn(main.settings.runpod_model, response.text)
         self.assertIn("67 ms", response.text)
+        self.assertNotIn(standard_endpoint_id, response.text)
+
+    def test_fixed_runpod_endpoints_are_mapped_server_side(self) -> None:
+        endpoint_mapping = {
+            "rtx4090_24gb": "endpoint-4090-test-only",
+            "rtx5090_32gb": "endpoint-5090-test-only",
+            "rtx6000ada_48gb": "endpoint-6000ada-test-only",
+        }
+        runpod_settings = replace(
+            main.settings,
+            runpod_endpoint_rtx4090_id=(
+                endpoint_mapping["rtx4090_24gb"]
+            ),
+            runpod_endpoint_rtx5090_id=(
+                endpoint_mapping["rtx5090_32gb"]
+            ),
+            runpod_endpoint_rtx6000_ada_id=(
+                endpoint_mapping["rtx6000ada_48gb"]
+            ),
+        )
+
+        for endpoint_key, expected_endpoint_id in (
+            endpoint_mapping.items()
+        ):
+            with self.subTest(endpoint_key=endpoint_key):
+                captured: dict[str, str | None] = {}
+
+                async def fake_analyze_text(
+                    **kwargs: object,
+                ) -> FeedbackResult:
+                    provider = kwargs["provider_override"]
+                    captured["endpoint_id"] = (
+                        provider.endpoint_id  # type: ignore[attr-defined]
+                    )
+
+                    return FeedbackResult(
+                        provider="runpod",
+                        model=runpod_settings.runpod_model,
+                        feedback="Zuordnungstest",
+                        duration_ms=1,
+                    )
+
+                with (
+                    patch.object(
+                        main,
+                        "settings",
+                        runpod_settings,
+                    ),
+                    patch.object(
+                        main.feedback_service,
+                        "analyze_text",
+                        new=AsyncMock(
+                            side_effect=fake_analyze_text
+                        ),
+                    ),
+                ):
+                    response = self.client.post(
+                        "/analyze",
+                        data={
+                            "student_text": "Zuordnungstest.",
+                            "provider": "runpod",
+                            "runpod_endpoint": endpoint_key,
+                            "csrf_token": self.csrf_token,
+                        },
+                    )
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(
+                    captured["endpoint_id"],
+                    expected_endpoint_id,
+                )
+
+                for endpoint_id in endpoint_mapping.values():
+                    self.assertNotIn(endpoint_id, response.text)
+
+    def test_unknown_runpod_endpoint_is_rejected(self) -> None:
+        with patch.object(
+            main.feedback_service,
+            "analyze_text",
+            new=AsyncMock(),
+        ) as analyze_mock:
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "runpod",
+                    "runpod_endpoint": "attacker-endpoint-id",
+                    "csrf_token": self.csrf_token,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "RunPod-Hardwarekonfiguration ist nicht erlaubt",
+            response.text,
+        )
+        self.assertNotIn("attacker-endpoint-id", response.text)
+        analyze_mock.assert_not_awaited()
 
     def test_invalid_ollama_url_returns_understandable_error(self) -> None:
         response = self.client.post(

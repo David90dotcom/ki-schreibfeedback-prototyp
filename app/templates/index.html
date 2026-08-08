@@ -250,6 +250,44 @@
             </div>
         </section>
 
+        <section
+            id="runpod-settings"
+            class="provider-settings"
+            data-provider-panel="runpod"
+        >
+            <h3>RunPod-Hardwarekonfiguration</h3>
+
+            <label for="runpod-endpoint">
+                Inferenzziel
+            </label>
+
+            <select
+                id="runpod-endpoint"
+                name="runpod_endpoint"
+                required
+            >
+                {% for endpoint in runpod_endpoint_options %}
+                    <option
+                        value="{{ endpoint.key }}"
+                        {% if endpoint.key == selected_runpod_endpoint %}selected{% endif %}
+                        {% if not endpoint.configured %}disabled{% endif %}
+                    >
+                        {{ endpoint.label }}
+                        {% if not endpoint.configured %}
+                            (noch nicht konfiguriert)
+                        {% endif %}
+                    </option>
+                {% endfor %}
+            </select>
+
+            <p class="hint">
+                Der bestehende Standard nutzt den automatischen
+                48-GB-GPU-Pool. Die drei festen Ziele dienen dem
+                Hardwarevergleich. Alle vier verwenden dasselbe Modell;
+                die Endpoint-IDs bleiben ausschließlich im Backend.
+            </p>
+        </section>
+
         <label for="student_text">
             Abgetippter Beispieltext
         </label>

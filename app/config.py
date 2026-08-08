@@ -155,6 +155,30 @@ class Settings:
         os.getenv("RUNPOD_ENDPOINT_ID", "").strip() or None
     )
 
+    runpod_endpoint_rtx4090_id: str | None = (
+        os.getenv(
+            "RUNPOD_ENDPOINT_RTX4090_ID",
+            "",
+        ).strip()
+        or None
+    )
+
+    runpod_endpoint_rtx5090_id: str | None = (
+        os.getenv(
+            "RUNPOD_ENDPOINT_RTX5090_ID",
+            "",
+        ).strip()
+        or None
+    )
+
+    runpod_endpoint_rtx6000_ada_id: str | None = (
+        os.getenv(
+            "RUNPOD_ENDPOINT_RTX6000_ADA_ID",
+            "",
+        ).strip()
+        or None
+    )
+
     runpod_model: str = _configured_runpod_model()
 
     runpod_job_timeout_seconds: float = float(
