@@ -25,11 +25,12 @@
             {% endfor %}
         </select>
 
-        <section
-            id="ollama-settings"
-            class="provider-settings"
-            data-provider-panel="ollama"
-        >
+        {% if ollama_available %}
+            <section
+                id="ollama-settings"
+                class="provider-settings"
+                data-provider-panel="ollama"
+            >
             <h3>Lokales Ollama-Modell</h3>
 
             {% if browser_overrides_allowed %}
@@ -128,7 +129,8 @@
                 role="status"
                 aria-live="polite"
             ></p>
-        </section>
+            </section>
+        {% endif %}
 
         <section
             id="openai-settings"
