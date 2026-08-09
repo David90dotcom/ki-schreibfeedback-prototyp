@@ -11,45 +11,7 @@ import httpx
 
 RUNPOD_QUEUE_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_MANAGEMENT_API_BASE_URL = "https://api.runpod.io/v2"
-RUNPOD_GRAPHQL_API_URL = "https://api.runpod.io/graphql"
-
-RUNPOD_ENDPOINT_STATUS_QUERY = """
-query RunPodEndpointStatus($endpointId: String!) {
-  myself {
-    endpoint(id: $endpointId) {
-      id
-      gpuIds
-      gpuCount
-      idleTimeout
-      executionTimeoutMs
-      version
-      workersMin
-      workersMax
-      workerState(input: {granularity: LIVE}) {
-        time
-        initializing
-        idle
-        running
-        throttled
-        unhealthy
-      }
-      pods {
-        id
-        desiredStatus
-        uptimeSeconds
-        version
-        slsVersion
-        lastStartedAt
-        machine {
-          gpuTypeId
-          gpuDisplayName
-          dataCenterId
-        }
-      }
-    }
-  }
-}
-"""
+RUNPOD_REST_V1_API_BASE_URL = "https://rest.runpod.io/v1"
 
 SUPPLY_LEVELS = ("NONE", "LOW", "MEDIUM", "HIGH")
 SUPPLY_LABELS = {
@@ -163,7 +125,7 @@ class RunPodStatusService:
                     ),
                 )
 
-                should_try_graphql = (
+                should_try_rest_v1 = (
                     (
                         not configuration.get("available")
                         and configuration.get("fallbackEligible")
@@ -174,22 +136,22 @@ class RunPodStatusService:
                     )
                 )
 
-                if should_try_graphql:
-                    graphql_result = await self._cached(
-                        ("graphql-endpoint", endpoint_id),
+                if should_try_rest_v1:
+                    rest_v1_result = await self._cached(
+                        ("rest-v1-endpoint", endpoint_id),
                         self.worker_cache_seconds,
-                        lambda: self._read_graphql_endpoint(
+                        lambda: self._read_rest_v1_endpoint(
                             client,
                             endpoint_id,
                         ),
                     )
 
-                    if graphql_result.get("available"):
+                    if rest_v1_result.get("available"):
                         if (
                             not configuration.get("available")
                             and configuration.get("fallbackEligible")
                         ):
-                            configuration = graphql_result[
+                            configuration = rest_v1_result[
                                 "configuration"
                             ]
 
@@ -197,13 +159,13 @@ class RunPodStatusService:
                             not technical.get("available")
                             and technical.get("fallbackEligible")
                         ):
-                            technical = graphql_result["technical"]
+                            technical = rest_v1_result["technical"]
                     else:
-                        graphql_message = self._safe_string(
-                            graphql_result.get("message")
+                        rest_v1_message = self._safe_string(
+                            rest_v1_result.get("message")
                         )
-                        graphql_permission_missing = bool(
-                            graphql_result.get("permissionMissing")
+                        rest_v1_permission_missing = bool(
+                            rest_v1_result.get("permissionMissing")
                         )
 
                         if (
@@ -216,13 +178,13 @@ class RunPodStatusService:
                                     configuration.get(
                                         "permissionMissing"
                                     )
-                                    or graphql_permission_missing
+                                    or rest_v1_permission_missing
                                 ),
                                 "message": self._combine_messages(
                                     self._safe_string(
                                         configuration.get("message")
                                     ),
-                                    graphql_message,
+                                    rest_v1_message,
                                 ),
                             }
 
@@ -234,15 +196,24 @@ class RunPodStatusService:
                                 **technical,
                                 "permissionMissing": bool(
                                     technical.get("permissionMissing")
-                                    or graphql_permission_missing
+                                    or rest_v1_permission_missing
                                 ),
                                 "message": self._combine_messages(
                                     self._safe_string(
                                         technical.get("message")
                                     ),
-                                    graphql_message,
+                                    rest_v1_message,
                                 ),
                             }
+
+                if (
+                    technical.get("available")
+                    and health_result.get("available")
+                ):
+                    technical = self._merge_technical_health(
+                        technical,
+                        health_result,
+                    )
 
                 if (
                     not technical.get("available")
@@ -380,7 +351,7 @@ class RunPodStatusService:
         )
 
         if status_code != 200 or payload is None:
-            permission_missing = status_code == 403
+            permission_missing = status_code in {401, 403}
             message = (
                 "Dem RunPod-API-Key fehlt die Leseberechtigung "
                 "für die Endpoint-Konfiguration."
@@ -560,11 +531,12 @@ class RunPodStatusService:
                 "include": "AVAILABILITY",
                 "product": "SERVERLESS",
                 "count": "1",
+                "cloud": "SECURE",
             },
         )
 
         if status_code != 200 or payload is None:
-            permission_missing = status_code == 403
+            permission_missing = status_code in {401, 403}
             message = (
                 "Dem RunPod-API-Key fehlt die Leseberechtigung "
                 "für den GPU-Katalog."
@@ -630,7 +602,7 @@ class RunPodStatusService:
         )
 
         if status_code != 200 or payload is None:
-            permission_missing = status_code == 403
+            permission_missing = status_code in {401, 403}
             message = (
                 "Dem RunPod-API-Key fehlt die Leseberechtigung "
                 "für technische Workerdaten."
@@ -704,76 +676,49 @@ class RunPodStatusService:
             ),
         }
 
-    async def _read_graphql_endpoint(
+    async def _read_rest_v1_endpoint(
         self,
         client: httpx.AsyncClient,
         endpoint_id: str,
     ) -> dict[str, Any]:
-        status_code, payload, failure = await self._post_json(
+        encoded_id = quote(endpoint_id, safe="")
+        status_code, payload, failure = await self._get_json(
             client,
-            RUNPOD_GRAPHQL_API_URL,
-            params={"api_key": str(self.api_key)},
-            json_body={
-                "query": RUNPOD_ENDPOINT_STATUS_QUERY,
-                "variables": {"endpointId": endpoint_id},
-            },
+            f"{RUNPOD_REST_V1_API_BASE_URL}/endpoints/{encoded_id}",
+            params={"includeWorkers": "true"},
         )
 
         if status_code != 200 or payload is None:
+            permission_missing = status_code in {401, 403}
             return {
                 "available": False,
-                "permissionMissing": status_code in {401, 403},
-                "message": self._failure_message(
-                    "Auch der offizielle GraphQL-Rückfall ist momentan "
-                    "nicht abrufbar.",
-                    status_code,
-                    failure,
-                ),
-            }
-
-        if isinstance(payload.get("errors"), list):
-            return {
-                "available": False,
-                "permissionMissing": self._graphql_permission_missing(
-                    payload.get("errors")
-                ),
+                "permissionMissing": permission_missing,
                 "message": (
-                    "RunPod konnte die Endpoint-Daten auch über den "
-                    "GraphQL-Rückfall nicht bereitstellen."
+                    "Dem RunPod-API-Key fehlt die Leseberechtigung für "
+                    "den offiziellen REST-v1-Fallback."
+                    if permission_missing
+                    else self._failure_message(
+                        "Auch der offizielle REST-v1-Fallback ist "
+                        "momentan nicht abrufbar.",
+                        status_code,
+                        failure,
+                    )
                 ),
             }
 
-        data = payload.get("data")
-        myself = data.get("myself") if isinstance(data, dict) else None
-        endpoint = (
-            myself.get("endpoint")
-            if isinstance(myself, dict)
-            else None
-        )
-
-        if not isinstance(endpoint, dict):
-            return {
-                "available": False,
-                "message": (
-                    "RunPod meldete den ausgewählten Endpoint im "
-                    "GraphQL-Rückfall nicht zurück."
-                ),
-            }
-
-        returned_endpoint_id = self._safe_string(endpoint.get("id"))
+        returned_endpoint_id = self._safe_string(payload.get("id"))
 
         if returned_endpoint_id != endpoint_id:
             return {
                 "available": False,
                 "message": (
-                    "RunPod lieferte im GraphQL-Rückfall keine eindeutig "
+                    "RunPod lieferte im REST-v1-Fallback keine eindeutig "
                     "zuordenbare Endpoint-Konfiguration."
                 ),
             }
 
-        endpoint_version = self._count_or_none(endpoint.get("version"))
-        counts = self._latest_worker_counts(endpoint.get("workerState"))
-        raw_pods = endpoint.get("pods")
+        endpoint_version = self._count_or_none(payload.get("version"))
+        raw_pods = payload.get("workers")
 
         if not isinstance(raw_pods, list):
             raw_pods = []
@@ -789,18 +734,34 @@ class RunPodStatusService:
             if not isinstance(machine, dict):
                 machine = {}
 
+            machine_gpu_type = machine.get("gpuType")
+
+            if not isinstance(machine_gpu_type, dict):
+                machine_gpu_type = {}
+
+            gpu = raw_pod.get("gpu")
+
+            if not isinstance(gpu, dict):
+                gpu = {}
+
             worker_version = self._count_or_none(
                 raw_pod.get("slsVersion")
             )
 
-            if worker_version is None:
-                worker_version = self._count_or_none(
-                    raw_pod.get("version")
-                )
-
             gpu_type_id = self._safe_string(
                 machine.get("gpuTypeId")
-            ) or self._safe_string(machine.get("gpuDisplayName"))
+            )
+
+            if gpu_type_id is None:
+                gpu_type_id = (
+                    self._safe_string(machine_gpu_type.get("id"))
+                    or self._safe_string(gpu.get("id"))
+                    or self._safe_string(machine.get("gpuDisplayName"))
+                    or self._safe_string(
+                        machine_gpu_type.get("displayName")
+                    )
+                    or self._safe_string(gpu.get("displayName"))
+                )
 
             workers.append(
                 {
@@ -828,36 +789,39 @@ class RunPodStatusService:
                 }
             )
 
-        if len(workers) == 1:
-            aggregate_status = self._single_worker_status(counts)
+        flashboot = payload.get("flashboot")
 
-            if aggregate_status:
-                workers[0]["status"] = aggregate_status
+        if isinstance(flashboot, bool):
+            flashboot_label = "AKTIV" if flashboot else "INAKTIV"
+        else:
+            flashboot_label = self._safe_string(flashboot)
 
         configuration = {
             "available": True,
             "permissionMissing": False,
             "fallbackEligible": False,
-            "gpuPools": self._split_gpu_ids(endpoint.get("gpuIds")),
-            "gpuTypeIds": [],
-            "gpuCount": self._count_or_none(endpoint.get("gpuCount")),
+            "gpuPools": [],
+            "gpuTypeIds": self._safe_string_list(
+                payload.get("gpuTypeIds")
+            ),
+            "gpuCount": self._count_or_none(payload.get("gpuCount")),
             "idleTimeoutSeconds": self._count_or_none(
-                endpoint.get("idleTimeout")
+                payload.get("idleTimeout")
             ),
             "executionTimeoutMs": self._count_or_none(
-                endpoint.get("executionTimeoutMs")
+                payload.get("executionTimeoutMs")
             ),
             "minimumWorkers": self._count_or_none(
-                endpoint.get("workersMin")
+                payload.get("workersMin")
             ),
             "maximumWorkers": self._count_or_none(
-                endpoint.get("workersMax")
+                payload.get("workersMax")
             ),
-            "flashboot": None,
-            "source": "graphql",
+            "flashboot": flashboot_label,
+            "source": "rest_v1",
             "message": (
                 "Endpoint-Konfiguration über den offiziellen "
-                "GraphQL-Rückfall geladen, weil RunPods REST API v2 "
+                "REST-v1-Fallback geladen, weil RunPods REST API v2 "
                 "nicht verfügbar war."
             ),
         }
@@ -865,13 +829,13 @@ class RunPodStatusService:
             "available": True,
             "permissionMissing": False,
             "fallbackEligible": False,
-            "aggregateAvailable": True,
-            "source": "graphql",
+            "aggregateAvailable": False,
+            "source": "rest_v1",
             "endpointVersion": endpoint_version,
-            "counts": counts,
+            "counts": self._worker_counts(None),
             "workers": workers,
             "message": (
-                "Workerdetails über den offiziellen GraphQL-Rückfall "
+                "Workerdetails über den offiziellen REST-v1-Fallback "
                 "geladen, weil RunPods REST API v2 nicht verfügbar war."
             ),
         }
@@ -891,38 +855,6 @@ class RunPodStatusService:
     ) -> tuple[int | None, dict[str, Any] | None, str | None]:
         try:
             response = await client.get(url, params=params)
-        except httpx.TimeoutException:
-            return None, None, "timeout"
-        except httpx.RequestError:
-            return None, None, "connection"
-
-        if response.status_code != 200:
-            return response.status_code, None, None
-
-        try:
-            payload = response.json()
-        except ValueError:
-            return response.status_code, None, "invalid_json"
-
-        if not isinstance(payload, dict):
-            return response.status_code, None, "invalid_json"
-
-        return response.status_code, payload, None
-
-    async def _post_json(
-        self,
-        client: httpx.AsyncClient,
-        url: str,
-        *,
-        params: dict[str, str] | None = None,
-        json_body: dict[str, Any],
-    ) -> tuple[int | None, dict[str, Any] | None, str | None]:
-        try:
-            response = await client.post(
-                url,
-                params=params,
-                json=json_body,
-            )
         except httpx.TimeoutException:
             return None, None, "timeout"
         except httpx.RequestError:
@@ -1092,20 +1024,35 @@ class RunPodStatusService:
             ),
         }
 
-    def _latest_worker_counts(self, value: Any) -> dict[str, int]:
-        if not isinstance(value, list):
-            return self._worker_counts(None)
+    def _merge_technical_health(
+        self,
+        technical: dict[str, Any],
+        health: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Ergänzt Einzeldaten um die stabileren Queue-Health-Zähler."""
 
-        states = [item for item in value if isinstance(item, dict)]
+        counts = self._worker_counts(health.get("workers"))
+        workers = list(technical.get("workers") or [])
 
-        if not states:
-            return self._worker_counts(None)
+        if len(workers) == 1:
+            aggregate_status = self._single_worker_status(counts)
 
-        latest = max(
-            states,
-            key=lambda item: self._safe_string(item.get("time")) or "",
-        )
-        return self._worker_counts(latest)
+            if aggregate_status:
+                workers[0] = {
+                    **workers[0],
+                    "status": aggregate_status,
+                }
+
+        return {
+            **technical,
+            "aggregateAvailable": True,
+            "counts": counts,
+            "jobs": {
+                key: self._count(value)
+                for key, value in (health.get("jobs") or {}).items()
+            },
+            "workers": workers,
+        }
 
     def _worker_counts(self, value: Any) -> dict[str, int]:
         source = value if isinstance(value, dict) else {}
@@ -1178,26 +1125,6 @@ class RunPodStatusService:
             message
             for message in (first, second)
             if message
-        )
-
-    @classmethod
-    def _graphql_permission_missing(cls, errors: Any) -> bool:
-        if not isinstance(errors, list):
-            return False
-
-        text = " ".join(
-            cls._safe_string(error.get("message")) or ""
-            for error in errors
-            if isinstance(error, dict)
-        ).lower()
-        return any(
-            marker in text
-            for marker in (
-                "access denied",
-                "forbidden",
-                "permission",
-                "unauthorized",
-            )
         )
 
     @staticmethod

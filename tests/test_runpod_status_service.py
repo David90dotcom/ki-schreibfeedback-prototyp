@@ -71,6 +71,10 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
                     request.url.params["include"],
                     "AVAILABILITY",
                 )
+                self.assertEqual(
+                    request.url.params["cloud"],
+                    "SECURE",
+                )
                 return httpx.Response(
                     200,
                     json={
@@ -226,7 +230,7 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
             snapshot["technical"]["permissionMissing"]
         )
 
-    async def test_http_500_uses_graphql_fallback_for_real_details(
+    async def test_http_500_uses_rest_v1_fallback_for_real_details(
         self,
     ) -> None:
         requests: list[httpx.Request] = []
@@ -243,60 +247,38 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
 
-            if request.method == "POST" and request.url.path == "/graphql":
+            if request.url.host == "rest.runpod.io":
                 self.assertEqual(
-                    request.url.params["api_key"],
-                    self.API_KEY,
-                )
-                body = json.loads(request.content)
-                self.assertEqual(
-                    body["variables"]["endpointId"],
-                    self.ENDPOINT_ID,
+                    request.url.params["includeWorkers"],
+                    "true",
                 )
                 return httpx.Response(
                     200,
                     json={
-                        "data": {
-                            "myself": {
-                                "endpoint": {
-                                    "id": self.ENDPOINT_ID,
-                                    "gpuIds": "ADA_24",
-                                    "gpuCount": 1,
-                                    "idleTimeout": 3600,
-                                    "executionTimeoutMs": 600000,
-                                    "version": 20,
-                                    "workersMin": 0,
-                                    "workersMax": 1,
-                                    "workerState": [
-                                        {
-                                            "time": "2026-08-09T19:15:00Z",
-                                            "initializing": 0,
-                                            "idle": 1,
-                                            "running": 0,
-                                            "throttled": 0,
-                                            "unhealthy": 0,
-                                        }
-                                    ],
-                                    "pods": [
-                                        {
-                                            "id": "graphql-worker-1",
-                                            "desiredStatus": "RUNNING",
-                                            "uptimeSeconds": 412,
-                                            "version": 20,
-                                            "slsVersion": 20,
-                                            "lastStartedAt": (
-                                                "2026-08-09T19:08:08Z"
-                                            ),
-                                            "machine": {
-                                                "gpuTypeId": self.GPU_TYPE_ID,
-                                                "gpuDisplayName": "RTX 4090",
-                                                "dataCenterId": "EU-RO-1",
-                                            },
-                                        }
-                                    ],
-                                }
+                        "id": self.ENDPOINT_ID,
+                        "gpuTypeIds": [self.GPU_TYPE_ID],
+                        "gpuCount": 1,
+                        "idleTimeout": 3600,
+                        "executionTimeoutMs": 600000,
+                        "version": 20,
+                        "workersMin": 0,
+                        "workersMax": 1,
+                        "flashboot": True,
+                        "workers": [
+                            {
+                                "id": "rest-v1-worker-1",
+                                "desiredStatus": "RUNNING",
+                                "uptimeSeconds": 412,
+                                "slsVersion": 20,
+                                "lastStartedAt": (
+                                    "2026-08-09T19:08:08Z"
+                                ),
+                                "machine": {
+                                    "gpuTypeId": self.GPU_TYPE_ID,
+                                    "dataCenterId": "EU-RO-1",
+                                },
                             }
-                        }
+                        ],
                     },
                 )
 
@@ -342,12 +324,13 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["worker"]["state"], "warm")
         self.assertEqual(snapshot["supply"]["level"], "HIGH")
         self.assertTrue(snapshot["supply"]["configurationVerified"])
-        self.assertEqual(snapshot["configuration"]["source"], "graphql")
+        self.assertEqual(snapshot["configuration"]["source"], "rest_v1")
         self.assertEqual(
             snapshot["configuration"]["idleTimeoutSeconds"],
             3600,
         )
-        self.assertEqual(snapshot["technical"]["source"], "graphql")
+        self.assertEqual(snapshot["configuration"]["flashboot"], "AKTIV")
+        self.assertEqual(snapshot["technical"]["source"], "rest_v1")
         self.assertEqual(snapshot["technical"]["endpointVersion"], 20)
         self.assertEqual(
             snapshot["technical"]["workers"][0]["gpuTypeId"],
@@ -363,9 +346,90 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(self.API_KEY, json.dumps(snapshot))
         self.assertEqual(
-            sum(request.method == "POST" for request in requests),
+            sum(request.url.host == "rest.runpod.io" for request in requests),
             1,
         )
+
+    async def test_rest_v1_keeps_details_when_catalog_returns_500(
+        self,
+    ) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.host == "api.runpod.ai":
+                return httpx.Response(
+                    200,
+                    json={
+                        "jobs": {"inQueue": 0, "inProgress": 0},
+                        "workers": {"idle": 3, "ready": 3},
+                    },
+                )
+
+            if request.url.host == "rest.runpod.io":
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": self.ENDPOINT_ID,
+                        "gpuTypeIds": [self.GPU_TYPE_ID],
+                        "gpuCount": 1,
+                        "idleTimeout": 3600,
+                        "executionTimeoutMs": 600000,
+                        "version": 9,
+                        "workersMin": 0,
+                        "workersMax": 1,
+                        "flashboot": True,
+                        "workers": [
+                            {
+                                "id": "rest-v1-worker-1",
+                                "desiredStatus": "RUNNING",
+                                "slsVersion": 9,
+                                "machine": {
+                                    "gpuTypeId": self.GPU_TYPE_ID,
+                                    "dataCenterId": "EU-RO-1",
+                                },
+                            }
+                        ],
+                    },
+                )
+
+            if request.url.path.startswith("/v2/serverless/"):
+                return httpx.Response(500)
+
+            if request.url.path.endswith("/v2/catalog/gpus"):
+                return httpx.Response(500)
+
+            return httpx.Response(404)
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+        service = RunPodStatusService(api_key=self.API_KEY)
+
+        with patch.object(
+            service,
+            "_create_http_client",
+            return_value=client,
+        ):
+            snapshot = await service.snapshot(
+                endpoint_key="rtx4090_24gb",
+                endpoint_label="RTX 4090 – 24 GB",
+                endpoint_id=self.ENDPOINT_ID,
+                gpu_type_ids=(self.GPU_TYPE_ID,),
+            )
+
+        self.assertEqual(snapshot["worker"]["state"], "warm")
+        self.assertFalse(snapshot["supply"]["available"])
+        self.assertIn("HTTP 500", snapshot["supply"]["message"])
+        self.assertEqual(snapshot["configuration"]["source"], "rest_v1")
+        self.assertEqual(
+            snapshot["configuration"]["idleTimeoutSeconds"],
+            3600,
+        )
+        self.assertEqual(snapshot["technical"]["source"], "rest_v1")
+        self.assertEqual(snapshot["technical"]["counts"]["ready"], 3)
+        self.assertEqual(
+            snapshot["technical"]["workers"][0]["gpuTypeId"],
+            self.GPU_TYPE_ID,
+        )
+        self.assertTrue(snapshot["warmWindow"]["configurationVerified"])
 
     async def test_double_management_failure_keeps_supply_and_health(
         self,
@@ -380,7 +444,7 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
                     },
                 )
 
-            if request.method == "POST" and request.url.path == "/graphql":
+            if request.url.host == "rest.runpod.io":
                 return httpx.Response(500)
 
             if request.url.path.startswith("/v2/serverless/"):
@@ -428,11 +492,11 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(snapshot["technical"]["source"], "health")
         self.assertEqual(snapshot["technical"]["counts"]["throttled"], 1)
         self.assertIn(
-            "GraphQL-Rückfall",
+            "REST-v1-Fallback",
             snapshot["configuration"]["message"],
         )
         self.assertIn(
-            "GraphQL-Rückfall",
+            "REST-v1-Fallback",
             snapshot["technical"]["diagnosticMessage"],
         )
 

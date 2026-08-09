@@ -403,7 +403,10 @@
             const pools = Array.isArray(configuration.gpuPools) &&
                 configuration.gpuPools.length
                 ? `GPU-Pool ${configuration.gpuPools.join(", ")}`
-                : "GPU-Pool unbekannt";
+                : Array.isArray(configuration.gpuTypeIds) &&
+                    configuration.gpuTypeIds.length
+                    ? `GPU-Typ ${configuration.gpuTypeIds.join(", ")}`
+                    : "GPU-Pool unbekannt";
 
             addTextElement(
                 runpodWorkerDetails,
@@ -413,7 +416,7 @@
             );
 
             if (
-                configuration.source === "graphql" &&
+                configuration.source !== "rest_v2" &&
                 configuration.message
             ) {
                 addTextElement(
@@ -476,7 +479,7 @@
             );
         }
 
-        if (technical.source === "graphql" && technical.message) {
+        if (technical.source !== "rest_v2" && technical.message) {
             addTextElement(
                 runpodWorkerDetails,
                 "p",
