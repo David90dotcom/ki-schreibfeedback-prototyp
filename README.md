@@ -1,8 +1,8 @@
-# KI-Schreibfeedback-Prototyp 0.6
+# KI-Schreibfeedback-Prototyp 0.6.0
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.6 ergänzt auswählbare GPU-Endpunkte, sichere Markdown-Darstellung, einen verständlichen Worker- und Jobstatus, getrennte Warte- und Verarbeitungszeiten sowie den gezielten Abbruch hängender Anfragen.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.6.0 ergänzt auswählbare GPU-Endpunkte, sichere Markdown-Darstellung, einen verständlichen Worker- und Jobstatus, getrennte Warte- und Verarbeitungszeiten sowie den gezielten Abbruch hängender Anfragen.
 
-> **Aktueller Entwicklungsstand: Version 0.6.** Das [Abnahmeprotokoll 0.5.0](docs/abnahme-v0.5.0.md) dokumentiert weiterhin den letzten vollständig produktiv abgenommenen Release. Die neuen Transparenzfunktionen von 0.6 sind automatisiert getestet und müssen nach dem Web-Redeployment noch einmal Ende-zu-Ende gegen die echten RunPod-Endpunkte geprüft werden.
+> **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
 
 ## Versionsstand und Ziel
 
@@ -11,9 +11,10 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, loka
 | **0.3** | abgeschlossen | Provider-Auswahl für Ollama, OpenAI und RunPod, RunPod-Worker, Konfiguration und automatisierte Tests |
 | **0.4** | abgeschlossen | Serverseitige Anmeldung, geschützte Web- und Modellrouten, sichere Sitzungen, Login-Begrenzung und CSRF-Schutz |
 | **0.5.0** | abgeschlossen | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
-| **0.6** | in Abnahme | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
+| **0.6.0** | stabiler Release | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
+| **0.7** | nächste Entwicklungsversion | Weiterentwicklung ausschließlich auf Basis des unveränderten Tags `v0.6.0` |
 
-Version 0.5.0 ist der erste produktiv bereitgestellte und Ende-zu-Ende abgenommene Stand. Version 0.6 baut additiv darauf auf; Modell-Payload und vLLM-Startkonfiguration bleiben unverändert.
+Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Version 0.6.0 ist der neue stabile Standard; Modell-Payload und vLLM-Startkonfiguration bleiben gegenüber 0.5.0 unverändert.
 
 ## Architektur
 
@@ -178,10 +179,11 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der aktuelle Stand umfasst 68 erfolgreiche Tests einschließlich der acht Subtests. Sie decken Browser- und Providerauswahl, Produktionsbeschränkungen, RunPod-Client und -Worker, Supply-/Health-Abbildung, individuelle Jobstatus, persistente Jobregistrierung, Einzelabbruch, manuellen Altjob-Abbruch, Zeitmetriken sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der Release-Stand umfasst 69 erfolgreiche Tests einschließlich der acht Subtests. Sie decken Browser- und Providerauswahl, Produktionsbeschränkungen, RunPod-Client und -Worker, Supply-/Health-Abbildung, individuelle Jobstatus, persistente Jobregistrierung, Einzelabbruch, manuellen Altjob-Abbruch, Zeitmetriken sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 
+- [Abnahmeprotokoll für Version 0.6.0](docs/abnahme-v0.6.0.md)
 - [Abnahmeprotokoll für Version 0.5.0](docs/abnahme-v0.5.0.md)
 - [Bekannte Einschränkungen](docs/known-issues.md)
 
@@ -197,4 +199,4 @@ Die Modellantwort wird in Version 0.6 mit einer engen, sicheren Markdown-Konfigu
 - Der RunPod-Key, die Endpoint-ID und der standardmäßig verwendete OpenAI-Key gehören ausschließlich in die lokale beziehungsweise serverseitige `.env`.
 - Die frei änderbare Ollama-Adresse und das optionale OpenAI-Key-Feld sind nur für die lokale Entwicklung vorgesehen.
 - Das Produktionsdeployment veröffentlicht ausschließlich Caddy auf Port 80/443; der Webcontainer ist nur an `127.0.0.1:8000` gebunden.
-- Die Modellantwort wird escaped als Text ausgegeben. Eine spätere Markdown-Darstellung muss weiterhin verhindern, dass Modellinhalt ungeprüft als HTML ausgeführt wird.
+- Die Modellantwort wird ausschließlich über die restriktive Markdown-Konfiguration gerendert; Raw HTML, aktive Links und Bilder bleiben deaktiviert.
