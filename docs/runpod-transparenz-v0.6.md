@@ -12,6 +12,8 @@ Die Web-App soll Prüfern verständlich zeigen, ob für das ausgewählte RunPod-
 
 Während einer RunPod-Anfrage sendet der Browser das Analyseformular asynchron ab und fragt parallel alle drei Sekunden den geschützten Statusendpunkt der Web-App ab. Dadurch bleiben Zeitmesser und Zustandsmeldung auch während eines langen Cold Starts sichtbar. Es wird keine Prozentzahl angezeigt, weil RunPod keinen belastbaren prozentualen Fortschritt liefert.
 
+Die Health-Daten gelten immer aggregiert für den gesamten Endpoint. Insbesondere bedeutet ein `running`-Worker nur, dass der Worker-Container läuft. Erst ein Jobstatus `IN_PROGRESS` bedeutet, dass ein Job von einem Worker aufgenommen wurde. Solange gleichzeitig Jobs unter `inQueue` gemeldet werden, behauptet die Oberfläche deshalb keine Zuordnung des laufenden Workers zum Browserauftrag.
+
 ## Warmhaltefenster
 
 - RunPod-`Idle timeout`: `3600 s` bei jedem verwendeten Endpoint
@@ -37,7 +39,7 @@ Antwortet eine Management-API mit `403`, bleiben Analyse und Health-Status nutzb
 - Browserwerte werden ausschließlich über die feste Endpoint-Allowlist aufgelöst.
 - API-Key und Endpoint-IDs erscheinen weder in HTML noch in JSON.
 - Supply- und Workerfehler beeinträchtigen die Modellanfrage nicht.
-- Live-Anzeige verwendet echte Endpointzustände plus Zeitmesser, keine erfundene Prozentzahl.
+- Live-Anzeige verwendet echte aggregierte Endpointzustände plus Zeitmesser, keine erfundene Prozentzahl oder Jobzuordnung.
 - Ergebnis trennt Gesamt-, Warte-/Bereitstellungs- und KI-Verarbeitungszeit.
 - Warmhalteangabe enthält ausdrücklich keine Reservierungsgarantie.
 - Technische Details sind eingeklappt und bleiben bei fehlender Berechtigung ehrlich unvollständig.

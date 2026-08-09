@@ -888,36 +888,40 @@ class RunPodStatusService:
         jobs = health["jobs"]
         workers = health["workers"]
 
-        if jobs["inProgress"] > 0 or workers["running"] > 0:
-            state = "processing"
-            label = "Worker verarbeitet gerade eine Anfrage"
-            tone = "info"
-        elif workers["unhealthy"] > 0:
+        if workers["unhealthy"] > 0:
             state = "unhealthy"
             label = (
                 "Workerstart fehlgeschlagen – Ersatz wird "
                 "möglicherweise gestartet"
             )
             tone = "error"
+        elif jobs["inQueue"] > 0:
+            state = "queued"
+            label = "Anfrage wartet auf verfügbaren Worker"
+            tone = "warning"
+        elif jobs["inProgress"] > 0:
+            state = "processing"
+            label = "Endpoint verarbeitet eine Anfrage"
+            tone = "info"
         elif workers["initializing"] > 0:
             state = "initializing"
-            label = "Worker wird gestartet – mehrere Minuten möglich"
+            label = "GPU-Kapazität wird gestartet"
             tone = "warning"
         elif workers["throttled"] > 0:
             state = "throttled"
             label = "GPU-Kapazität momentan eingeschränkt"
             tone = "limited"
-        elif jobs["inQueue"] > 0:
-            state = "queued"
-            label = "Auftrag wartet auf einen Worker – Cold Start möglich"
-            tone = "warning"
         elif workers["idle"] + workers["ready"] > 0:
             state = "warm"
-            label = "Worker aktiv – kurze Wartezeit erwartet"
+            label = "GPU-Kapazität verfügbar"
             tone = "success"
+        elif workers["running"] > 0:
+            state = "running"
+            label = "Worker läuft – kein Job in Verarbeitung"
+            tone = "neutral"
         else:
             state = "cold"
-            label = "Cold Start erforderlich"
+            label = "Keine aktive GPU-Kapazität"
             tone = "neutral"
 
         return {

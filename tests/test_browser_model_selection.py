@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -99,6 +100,26 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn(main.settings.openai_model, response.text)
         self.assertIn("Cloud: RunPod Serverless", response.text)
         self.assertIn("Andere Modell-ID", response.text)
+
+    def test_live_status_does_not_claim_assignment_from_worker_state(
+        self,
+    ) -> None:
+        script = (
+            Path(__file__).parents[1] / "app" / "static" / "app.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertNotIn(
+            "Worker hat den Auftrag übernommen",
+            script,
+        )
+        self.assertNotIn(
+            "Worker verarbeitet gerade eine Anfrage",
+            script,
+        )
+        self.assertIn(
+            "Ein laufender Worker ist nicht automatisch deinem Auftrag zugeordnet",
+            script,
+        )
 
     def test_production_page_hides_ollama_and_override_fields(self) -> None:
         production_settings = replace(
