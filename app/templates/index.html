@@ -365,13 +365,22 @@
             <dd>{{ result.model }}</dd>
         </div>
 
+        {% if result_hardware %}
+            <div>
+                <dt>Hardware</dt>
+                <dd>{{ result_hardware }}</dd>
+            </div>
+        {% endif %}
+
         <div>
             <dt>Antwortzeit</dt>
             <dd>{{ result.duration_ms }} ms</dd>
         </div>
     </dl>
 
-    <pre class="feedback">{{ result.feedback }}</pre>
+    <div class="feedback">
+        {{ result.feedback | feedback_markdown }}
+    </div>
 </section>
 {% endif %}
 

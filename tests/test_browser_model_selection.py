@@ -344,7 +344,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
             return FeedbackResult(
                 provider="runpod",
                 model=provider.model_name,
-                feedback="RunPod-Testfeedback",
+                feedback=(
+                    "### **RunPod-Testfeedback**\n\n"
+                    "- Erster Hinweis"
+                ),
                 duration_ms=67,
             )
 
@@ -381,8 +384,18 @@ class BrowserModelSelectionTests(unittest.TestCase):
             main.settings.runpod_model,
         )
         self.assertIn("RunPod-Testfeedback", response.text)
+        self.assertIn(
+            "<h3><strong>RunPod-Testfeedback</strong></h3>",
+            response.text,
+        )
+        self.assertIn("<li>Erster Hinweis</li>", response.text)
+        self.assertNotIn("###", response.text)
         self.assertIn(main.settings.runpod_model, response.text)
         self.assertIn("67 ms", response.text)
+        self.assertIn(
+            "RunPod Standard – automatischer 48-GB-GPU-Pool",
+            response.text,
+        )
         self.assertNotIn(standard_endpoint_id, response.text)
 
     def test_fixed_runpod_endpoints_are_mapped_server_side(self) -> None:
@@ -390,6 +403,11 @@ class BrowserModelSelectionTests(unittest.TestCase):
             "rtx4090_24gb": "endpoint-4090-test-only",
             "rtx5090_32gb": "endpoint-5090-test-only",
             "rtx6000ada_48gb": "endpoint-6000ada-test-only",
+        }
+        endpoint_labels = {
+            "rtx4090_24gb": "RTX 4090 – 24 GB",
+            "rtx5090_32gb": "RTX 5090 – 32 GB",
+            "rtx6000ada_48gb": "RTX 6000 Ada – 48 GB",
         }
         runpod_settings = replace(
             main.settings,
@@ -453,6 +471,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 self.assertEqual(
                     captured["endpoint_id"],
                     expected_endpoint_id,
+                )
+                self.assertIn(
+                    endpoint_labels[endpoint_key],
+                    response.text,
                 )
 
                 for endpoint_id in endpoint_mapping.values():

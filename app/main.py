@@ -24,6 +24,7 @@ from app.config import (
     APP_MODE_PRODUCTION,
     settings,
 )
+from app.feedback_markdown import render_feedback_markdown
 from app.llm.base import LLMProvider
 from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
@@ -129,6 +130,9 @@ app.mount(
 templates = Jinja2Templates(
     directory=BASE_DIR / "templates"
 )
+templates.env.filters[
+    "feedback_markdown"
+] = render_feedback_markdown
 
 
 feedback_service = FeedbackService(
@@ -242,6 +246,25 @@ def _selected_runpod_endpoint_key(
     return RUNPOD_DEFAULT_ENDPOINT_KEY
 
 
+def _runpod_endpoint_label(
+    endpoint_key: str,
+) -> str:
+    """Liefert nur das öffentliche Label eines bekannten Endpoints."""
+    for (
+        known_key,
+        label,
+        _settings_attribute,
+        _environment_variable,
+    ) in RUNPOD_ENDPOINT_CATALOG:
+        if endpoint_key == known_key:
+            return label
+
+    raise ValueError(
+        "Die ausgewählte RunPod-Hardwarekonfiguration "
+        "ist nicht erlaubt."
+    )
+
+
 def _template_context(
     *,
     csrf_token: str,
@@ -284,6 +307,19 @@ def _template_context(
     }:
         ollama_model_options.append(
             current_ollama_model
+        )
+
+    selected_runpod_endpoint_key = (
+        _selected_runpod_endpoint_key(
+            selected_runpod_endpoint
+        )
+    )
+
+    result_hardware = None
+
+    if result is not None and result.provider == "runpod":
+        result_hardware = _runpod_endpoint_label(
+            selected_runpod_endpoint_key
         )
 
     return {
@@ -332,11 +368,8 @@ def _template_context(
         ),
         "openai_override_used": openai_override_used,
         "runpod_endpoint_options": _runpod_endpoint_options(),
-        "selected_runpod_endpoint": (
-            _selected_runpod_endpoint_key(
-                selected_runpod_endpoint
-            )
-        ),
+        "selected_runpod_endpoint": selected_runpod_endpoint_key,
+        "result_hardware": result_hardware,
     }
 
 

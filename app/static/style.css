@@ -265,7 +265,7 @@ button:disabled {
 .metadata {
     display: grid;
     grid-template-columns:
-        repeat(3, minmax(0, 1fr));
+        repeat(auto-fit, minmax(190px, 1fr));
     gap: 12px;
     margin: 0 0 20px;
 }
@@ -284,16 +284,66 @@ button:disabled {
 .metadata dd {
     margin: 4px 0 0;
     font-weight: 600;
+    overflow-wrap: anywhere;
 }
 
 .feedback {
     padding: 16px;
-    overflow-x: auto;
-    font: inherit;
-    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    line-height: 1.6;
     background: #f9fafb;
     border: 1px solid var(--border);
     border-radius: 10px;
+}
+
+.feedback > :first-child {
+    margin-top: 0;
+}
+
+.feedback > :last-child {
+    margin-bottom: 0;
+}
+
+.feedback h1,
+.feedback h2,
+.feedback h3,
+.feedback h4,
+.feedback h5,
+.feedback h6 {
+    margin: 1.25rem 0 0.5rem;
+    line-height: 1.3;
+}
+
+.feedback h1,
+.feedback h2 {
+    font-size: 1.25rem;
+}
+
+.feedback h3,
+.feedback h4,
+.feedback h5,
+.feedback h6 {
+    font-size: 1.1rem;
+}
+
+.feedback p {
+    margin: 0 0 0.9rem;
+}
+
+.feedback ul,
+.feedback ol {
+    margin: 0.5rem 0 1rem;
+    padding-left: 1.5rem;
+}
+
+.feedback li + li {
+    margin-top: 0.35rem;
+}
+
+.feedback hr {
+    margin: 1.25rem 0;
+    border: 0;
+    border-top: 1px solid var(--border);
 }
 
 @keyframes loading-slide {
