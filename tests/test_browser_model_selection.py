@@ -71,7 +71,24 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('id="runpod-endpoint"', response.text)
         self.assertIn('id="runpod-readiness"', response.text)
         self.assertIn('id="runpod-worker-status"', response.text)
-        self.assertIn('id="runpod-supply-status"', response.text)
+        self.assertIn('id="runpod-status-time"', response.text)
+        self.assertIn('id="runpod-aggregate-status"', response.text)
+        self.assertIn('data-worker-count="idle"', response.text)
+        self.assertIn('data-worker-count="ready"', response.text)
+        self.assertIn('data-worker-count="running"', response.text)
+        self.assertIn(
+            'data-worker-count="initializing"',
+            response.text,
+        )
+        self.assertIn('data-worker-count="throttled"', response.text)
+        self.assertIn('data-worker-count="unhealthy"', response.text)
+        self.assertNotIn('id="runpod-supply-status"', response.text)
+        self.assertNotIn('id="runpod-warm-window"', response.text)
+        self.assertNotIn('id="runpod-status-note"', response.text)
+        self.assertNotIn('id="runpod-worker-details"', response.text)
+        self.assertNotIn("GPU-Verfügbarkeit", response.text)
+        self.assertNotIn("Warmhaltefenster", response.text)
+        self.assertNotIn("Technische Workerdetails", response.text)
         self.assertIn('id="analysis-response"', response.text)
         self.assertIn('value="runpod"', response.text)
         self.assertIn('value="standard"', response.text)
@@ -400,6 +417,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
             "RunPod Standard – automatischer 48-GB-GPU-Pool",
             response.text,
         )
+        self.assertNotIn("warm-window-note", response.text)
+        self.assertNotIn("data-runpod-result-details", response.text)
+        self.assertNotIn("GPU-Verfügbarkeit", response.text)
+        self.assertNotIn("Technische Details", response.text)
         self.assertNotIn(standard_endpoint_id, response.text)
 
     def test_runpod_status_endpoint_maps_key_without_exposing_id(
@@ -514,7 +535,8 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn("57,1 s", response.text)
         self.assertIn("job-visible-123", response.text)
         self.assertIn("worker-visible-456", response.text)
-        self.assertIn("keine garantierte Reservierung", response.text)
+        self.assertNotIn("keine garantierte Reservierung", response.text)
+        self.assertNotIn("data-runpod-result-details", response.text)
         self.assertNotIn(endpoint_id, response.text)
 
     def test_fixed_runpod_endpoints_are_mapped_server_side(self) -> None:

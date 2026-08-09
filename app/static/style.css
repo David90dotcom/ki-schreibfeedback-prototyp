@@ -277,6 +277,47 @@ button:disabled {
     overflow-wrap: anywhere;
 }
 
+.aggregate-worker-status {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.aggregate-worker-status h5 {
+    margin: 0;
+    font-size: 0.9rem;
+}
+
+.worker-count-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 9px 0 0;
+}
+
+.worker-count-grid div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 9px 11px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+}
+
+.worker-count-grid dt {
+    color: var(--muted);
+    font-size: 0.84rem;
+}
+
+.worker-count-grid dd {
+    margin: 0;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
 .status-badge {
     display: inline-flex;
     align-items: center;
@@ -609,5 +650,9 @@ button:disabled {
     .readiness-values,
     .technical-values {
         grid-template-columns: 1fr;
+    }
+
+    .worker-count-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }

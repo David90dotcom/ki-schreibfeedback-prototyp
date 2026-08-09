@@ -51,6 +51,9 @@
     const runpodStatusTime = form.querySelector(
         "#runpod-status-time"
     );
+    const runpodAggregateStatus = form.querySelector(
+        "#runpod-aggregate-status"
+    );
     const runpodStatusNote = form.querySelector(
         "#runpod-status-note"
     );
@@ -364,6 +367,21 @@
             .join(" · ");
     }
 
+    function renderAggregateStatus(counts) {
+        if (!runpodAggregateStatus) {
+            return;
+        }
+
+        runpodAggregateStatus
+            .querySelectorAll("[data-worker-count]")
+            .forEach((field) => {
+                const value = counts?.[field.dataset.workerCount];
+                field.textContent = Number.isInteger(value)
+                    ? String(value)
+                    : "–";
+            });
+    }
+
     function hasAggregateWorkers(counts) {
         return Object.values(counts || {}).some(
             (value) => Number.isInteger(value) && value > 0
@@ -608,6 +626,8 @@
                 : "–";
         }
 
+        renderAggregateStatus(snapshot.technical?.counts);
+
         if (runpodStatusNote) {
             const messages = [
                 snapshot.supply?.message ||
@@ -656,6 +676,8 @@
         if (runpodStatusTime) {
             runpodStatusTime.textContent = "–";
         }
+
+        renderAggregateStatus(null);
     }
 
     async function loadRunpodStatus({live = false} = {}) {
@@ -691,6 +713,7 @@
                 "Wird geladen …",
                 "neutral"
             );
+            renderAggregateStatus(null);
         }
 
         if (refreshRunpodStatusButton) {
