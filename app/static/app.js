@@ -343,6 +343,33 @@
         return element;
     }
 
+    function formatWorkerCounts(counts) {
+        const safeCounts = counts || {};
+        const values = [
+            ["idle", "idle"],
+            ["ready", "bereit"],
+            ["running", "laufend"],
+            ["initializing", "startend"],
+            ["throttled", "gedrosselt"],
+            ["unhealthy", "fehlerhaft"],
+        ];
+
+        return values
+            .map(([key, label]) => {
+                const value = Number.isInteger(safeCounts[key])
+                    ? safeCounts[key]
+                    : 0;
+                return `${label}: ${value}`;
+            })
+            .join(" · ");
+    }
+
+    function hasAggregateWorkers(counts) {
+        return Object.values(counts || {}).some(
+            (value) => Number.isInteger(value) && value > 0
+        );
+    }
+
     function renderWorkerDetails(technical, configuration) {
         if (!runpodWorkerDetails) {
             return;
@@ -384,6 +411,18 @@
                 `Endpoint: ${pools} · ${idleLabel} · ${executionLabel} · ${workerRange} · ${flashboot}`,
                 "technical-summary"
             );
+
+            if (
+                configuration.source === "graphql" &&
+                configuration.message
+            ) {
+                addTextElement(
+                    runpodWorkerDetails,
+                    "p",
+                    configuration.message,
+                    "technical-summary"
+                );
+            }
         } else if (configuration?.message) {
             addTextElement(
                 runpodWorkerDetails,
@@ -401,6 +440,26 @@
                     "Technische Workerdaten sind nicht abrufbar.",
                 "technical-unavailable"
             );
+
+            if (technical?.aggregateAvailable) {
+                addTextElement(
+                    runpodWorkerDetails,
+                    "p",
+                    `Aggregierter Status: ${formatWorkerCounts(
+                        technical.counts
+                    )}`,
+                    "technical-summary"
+                );
+            }
+
+            if (technical?.diagnosticMessage) {
+                addTextElement(
+                    runpodWorkerDetails,
+                    "p",
+                    `Technische Diagnose: ${technical.diagnosticMessage}`,
+                    "technical-unavailable"
+                );
+            }
             return;
         }
 
@@ -417,11 +476,33 @@
             );
         }
 
+        if (technical.source === "graphql" && technical.message) {
+            addTextElement(
+                runpodWorkerDetails,
+                "p",
+                technical.message,
+                "technical-summary"
+            );
+        }
+
+        if (technical.aggregateAvailable) {
+            addTextElement(
+                runpodWorkerDetails,
+                "p",
+                `Aggregierter Status: ${formatWorkerCounts(
+                    technical.counts
+                )}`,
+                "technical-summary"
+            );
+        }
+
         if (!workers.length) {
             addTextElement(
                 runpodWorkerDetails,
                 "p",
-                "Aktuell ist kein aktiver Worker gemeldet.",
+                hasAggregateWorkers(technical.counts)
+                    ? "Aktive Worker sind nur aggregiert gemeldet; eine Einzelzuordnung ist nicht verfügbar."
+                    : "Aktuell ist kein aktiver Worker gemeldet.",
                 "technical-unavailable"
             );
             return;
@@ -907,7 +988,9 @@
             const unavailableMessage =
                 technical?.message || "Nicht abrufbar";
 
-            actualGpuField.textContent = unavailableMessage;
+            actualGpuField.textContent = technical?.aggregateAvailable
+                ? "Nicht einzeln abrufbar"
+                : unavailableMessage;
             releaseField.textContent = "Nicht abrufbar";
             dataCenterField.textContent = "Nicht abrufbar";
             activeWorkersField.replaceChildren();
@@ -917,6 +1000,17 @@
                 unavailableMessage,
                 "technical-unavailable"
             );
+
+            if (technical?.aggregateAvailable) {
+                addTextElement(
+                    activeWorkersField,
+                    "p",
+                    `Aggregierter Status: ${formatWorkerCounts(
+                        technical.counts
+                    )}`,
+                    "technical-summary"
+                );
+            }
             return;
         }
 
@@ -956,7 +1050,9 @@
             addTextElement(
                 activeWorkersField,
                 "p",
-                "Nach Abschluss ist kein aktiver Worker mehr gemeldet.",
+                hasAggregateWorkers(technical.counts)
+                    ? "Aktive Worker sind nur aggregiert gemeldet; eine Einzelzuordnung ist nicht verfügbar."
+                    : "Nach Abschluss ist kein aktiver Worker mehr gemeldet.",
                 "technical-unavailable"
             );
             return;
