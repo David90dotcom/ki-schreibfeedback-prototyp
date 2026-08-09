@@ -86,6 +86,14 @@ class BrowserModelSelectionTests(unittest.TestCase):
             response.text,
         )
         self.assertIn("Hängende Anfragen verwalten", response.text)
+        self.assertRegex(
+            response.text,
+            r'/static/app\.js\?v=[0-9a-f]{12}',
+        )
+        self.assertRegex(
+            response.text,
+            r'/static/style\.css\?v=[0-9a-f]{12}',
+        )
         self.assertIn('data-worker-count="idle"', response.text)
         self.assertIn('data-worker-count="ready"', response.text)
         self.assertIn('data-worker-count="running"', response.text)
@@ -141,6 +149,8 @@ class BrowserModelSelectionTests(unittest.TestCase):
             script,
         )
         self.assertIn('setRunpodLoadingTone("success")', script)
+        self.assertIn("RUNPOD_JOBS_REQUEST_TIMEOUT_MS", script)
+        self.assertIn("controller.abort()", script)
 
     def test_production_page_hides_ollama_and_override_fields(self) -> None:
         production_settings = replace(

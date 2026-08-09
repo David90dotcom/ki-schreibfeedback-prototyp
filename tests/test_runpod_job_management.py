@@ -146,6 +146,42 @@ class RunPodJobManagementTests(unittest.TestCase):
         self.assertEqual(jobs[0].tracking_id, self.TRACKING_ID)
         self.assertEqual(jobs[0].job_id, self.JOB_ID)
 
+    def test_status_timeout_still_lists_locally_stored_job(self) -> None:
+        self._record_active_job()
+
+        async def delayed_status(_job_id: str) -> dict[str, str]:
+            await asyncio.sleep(0.1)
+            return {
+                "id": self.JOB_ID,
+                "status": "IN_PROGRESS",
+            }
+
+        with (
+            patch.object(main, "settings", self.runpod_settings),
+            patch.object(main, "runpod_job_store", self.store),
+            patch.object(
+                main,
+                "RUNPOD_JOB_STATUS_REFRESH_TIMEOUT_SECONDS",
+                0.01,
+            ),
+            patch.object(
+                main.RunPodProvider,
+                "get_job_status",
+                new=AsyncMock(side_effect=delayed_status),
+            ),
+        ):
+            response = self.client.get(
+                "/api/runpod/jobs",
+                params={"endpoint_key": self.ENDPOINT_KEY},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["jobs"]), 1)
+        self.assertEqual(payload["jobs"][0]["jobId"], self.JOB_ID)
+        self.assertEqual(payload["jobs"][0]["status"], "IN_QUEUE")
+        self.assertFalse(payload["jobs"][0]["statusFresh"])
+
     def test_completed_job_disappears_from_active_list(self) -> None:
         self._record_active_job(status="IN_PROGRESS")
 

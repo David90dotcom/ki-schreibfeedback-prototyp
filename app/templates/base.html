@@ -11,11 +11,11 @@
 
     <link
         rel="stylesheet"
-        href="{{ url_for('static', path='/style.css') }}"
+        href="{{ url_for('static', path='/style.css') }}?v={{ static_asset_version }}"
     >
 
     <script
-        src="{{ url_for('static', path='/app.js') }}"
+        src="{{ url_for('static', path='/app.js') }}?v={{ static_asset_version }}"
         defer
     ></script>
 </head>
