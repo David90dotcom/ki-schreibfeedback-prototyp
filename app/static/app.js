@@ -793,11 +793,23 @@
 
     function updateLiveRunpodMessage(snapshot) {
         const state = snapshot?.worker?.state;
+        const jobs = snapshot?.worker?.jobs || {};
+        const queuedJobs = Number.isInteger(jobs.inQueue)
+            ? jobs.inQueue
+            : 0;
+        const activeJobs = Number.isInteger(jobs.inProgress)
+            ? jobs.inProgress
+            : 0;
 
-        if (state === "processing") {
+        if (queuedJobs > 0) {
             setLiveMessage(
-                "Worker hat den Auftrag übernommen – KI-Feedback wird berechnet",
-                "Die Warteschlange ist beendet. Das Modell verarbeitet jetzt den Schülertext."
+                "RunPod meldet eine wartende Anfrage",
+                "Der Status gilt für den gesamten Endpoint. Dein Auftrag bleibt aktiv und das Ergebnis erscheint nach Abschluss automatisch."
+            );
+        } else if (activeJobs > 0 || state === "processing") {
+            setLiveMessage(
+                "Der Endpoint verarbeitet mindestens eine Anfrage",
+                "Der Status gilt für den gesamten Endpoint und belegt noch keine sichere Zuordnung zu deinem Auftrag."
             );
         } else if (state === "initializing") {
             setLiveMessage(
@@ -806,8 +818,8 @@
             );
         } else if (state === "queued") {
             setLiveMessage(
-                "Auftrag wartet auf einen Worker / Cold Start",
-                "RunPod sucht oder startet geeignete GPU-Kapazität. Das Browserfenster bitte geöffnet lassen."
+                "RunPod meldet eine wartende Anfrage",
+                "Der Status gilt für den gesamten Endpoint. Das Browserfenster bitte geöffnet lassen."
             );
         } else if (state === "unhealthy") {
             setLiveMessage(
@@ -821,8 +833,13 @@
             );
         } else if (state === "warm") {
             setLiveMessage(
-                "Aktiver Worker wird dem Auftrag zugewiesen",
-                "Ein Warmstart wird erwartet. Der Endpointstatus kann dem Job kurz hinterherlaufen."
+                "GPU-Kapazität ist verfügbar",
+                "Der Auftrag wurde übermittelt; RunPod hat noch keine laufende Jobverarbeitung gemeldet."
+            );
+        } else if (state === "running") {
+            setLiveMessage(
+                "Worker läuft – noch keine Jobverarbeitung gemeldet",
+                "Ein laufender Worker ist nicht automatisch deinem Auftrag zugeordnet. Der Auftrag bleibt aktiv."
             );
         } else if (state === "cold") {
             setLiveMessage(

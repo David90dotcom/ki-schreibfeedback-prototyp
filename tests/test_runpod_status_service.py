@@ -15,6 +15,100 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
     ENDPOINT_ID = "status-test-endpoint"
     GPU_TYPE_ID = "NVIDIA GeForce RTX 4090"
 
+    def test_running_worker_does_not_mean_queued_job_is_processing(
+        self,
+    ) -> None:
+        service = RunPodStatusService(api_key=self.API_KEY)
+
+        worker = service._classify_worker_status(
+            {
+                "available": True,
+                "jobs": {
+                    "completed": 0,
+                    "failed": 0,
+                    "inProgress": 0,
+                    "inQueue": 1,
+                    "retried": 0,
+                },
+                "workers": {
+                    "idle": 2,
+                    "ready": 2,
+                    "running": 1,
+                    "initializing": 0,
+                    "throttled": 0,
+                    "unhealthy": 0,
+                },
+            }
+        )
+
+        self.assertEqual(worker["state"], "queued")
+        self.assertEqual(
+            worker["label"],
+            "Anfrage wartet auf verfügbaren Worker",
+        )
+        self.assertNotIn("verarbeitet", worker["label"])
+
+    def test_running_worker_without_active_job_is_not_processing(
+        self,
+    ) -> None:
+        service = RunPodStatusService(api_key=self.API_KEY)
+
+        worker = service._classify_worker_status(
+            {
+                "available": True,
+                "jobs": {
+                    "completed": 0,
+                    "failed": 0,
+                    "inProgress": 0,
+                    "inQueue": 0,
+                    "retried": 0,
+                },
+                "workers": {
+                    "idle": 0,
+                    "ready": 0,
+                    "running": 1,
+                    "initializing": 0,
+                    "throttled": 0,
+                    "unhealthy": 0,
+                },
+            }
+        )
+
+        self.assertEqual(worker["state"], "running")
+        self.assertEqual(
+            worker["label"],
+            "Worker läuft – kein Job in Verarbeitung",
+        )
+
+    def test_queue_has_priority_over_other_active_endpoint_jobs(
+        self,
+    ) -> None:
+        service = RunPodStatusService(api_key=self.API_KEY)
+
+        worker = service._classify_worker_status(
+            {
+                "available": True,
+                "jobs": {
+                    "completed": 0,
+                    "failed": 0,
+                    "inProgress": 1,
+                    "inQueue": 1,
+                    "retried": 0,
+                },
+                "workers": {
+                    "idle": 0,
+                    "ready": 0,
+                    "running": 1,
+                    "initializing": 0,
+                    "throttled": 0,
+                    "unhealthy": 0,
+                },
+            }
+        )
+
+        self.assertEqual(worker["state"], "queued")
+        self.assertNotIn("verarbeitet", worker["label"])
+
     async def test_snapshot_combines_health_supply_and_worker_details(
         self,
     ) -> None:
@@ -221,7 +315,7 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             snapshot["worker"]["state"],
-            "initializing",
+            "queued",
         )
         self.assertFalse(snapshot["supply"]["available"])
         self.assertTrue(snapshot["supply"]["permissionMissing"])
