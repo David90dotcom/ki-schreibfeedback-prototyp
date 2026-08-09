@@ -87,6 +87,25 @@ def _positive_int_from_env(
     return value
 
 
+def _bounded_int_from_env(
+    name: str,
+    fallback: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Liest eine Ganzzahl innerhalb eines dokumentierten Bereichs."""
+
+    value = _positive_int_from_env(name, fallback)
+
+    if not minimum <= value <= maximum:
+        raise ValueError(
+            f"{name} muss zwischen {minimum} und {maximum} liegen."
+        )
+
+    return value
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv(
@@ -182,11 +201,18 @@ class Settings:
     runpod_model: str = _configured_runpod_model()
 
     runpod_job_timeout_seconds: float = float(
-        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "600")
+        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "1200")
     )
 
     runpod_poll_interval_seconds: float = float(
         os.getenv("RUNPOD_POLL_INTERVAL_SECONDS", "1")
+    )
+
+    runpod_idle_timeout_seconds: int = _bounded_int_from_env(
+        "RUNPOD_IDLE_TIMEOUT_SECONDS",
+        3600,
+        minimum=1,
+        maximum=3600,
     )
 
     max_input_chars: int = int(

@@ -109,13 +109,18 @@ class WebAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.headers["location"], "/login")
 
     def test_api_rejects_unauthenticated_request(self) -> None:
-        response = self.client.get("/api/ollama/models")
+        for path in (
+            "/api/ollama/models",
+            "/api/runpod/status",
+        ):
+            with self.subTest(path=path):
+                response = self.client.get(path)
 
-        self.assertEqual(response.status_code, 401)
-        self.assertEqual(
-            response.json()["detail"]["message"],
-            "Anmeldung erforderlich.",
-        )
+                self.assertEqual(response.status_code, 401)
+                self.assertEqual(
+                    response.json()["detail"]["message"],
+                    "Anmeldung erforderlich.",
+                )
 
     def test_wrong_credentials_are_rejected(self) -> None:
         csrf_token = _csrf_token_from(

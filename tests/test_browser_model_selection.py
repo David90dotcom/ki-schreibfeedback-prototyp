@@ -69,6 +69,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('id="ollama-model"', response.text)
         self.assertIn('id="openai-model"', response.text)
         self.assertIn('id="runpod-endpoint"', response.text)
+        self.assertIn('id="runpod-readiness"', response.text)
+        self.assertIn('id="runpod-worker-status"', response.text)
+        self.assertIn('id="runpod-supply-status"', response.text)
+        self.assertIn('id="analysis-response"', response.text)
         self.assertIn('value="runpod"', response.text)
         self.assertIn('value="standard"', response.text)
         self.assertIn('value="rtx4090_24gb"', response.text)
@@ -397,6 +401,121 @@ class BrowserModelSelectionTests(unittest.TestCase):
             response.text,
         )
         self.assertNotIn(standard_endpoint_id, response.text)
+
+    def test_runpod_status_endpoint_maps_key_without_exposing_id(
+        self,
+    ) -> None:
+        endpoint_id = "status-endpoint-secret-test-only"
+        runpod_settings = replace(
+            main.settings,
+            runpod_endpoint_rtx4090_id=endpoint_id,
+        )
+        snapshot = {
+            "endpoint": {
+                "key": "rtx4090_24gb",
+                "label": "RTX 4090 – 24 GB",
+            },
+            "checkedAt": "2026-08-09T12:00:00+00:00",
+            "worker": {
+                "state": "warm",
+                "label": "Worker aktiv",
+                "tone": "success",
+            },
+            "supply": {
+                "level": "HIGH",
+                "label": "Hoch (HIGH)",
+                "tone": "success",
+            },
+            "warmWindow": {
+                "idleTimeoutSeconds": 3600,
+            },
+            "technical": {
+                "available": False,
+                "workers": [],
+            },
+        }
+
+        with (
+            patch.object(main, "settings", runpod_settings),
+            patch.object(
+                main.runpod_status_service,
+                "snapshot",
+                new=AsyncMock(return_value=snapshot),
+            ) as snapshot_mock,
+        ):
+            response = self.client.get(
+                "/api/runpod/status",
+                params={"endpoint_key": "rtx4090_24gb"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["cache-control"],
+            "no-store",
+        )
+        self.assertEqual(response.json(), snapshot)
+        self.assertNotIn(endpoint_id, response.text)
+        snapshot_mock.assert_awaited_once_with(
+            endpoint_key="rtx4090_24gb",
+            endpoint_label="RTX 4090 – 24 GB",
+            endpoint_id=endpoint_id,
+            gpu_type_ids=("NVIDIA GeForce RTX 4090",),
+        )
+
+    def test_async_runpod_response_contains_transparent_metrics(
+        self,
+    ) -> None:
+        endpoint_id = "async-endpoint-secret-test-only"
+        runpod_settings = replace(
+            main.settings,
+            runpod_endpoint_rtx4090_id=endpoint_id,
+        )
+
+        async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
+            return FeedbackResult(
+                provider="runpod",
+                model=runpod_settings.runpod_model,
+                feedback="### Transparentes Testfeedback",
+                duration_ms=57704,
+                queue_duration_ms=600,
+                execution_duration_ms=57104,
+                provider_request_id="job-visible-123",
+                worker_id="worker-visible-456",
+            )
+
+        with (
+            patch.object(main, "settings", runpod_settings),
+            patch.object(
+                main.feedback_service,
+                "analyze_text",
+                new=AsyncMock(side_effect=fake_analyze_text),
+            ),
+        ):
+            response = self.client.post(
+                "/analyze",
+                headers={"X-Requested-With": "XMLHttpRequest"},
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "runpod",
+                    "runpod_endpoint": "rtx4090_24gb",
+                    "csrf_token": self.csrf_token,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn("<!doctype html>", response.text)
+        self.assertNotIn('id="analysis-form"', response.text)
+        self.assertIn("Transparentes Testfeedback", response.text)
+        self.assertIn("Gesamtzeit", response.text)
+        self.assertIn("57,7 s", response.text)
+        self.assertIn("Warte-/Bereitstellungszeit", response.text)
+        self.assertIn("600 ms", response.text)
+        self.assertIn("KI-Verarbeitungszeit", response.text)
+        self.assertIn("57,1 s", response.text)
+        self.assertIn("job-visible-123", response.text)
+        self.assertIn("worker-visible-456", response.text)
+        self.assertIn("keine garantierte Reservierung", response.text)
+        self.assertNotIn(endpoint_id, response.text)
 
     def test_fixed_runpod_endpoints_are_mapped_server_side(self) -> None:
         endpoint_mapping = {

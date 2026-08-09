@@ -10,6 +10,10 @@ class FeedbackResult:
     model: str
     feedback: str
     duration_ms: int
+    queue_duration_ms: float | None = None
+    execution_duration_ms: float | None = None
+    provider_request_id: str | None = None
+    worker_id: str | None = None
 
 
 class FeedbackService:
@@ -68,6 +72,10 @@ class FeedbackService:
             model=response.model,
             feedback=response.text,
             duration_ms=duration_ms,
+            queue_duration_ms=response.queue_duration_ms,
+            execution_duration_ms=response.execution_duration_ms,
+            provider_request_id=response.provider_request_id,
+            worker_id=response.worker_id,
         )
 
     def _build_feedback_prompt(

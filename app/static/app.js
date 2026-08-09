@@ -3,6 +3,7 @@
 
     const CUSTOM_MODEL_VALUE = "__custom__";
     const SLOW_RESPONSE_DELAY_MS = 8000;
+    const RUNPOD_STATUS_POLL_INTERVAL_MS = 3000;
 
     const form = document.querySelector("#analysis-form");
 
@@ -10,50 +11,84 @@
         return;
     }
 
-    const providerSelect =
-        form.querySelector("#provider");
-
-    const providerPanels =
-        form.querySelectorAll("[data-provider-panel]");
-
-    const modelSelects =
-        form.querySelectorAll("[data-model-select]");
-
-    const ollamaBaseUrlInput =
-        form.querySelector("#ollama-base-url");
-
-    const ollamaModelSelect =
-        form.querySelector("#ollama-model");
-
-    const loadOllamaModelsButton =
-        form.querySelector("#load-ollama-models");
-
-    const ollamaStatus =
-        form.querySelector("#ollama-model-status");
-
-    const submitButton =
-        form.querySelector("#submit-button");
-
-    const loadingIndicator =
-        form.querySelector("#analysis-loading");
-
-    const loadingMessage =
-        form.querySelector("#loading-message");
-
-    const loadingHint =
-        form.querySelector("#loading-hint");
+    const providerSelect = form.querySelector("#provider");
+    const providerPanels = form.querySelectorAll(
+        "[data-provider-panel]"
+    );
+    const modelSelects = form.querySelectorAll(
+        "[data-model-select]"
+    );
+    const ollamaBaseUrlInput = form.querySelector(
+        "#ollama-base-url"
+    );
+    const ollamaModelSelect = form.querySelector(
+        "#ollama-model"
+    );
+    const loadOllamaModelsButton = form.querySelector(
+        "#load-ollama-models"
+    );
+    const ollamaStatus = form.querySelector(
+        "#ollama-model-status"
+    );
+    const runpodEndpointSelect = form.querySelector(
+        "#runpod-endpoint"
+    );
+    const runpodReadiness = form.querySelector(
+        "#runpod-readiness"
+    );
+    const refreshRunpodStatusButton = form.querySelector(
+        "#refresh-runpod-status"
+    );
+    const runpodWorkerStatus = form.querySelector(
+        "#runpod-worker-status"
+    );
+    const runpodSupplyStatus = form.querySelector(
+        "#runpod-supply-status"
+    );
+    const runpodWarmWindow = form.querySelector(
+        "#runpod-warm-window"
+    );
+    const runpodStatusTime = form.querySelector(
+        "#runpod-status-time"
+    );
+    const runpodStatusNote = form.querySelector(
+        "#runpod-status-note"
+    );
+    const runpodWorkerDetails = form.querySelector(
+        "#runpod-worker-details"
+    );
+    const submitButton = form.querySelector(
+        "#submit-button"
+    );
+    const loadingIndicator = form.querySelector(
+        "#analysis-loading"
+    );
+    const loadingMessage = form.querySelector(
+        "#loading-message"
+    );
+    const loadingHint = form.querySelector(
+        "#loading-hint"
+    );
+    const analysisResponse = document.querySelector(
+        "#analysis-response"
+    );
 
     let slowResponseTimer = null;
+    let elapsedTimer = null;
+    let runpodPollingTimer = null;
+    let loadingStartedAt = null;
+    let liveMessage = "";
+    let liveHint = "";
+    let latestRunpodSnapshot = null;
+    const runpodStatusRequestsInFlight = new Set();
 
     function updateCustomModelField(modelSelect) {
         const panel = modelSelect.closest(
             "[data-provider-panel]"
         );
-
         const customGroup = panel?.querySelector(
             "[data-custom-model-group]"
         );
-
         const customInput = panel?.querySelector(
             "[data-custom-model-input]"
         );
@@ -64,26 +99,21 @@
 
         const customSelected =
             modelSelect.value === CUSTOM_MODEL_VALUE;
-
         const panelActive = !panel.hidden;
 
         customGroup.hidden = !customSelected;
-
         customInput.disabled =
             !customSelected || !panelActive;
-
         customInput.required =
             customSelected && panelActive;
     }
 
     function updateProviderPanels() {
-        const selectedProvider =
-            providerSelect.value;
+        const selectedProvider = providerSelect.value;
 
         providerPanels.forEach((panel) => {
             const panelActive =
-                panel.dataset.providerPanel ===
-                selectedProvider;
+                panel.dataset.providerPanel === selectedProvider;
 
             panel.hidden = !panelActive;
 
@@ -106,6 +136,10 @@
             ollamaBaseUrlInput.required =
                 selectedProvider === "ollama";
         }
+
+        if (selectedProvider === "runpod") {
+            void loadRunpodStatus();
+        }
     }
 
     function setOllamaStatus(message, status) {
@@ -117,19 +151,14 @@
         ollamaStatus.className = "status-message";
 
         if (status) {
-            ollamaStatus.classList.add(
-                `status-${status}`
-            );
+            ollamaStatus.classList.add(`status-${status}`);
         }
     }
 
     function addModelOption(modelName, label) {
-        const option =
-            document.createElement("option");
-
+        const option = document.createElement("option");
         option.value = modelName;
         option.textContent = label;
-
         ollamaModelSelect.append(option);
     }
 
@@ -137,12 +166,8 @@
         modelNames,
         defaultModel
     ) {
-        const currentSelection =
-            ollamaModelSelect.value;
-
-        const discoveredModels = [
-            ...new Set(modelNames),
-        ]
+        const currentSelection = ollamaModelSelect.value;
+        const discoveredModels = [...new Set(modelNames)]
             .filter(
                 (modelName) =>
                     typeof modelName === "string" &&
@@ -156,22 +181,15 @@
 
         const defaultDiscovered =
             discoveredModels.includes(defaultModel);
-
         const defaultLabel = defaultDiscovered
             ? `${defaultModel} (Standard aus .env)`
             : `${defaultModel} (Standard aus .env – nicht von Ollama gemeldet)`;
 
-        addModelOption(
-            defaultModel,
-            defaultLabel
-        );
+        addModelOption(defaultModel, defaultLabel);
 
         discoveredModels.forEach((modelName) => {
             if (modelName !== defaultModel) {
-                addModelOption(
-                    modelName,
-                    modelName
-                );
+                addModelOption(modelName, modelName);
             }
         });
 
@@ -180,62 +198,43 @@
             "Andere Modell-ID …"
         );
 
-        if (
-            currentSelection === CUSTOM_MODEL_VALUE
-        ) {
-            ollamaModelSelect.value =
-                CUSTOM_MODEL_VALUE;
+        if (currentSelection === CUSTOM_MODEL_VALUE) {
+            ollamaModelSelect.value = CUSTOM_MODEL_VALUE;
         } else if (
             currentSelection === defaultModel ||
-            discoveredModels.includes(
-                currentSelection
-            )
+            discoveredModels.includes(currentSelection)
         ) {
-            ollamaModelSelect.value =
-                currentSelection;
+            ollamaModelSelect.value = currentSelection;
         } else {
-            ollamaModelSelect.value =
-                defaultModel;
+            ollamaModelSelect.value = defaultModel;
         }
 
-        updateCustomModelField(
-            ollamaModelSelect
-        );
+        updateCustomModelField(ollamaModelSelect);
     }
 
     async function loadOllamaModels() {
-        const baseUrl =
-            ollamaBaseUrlInput?.value.trim();
+        const baseUrl = ollamaBaseUrlInput?.value.trim();
 
         setOllamaStatus(
             "Verbindung zu Ollama wird geprüft …",
             null
         );
-
         loadOllamaModelsButton.disabled = true;
 
         try {
-            const parameters =
-                new URLSearchParams();
+            const parameters = new URLSearchParams();
 
             if (baseUrl) {
-                parameters.set(
-                    "base_url",
-                    baseUrl
-                );
+                parameters.set("base_url", baseUrl);
             }
 
             const response = await fetch(
                 `/api/ollama/models?${parameters}`,
                 {
-                    headers: {
-                        Accept: "application/json",
-                    },
+                    headers: {Accept: "application/json"},
                 }
             );
-
-            const payload =
-                await response.json();
+            const payload = await response.json();
 
             if (!response.ok) {
                 const message =
@@ -253,8 +252,7 @@
             }
 
             if (ollamaBaseUrlInput) {
-                ollamaBaseUrlInput.value =
-                    payload.base_url;
+                ollamaBaseUrlInput.value = payload.base_url;
             }
 
             replaceOllamaModelOptions(
@@ -262,16 +260,13 @@
                 payload.default_model
             );
 
-            const message =
-                payload.models.length
-                    ? payload.message
-                    : "Ollama ist erreichbar, meldet aber keine installierten Modelle.";
+            const message = payload.models.length
+                ? payload.message
+                : "Ollama ist erreichbar, meldet aber keine installierten Modelle.";
 
             setOllamaStatus(
                 message,
-                payload.models.length
-                    ? "success"
-                    : "warning"
+                payload.models.length ? "success" : "warning"
             );
         } catch (error) {
             const message =
@@ -279,83 +274,791 @@
                     ? error.message
                     : "Die Ollama-Modellliste konnte nicht geladen werden.";
 
-            setOllamaStatus(
-                message,
-                "error"
-            );
+            setOllamaStatus(message, "error");
         } finally {
             loadOllamaModelsButton.disabled =
                 providerSelect.value !== "ollama";
         }
     }
 
-    function startLoading(event) {
-        if (form.dataset.submitting === "true") {
-            event.preventDefault();
+    function setStatusBadge(element, label, tone) {
+        if (!element) {
             return;
         }
 
+        element.textContent = label;
+        element.className =
+            `status-badge status-${tone || "neutral"}`;
+    }
+
+    function formatLocalTime(value, includeSeconds = false) {
+        const timestamp = new Date(value);
+
+        if (Number.isNaN(timestamp.getTime())) {
+            return "–";
+        }
+
+        return timestamp.toLocaleTimeString("de-DE", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: includeSeconds ? "2-digit" : undefined,
+        });
+    }
+
+    function formatElapsed(milliseconds) {
+        const totalSeconds = Math.max(
+            0,
+            Math.floor(milliseconds / 1000)
+        );
+        const minutes = Math.floor(totalSeconds / 60);
+        const seconds = totalSeconds % 60;
+
+        return `${String(minutes).padStart(2, "0")}:${String(
+            seconds
+        ).padStart(2, "0")}`;
+    }
+
+    function formatUptime(seconds) {
+        if (!Number.isInteger(seconds) || seconds < 0) {
+            return "unbekannt";
+        }
+
+        if (seconds < 60) {
+            return `${seconds} s`;
+        }
+
+        const minutes = Math.floor(seconds / 60);
+        return `${minutes} min`;
+    }
+
+    function addTextElement(parent, tagName, text, className) {
+        const element = document.createElement(tagName);
+        element.textContent = text;
+
+        if (className) {
+            element.className = className;
+        }
+
+        parent.append(element);
+        return element;
+    }
+
+    function renderWorkerDetails(technical, configuration) {
+        if (!runpodWorkerDetails) {
+            return;
+        }
+
+        runpodWorkerDetails.replaceChildren();
+
+        if (configuration?.available) {
+            const idleLabel = Number.isInteger(
+                configuration.idleTimeoutSeconds
+            )
+                ? `${Math.round(
+                    configuration.idleTimeoutSeconds / 60
+                )} min Idle-Timeout`
+                : "Idle-Timeout unbekannt";
+            const executionLabel = Number.isInteger(
+                configuration.executionTimeoutMs
+            )
+                ? `${Math.round(
+                    configuration.executionTimeoutMs / 1000
+                )} s Ausführungslimit`
+                : "Ausführungslimit unbekannt";
+            const workerRange =
+                configuration.minimumWorkers !== null &&
+                configuration.maximumWorkers !== null
+                    ? `${configuration.minimumWorkers}–${configuration.maximumWorkers} Worker`
+                    : "Workerlimit unbekannt";
+            const flashboot = configuration.flashboot
+                ? `FlashBoot ${configuration.flashboot}`
+                : "FlashBoot unbekannt";
+            const pools = Array.isArray(configuration.gpuPools) &&
+                configuration.gpuPools.length
+                ? `GPU-Pool ${configuration.gpuPools.join(", ")}`
+                : "GPU-Pool unbekannt";
+
+            addTextElement(
+                runpodWorkerDetails,
+                "p",
+                `Endpoint: ${pools} · ${idleLabel} · ${executionLabel} · ${workerRange} · ${flashboot}`,
+                "technical-summary"
+            );
+        } else if (configuration?.message) {
+            addTextElement(
+                runpodWorkerDetails,
+                "p",
+                configuration.message,
+                "technical-unavailable"
+            );
+        }
+
+        if (!technical?.available) {
+            addTextElement(
+                runpodWorkerDetails,
+                "p",
+                technical?.message ||
+                    "Technische Workerdaten sind nicht abrufbar.",
+                "technical-unavailable"
+            );
+            return;
+        }
+
+        const workers = Array.isArray(technical.workers)
+            ? technical.workers
+            : [];
+
+        if (technical.endpointVersion !== null) {
+            addTextElement(
+                runpodWorkerDetails,
+                "p",
+                `Aktueller Endpoint-Release: Version ${technical.endpointVersion}`,
+                "technical-summary"
+            );
+        }
+
+        if (!workers.length) {
+            addTextElement(
+                runpodWorkerDetails,
+                "p",
+                "Aktuell ist kein aktiver Worker gemeldet.",
+                "technical-unavailable"
+            );
+            return;
+        }
+
+        const list = document.createElement("ul");
+        list.className = "worker-list";
+
+        workers.forEach((worker) => {
+            const item = document.createElement("li");
+            const gpu = worker.gpuTypeId || "GPU nicht gemeldet";
+            const status = worker.status || "Status unbekannt";
+            const workerId = worker.id || "ID unbekannt";
+            const version =
+                worker.version === null
+                    ? "Release unbekannt"
+                    : `Release ${worker.version}`;
+            const dataCenter =
+                worker.dataCenterId || "Rechenzentrum unbekannt";
+
+            addTextElement(item, "strong", gpu);
+            addTextElement(
+                item,
+                "span",
+                `${status} · Worker ${workerId}`
+            );
+            addTextElement(
+                item,
+                "span",
+                `${version} · ${dataCenter} · Laufzeit ${formatUptime(
+                    worker.uptimeSeconds
+                )}`
+            );
+            list.append(item);
+        });
+
+        runpodWorkerDetails.append(list);
+    }
+
+    function renderWarmWindow(snapshot) {
+        if (!runpodWarmWindow) {
+            return;
+        }
+
+        const warmWindow = snapshot?.warmWindow;
+        const minutes =
+            warmWindow?.idleTimeoutMinutes ||
+            Number(runpodReadiness?.dataset.idleTimeoutMinutes) ||
+            60;
+        const workerState = snapshot?.worker?.state;
+
+        if (
+            warmWindow?.estimateActive &&
+            !["warm", "processing"].includes(workerState)
+        ) {
+            runpodWarmWindow.textContent =
+                "Warmhalteprognose durch aktuellen Workerstatus nicht bestätigt";
+            return;
+        }
+
+        if (
+            warmWindow?.estimateActive &&
+            warmWindow?.estimatedUntil
+        ) {
+            runpodWarmWindow.textContent =
+                `Voraussichtlich bis etwa ${formatLocalTime(
+                    warmWindow.estimatedUntil
+                )} Uhr warm`;
+            return;
+        }
+
+        if (snapshot?.worker?.state === "warm") {
+            runpodWarmWindow.textContent =
+                `Aktiver Worker; nach erfolgreicher Anfrage bis zu ${minutes} Minuten warm`;
+            return;
+        }
+
+        runpodWarmWindow.textContent =
+            `Bis zu ${minutes} Minuten nach der letzten erfolgreichen Anfrage`;
+    }
+
+    function renderRunpodSnapshot(snapshot, live = false) {
+        latestRunpodSnapshot = snapshot;
+
+        setStatusBadge(
+            runpodWorkerStatus,
+            snapshot.worker?.label || "Workerstatus nicht abrufbar",
+            snapshot.worker?.tone || "neutral"
+        );
+        setStatusBadge(
+            runpodSupplyStatus,
+            snapshot.supply?.label || "Nicht abrufbar",
+            snapshot.supply?.tone || "neutral"
+        );
+
+        if (runpodStatusTime) {
+            runpodStatusTime.dateTime = snapshot.checkedAt || "";
+            runpodStatusTime.textContent = snapshot.checkedAt
+                ? `${formatLocalTime(snapshot.checkedAt, true)} Uhr`
+                : "–";
+        }
+
+        if (runpodStatusNote) {
+            const messages = [
+                snapshot.supply?.message ||
+                    "Momentaufnahme der allgemeinen RunPod-Kapazität; keine Garantie für einen erfolgreichen Workerstart.",
+            ];
+
+            if (
+                snapshot.warmWindow?.configurationVerified === false
+            ) {
+                messages.push(
+                    "Das Warmhaltefenster stammt aus der Web-Konfiguration, weil die RunPod-Einstellung nicht lesbar ist."
+                );
+            }
+
+            runpodStatusNote.textContent = messages.join(" ");
+        }
+
+        renderWarmWindow(snapshot);
+        renderWorkerDetails(
+            snapshot.technical,
+            snapshot.configuration
+        );
+        populateResultTechnical(snapshot);
+
+        if (live) {
+            updateLiveRunpodMessage(snapshot);
+        }
+    }
+
+    function renderRunpodUnavailable(message) {
+        setStatusBadge(
+            runpodWorkerStatus,
+            "Workerstatus nicht abrufbar",
+            "neutral"
+        );
+        setStatusBadge(
+            runpodSupplyStatus,
+            "Nicht abrufbar",
+            "neutral"
+        );
+
+        if (runpodStatusNote) {
+            runpodStatusNote.textContent = message;
+        }
+
+        if (runpodStatusTime) {
+            runpodStatusTime.textContent = "–";
+        }
+    }
+
+    async function loadRunpodStatus({live = false} = {}) {
+        if (
+            !runpodReadiness ||
+            !runpodEndpointSelect ||
+            providerSelect.value !== "runpod"
+        ) {
+            return null;
+        }
+
+        const selectedEndpoint = runpodEndpointSelect.value;
+        const statusUrl = runpodReadiness.dataset.statusUrl;
+
+        if (!statusUrl || !selectedEndpoint) {
+            return null;
+        }
+
+        if (runpodStatusRequestsInFlight.has(selectedEndpoint)) {
+            return null;
+        }
+
+        runpodStatusRequestsInFlight.add(selectedEndpoint);
+
+        if (!live) {
+            setStatusBadge(
+                runpodWorkerStatus,
+                "Status wird geladen …",
+                "neutral"
+            );
+            setStatusBadge(
+                runpodSupplyStatus,
+                "Wird geladen …",
+                "neutral"
+            );
+        }
+
+        if (refreshRunpodStatusButton) {
+            refreshRunpodStatusButton.disabled = true;
+        }
+
+        try {
+            const parameters = new URLSearchParams({
+                endpoint_key: selectedEndpoint,
+            });
+            const response = await fetch(
+                `${statusUrl}?${parameters}`,
+                {
+                    headers: {Accept: "application/json"},
+                }
+            );
+            const payload = await response.json();
+
+            if (response.status === 401) {
+                window.location.assign("/login");
+                return null;
+            }
+
+            if (!response.ok) {
+                throw new Error(
+                    payload?.detail?.message ||
+                        "Der RunPod-Status konnte nicht geladen werden."
+                );
+            }
+
+            if (runpodEndpointSelect.value !== selectedEndpoint) {
+                return null;
+            }
+
+            renderRunpodSnapshot(payload, live);
+            return payload;
+        } catch (error) {
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : "Der RunPod-Status konnte nicht geladen werden.";
+
+            if (!live) {
+                renderRunpodUnavailable(message);
+            }
+
+            return null;
+        } finally {
+            runpodStatusRequestsInFlight.delete(selectedEndpoint);
+
+            if (refreshRunpodStatusButton) {
+                refreshRunpodStatusButton.disabled =
+                    providerSelect.value !== "runpod" ||
+                    runpodStatusRequestsInFlight.size > 0;
+            }
+        }
+    }
+
+    function setLiveMessage(message, hint) {
+        liveMessage = message;
+        liveHint = hint;
+        updateElapsedMessage();
+    }
+
+    function updateElapsedMessage() {
+        if (loadingStartedAt === null) {
+            return;
+        }
+
+        const elapsed = formatElapsed(
+            Date.now() - loadingStartedAt
+        );
+
+        loadingMessage.textContent = `${liveMessage} – ${elapsed}`;
+        loadingHint.textContent = liveHint;
+    }
+
+    function updateLiveRunpodMessage(snapshot) {
+        const state = snapshot?.worker?.state;
+
+        if (state === "processing") {
+            setLiveMessage(
+                "Worker hat den Auftrag übernommen – KI-Feedback wird berechnet",
+                "Die Warteschlange ist beendet. Das Modell verarbeitet jetzt den Schülertext."
+            );
+        } else if (state === "initializing") {
+            setLiveMessage(
+                "Worker wird gestartet – Cold Start läuft",
+                "Container, Modell und GPU-Kernels werden vorbereitet. Das kann mehrere Minuten dauern."
+            );
+        } else if (state === "queued") {
+            setLiveMessage(
+                "Auftrag wartet auf einen Worker / Cold Start",
+                "RunPod sucht oder startet geeignete GPU-Kapazität. Das Browserfenster bitte geöffnet lassen."
+            );
+        } else if (state === "unhealthy") {
+            setLiveMessage(
+                "Workerstart fehlgeschlagen",
+                "RunPod kann automatisch einen Ersatzworker starten. Die Anwendung wartet weiter innerhalb des Zeitlimits."
+            );
+        } else if (state === "throttled") {
+            setLiveMessage(
+                "GPU-Kapazität momentan eingeschränkt",
+                "Der Auftrag bleibt aktiv; die Bereitstellung kann länger dauern."
+            );
+        } else if (state === "warm") {
+            setLiveMessage(
+                "Aktiver Worker wird dem Auftrag zugewiesen",
+                "Ein Warmstart wird erwartet. Der Endpointstatus kann dem Job kurz hinterherlaufen."
+            );
+        } else if (state === "cold") {
+            setLiveMessage(
+                "Auftrag wurde übermittelt – Cold Start erforderlich",
+                "RunPod stellt jetzt einen Worker bereit. Das kann mehrere Minuten dauern."
+            );
+        }
+    }
+
+    function startRunpodLiveTracking() {
+        loadingStartedAt = Date.now();
+        setLiveMessage(
+            "Auftrag wird an RunPod übermittelt",
+            "Der Status des ausgewählten Endpoints wird regelmäßig geprüft."
+        );
+
+        elapsedTimer = window.setInterval(
+            updateElapsedMessage,
+            1000
+        );
+        void loadRunpodStatus({live: true});
+        runpodPollingTimer = window.setInterval(
+            () => {
+                void loadRunpodStatus({live: true});
+            },
+            RUNPOD_STATUS_POLL_INTERVAL_MS
+        );
+    }
+
+    function stopRunpodLiveTracking() {
+        if (elapsedTimer !== null) {
+            window.clearInterval(elapsedTimer);
+            elapsedTimer = null;
+        }
+
+        if (runpodPollingTimer !== null) {
+            window.clearInterval(runpodPollingTimer);
+            runpodPollingTimer = null;
+        }
+
+        loadingStartedAt = null;
+    }
+
+    function beginLoading() {
         form.dataset.submitting = "true";
         form.setAttribute("aria-busy", "true");
-
         submitButton.disabled = true;
-        submitButton.textContent =
-            "Feedback wird generiert …";
-
+        submitButton.textContent = "Feedback wird generiert …";
         loadingIndicator.hidden = false;
+
+        if (providerSelect.value === "runpod") {
+            startRunpodLiveTracking();
+            return;
+        }
 
         const localModelSelected =
             providerSelect.value === "ollama";
 
-        loadingMessage.textContent =
-            localModelSelected
-                ? "Das lokale Modell verarbeitet den Text …"
-                : "Das Cloudmodell verarbeitet den Text …";
+        loadingMessage.textContent = localModelSelected
+            ? "Das lokale Modell verarbeitet den Text …"
+            : "Das Cloudmodell verarbeitet den Text …";
+        loadingHint.textContent = localModelSelected
+            ? "Bitte warten. Der erste Aufruf kann länger dauern, weil das Modell zunächst in den Arbeitsspeicher geladen wird."
+            : "Bitte warten. Die Dauer hängt vom ausgewählten Modell und der Verbindung ab.";
 
-        loadingHint.textContent =
-            localModelSelected
-                ? "Bitte warten. Der erste Aufruf kann länger dauern, weil das Modell zunächst in den Arbeitsspeicher geladen wird."
-                : "Bitte warten. Die Dauer hängt vom ausgewählten Modell und der Verbindung ab.";
-
-        slowResponseTimer = window.setTimeout(
-            () => {
-                if (localModelSelected) {
-                    loadingMessage.textContent =
-                        "Das lokale Modell arbeitet weiterhin …";
-
-                    loadingHint.textContent =
-                        "Das Modell wird möglicherweise gerade in den Arbeitsspeicher geladen. Der erste Aufruf kann deutlich länger dauern.";
-                } else {
-                    loadingMessage.textContent =
-                        "Die Cloudanfrage wird weiterhin verarbeitet …";
-
-                    loadingHint.textContent =
-                        "Bitte lass das Browserfenster geöffnet. Die Antwort wird nach Abschluss automatisch angezeigt.";
-                }
-            },
-            SLOW_RESPONSE_DELAY_MS
-        );
+        slowResponseTimer = window.setTimeout(() => {
+            if (localModelSelected) {
+                loadingMessage.textContent =
+                    "Das lokale Modell arbeitet weiterhin …";
+                loadingHint.textContent =
+                    "Das Modell wird möglicherweise gerade in den Arbeitsspeicher geladen. Der erste Aufruf kann deutlich länger dauern.";
+            } else {
+                loadingMessage.textContent =
+                    "Die Cloudanfrage wird weiterhin verarbeitet …";
+                loadingHint.textContent =
+                    "Bitte lass das Browserfenster geöffnet. Die Antwort wird nach Abschluss automatisch angezeigt.";
+            }
+        }, SLOW_RESPONSE_DELAY_MS);
     }
 
     function resetLoadingState() {
         if (slowResponseTimer !== null) {
-            window.clearTimeout(
-                slowResponseTimer
-            );
-
+            window.clearTimeout(slowResponseTimer);
             slowResponseTimer = null;
         }
 
+        stopRunpodLiveTracking();
         delete form.dataset.submitting;
         form.removeAttribute("aria-busy");
-
         submitButton.disabled = false;
-
         submitButton.textContent =
             submitButton.dataset.defaultLabel ||
             "Feedback generieren";
-
         loadingIndicator.hidden = true;
+    }
+
+    function renderClientError(message) {
+        const section = document.createElement("section");
+        section.className = "card error";
+        section.dataset.analysisError = "true";
+        addTextElement(section, "h2", "Fehler");
+        addTextElement(section, "p", message);
+        analysisResponse.replaceChildren(section);
+    }
+
+    function localizeResultTimes(root = document) {
+        root
+            .querySelectorAll("[data-local-datetime]")
+            .forEach((element) => {
+                const value = element.dataset.localDatetime;
+
+                if (value) {
+                    element.textContent =
+                        `${formatLocalTime(value)} Uhr`;
+                }
+            });
+    }
+
+    function populateResultTechnical(snapshot) {
+        const details = document.querySelector(
+            "[data-runpod-result-details]"
+        );
+
+        if (
+            !details ||
+            details.dataset.endpointKey !==
+                snapshot?.endpoint?.key
+        ) {
+            return;
+        }
+
+        const supplyField = details.querySelector(
+            "[data-result-supply]"
+        );
+        const actualGpuField = details.querySelector(
+            "[data-result-actual-gpu]"
+        );
+        const releaseField = details.querySelector(
+            "[data-result-release]"
+        );
+        const dataCenterField = details.querySelector(
+            "[data-result-datacenter]"
+        );
+        const activeWorkersField = details.querySelector(
+            "[data-result-active-workers]"
+        );
+        const idleTimeoutField = details.querySelector(
+            "[data-result-idle-timeout]"
+        );
+        const workerLimitField = details.querySelector(
+            "[data-result-worker-limit]"
+        );
+        const flashbootField = details.querySelector(
+            "[data-result-flashboot]"
+        );
+
+        if (supplyField) {
+            supplyField.textContent =
+                snapshot.supply?.label || "Nicht abrufbar";
+        }
+
+        const configuration = snapshot.configuration;
+
+        if (configuration?.available) {
+            idleTimeoutField.textContent =
+                Number.isInteger(configuration.idleTimeoutSeconds)
+                    ? `${Math.round(
+                        configuration.idleTimeoutSeconds / 60
+                    )} Minuten (${configuration.idleTimeoutSeconds} s)`
+                    : "Nicht gemeldet";
+            workerLimitField.textContent =
+                configuration.minimumWorkers !== null &&
+                configuration.maximumWorkers !== null
+                    ? `${configuration.minimumWorkers} bis ${configuration.maximumWorkers}`
+                    : "Nicht gemeldet";
+            flashbootField.textContent =
+                configuration.flashboot || "Nicht gemeldet";
+        } else {
+            const configurationMessage =
+                configuration?.message || "Nicht abrufbar";
+            idleTimeoutField.textContent = configurationMessage;
+            workerLimitField.textContent = "Nicht abrufbar";
+            flashbootField.textContent = "Nicht abrufbar";
+        }
+
+        const technical = snapshot.technical;
+
+        if (!technical?.available) {
+            const unavailableMessage =
+                technical?.message || "Nicht abrufbar";
+
+            actualGpuField.textContent = unavailableMessage;
+            releaseField.textContent = "Nicht abrufbar";
+            dataCenterField.textContent = "Nicht abrufbar";
+            activeWorkersField.replaceChildren();
+            addTextElement(
+                activeWorkersField,
+                "p",
+                unavailableMessage,
+                "technical-unavailable"
+            );
+            return;
+        }
+
+        const workers = Array.isArray(technical.workers)
+            ? technical.workers
+            : [];
+        const reportedWorkerId = details.dataset.workerId;
+        const matchedWorker = reportedWorkerId
+            ? workers.find(
+                (worker) => worker.id === reportedWorkerId
+            )
+            : null;
+
+        if (matchedWorker) {
+            actualGpuField.textContent =
+                matchedWorker.gpuTypeId || "Nicht gemeldet";
+            releaseField.textContent =
+                matchedWorker.version === null
+                    ? "Nicht gemeldet"
+                    : `Version ${matchedWorker.version}`;
+            dataCenterField.textContent =
+                matchedWorker.dataCenterId || "Nicht gemeldet";
+        } else {
+            actualGpuField.textContent =
+                "Nicht eindeutig zuordenbar";
+            releaseField.textContent =
+                technical.endpointVersion === null
+                    ? "Nicht eindeutig zuordenbar"
+                    : `Endpoint-Version ${technical.endpointVersion}; Job nicht zugeordnet`;
+            dataCenterField.textContent =
+                "Nicht eindeutig zuordenbar";
+        }
+
+        activeWorkersField.replaceChildren();
+
+        if (!workers.length) {
+            addTextElement(
+                activeWorkersField,
+                "p",
+                "Nach Abschluss ist kein aktiver Worker mehr gemeldet.",
+                "technical-unavailable"
+            );
+            return;
+        }
+
+        addTextElement(
+            activeWorkersField,
+            "h4",
+            "Aktive Worker nach Abschluss"
+        );
+        const list = document.createElement("ul");
+        list.className = "worker-list compact-worker-list";
+
+        workers.forEach((worker) => {
+            const item = document.createElement("li");
+            item.textContent = [
+                worker.gpuTypeId || "GPU nicht gemeldet",
+                worker.status || "Status unbekannt",
+                worker.id ? `Worker ${worker.id}` : null,
+                worker.version === null
+                    ? null
+                    : `Release ${worker.version}`,
+                worker.dataCenterId || null,
+            ]
+                .filter(Boolean)
+                .join(" · ");
+            list.append(item);
+        });
+
+        activeWorkersField.append(list);
+    }
+
+    async function submitAnalysis(event) {
+        if (
+            typeof window.fetch !== "function" ||
+            typeof window.FormData !== "function"
+        ) {
+            return;
+        }
+
+        event.preventDefault();
+
+        if (form.dataset.submitting === "true") {
+            return;
+        }
+
+        const runpodSelected =
+            providerSelect.value === "runpod";
+        const formData = new FormData(form);
+
+        beginLoading();
+
+        try {
+            const response = await fetch(form.action, {
+                method: "POST",
+                body: formData,
+                headers: {
+                    Accept: "text/html",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            });
+
+            if (
+                response.redirected &&
+                new URL(response.url).pathname === "/login"
+            ) {
+                window.location.assign("/login");
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(
+                    "Die Anfrage konnte nicht abgeschlossen werden. Bitte lade die Seite neu und versuche es erneut."
+                );
+            }
+
+            analysisResponse.innerHTML = await response.text();
+            localizeResultTimes(analysisResponse);
+
+            const resultOrError = analysisResponse.querySelector(
+                "[data-analysis-result], [data-analysis-error]"
+            );
+
+            if (resultOrError) {
+                resultOrError.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                });
+            }
+        } catch (error) {
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : "Die Anfrage konnte nicht abgeschlossen werden.";
+            renderClientError(message);
+        } finally {
+            resetLoadingState();
+
+            if (runpodSelected) {
+                void loadRunpodStatus();
+            }
+        }
     }
 
     providerSelect.addEventListener(
@@ -364,14 +1067,9 @@
     );
 
     modelSelects.forEach((modelSelect) => {
-        modelSelect.addEventListener(
-            "change",
-            () => {
-                updateCustomModelField(
-                    modelSelect
-                );
-            }
-        );
+        modelSelect.addEventListener("change", () => {
+            updateCustomModelField(modelSelect);
+        });
     });
 
     if (loadOllamaModelsButton) {
@@ -381,15 +1079,36 @@
         );
     }
 
-    form.addEventListener(
-        "submit",
-        startLoading
-    );
+    if (runpodEndpointSelect) {
+        runpodEndpointSelect.addEventListener("change", () => {
+            latestRunpodSnapshot = null;
+            void loadRunpodStatus();
+        });
+    }
 
-    window.addEventListener(
-        "pageshow",
-        resetLoadingState
-    );
+    if (refreshRunpodStatusButton) {
+        refreshRunpodStatusButton.addEventListener(
+            "click",
+            () => {
+                void loadRunpodStatus();
+            }
+        );
+    }
+
+    form.addEventListener("submit", submitAnalysis);
+
+    window.addEventListener("pageshow", () => {
+        resetLoadingState();
+        localizeResultTimes();
+
+        if (
+            providerSelect.value === "runpod" &&
+            latestRunpodSnapshot === null
+        ) {
+            void loadRunpodStatus();
+        }
+    });
 
     updateProviderPanels();
+    localizeResultTimes();
 })();

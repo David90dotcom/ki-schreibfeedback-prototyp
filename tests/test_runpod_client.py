@@ -6,9 +6,13 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from app.domain.metrics import MetricSource
+from app.domain.metrics import (
+    FloatMetric,
+    MetricSource,
+    ProviderTiming,
+)
 from app.domain.model_catalog import ModelParameters
-from app.llm.base import ModelRequest
+from app.llm.base import ModelRequest, ModelResponse
 from app.llm.errors import (
     ProviderAuthenticationError,
     ProviderTimeoutError,
@@ -40,7 +44,7 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
             model_name=self.MODEL_NAME,
         )
 
-        self.assertEqual(provider.job_timeout_seconds, 600.0)
+        self.assertEqual(provider.job_timeout_seconds, 1200.0)
 
     @staticmethod
     def _request() -> ModelRequest:
@@ -323,6 +327,44 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
             error.details["operation"],
             "run",
         )
+
+    async def test_generate_preserves_runpod_timing_and_worker_id(
+        self,
+    ) -> None:
+        provider = self._provider()
+        model_response = ModelResponse(
+            provider_id="runpod",
+            requested_model_name=self.MODEL_NAME,
+            actual_model_name=self.MODEL_NAME,
+            text="Feedback mit Messwerten",
+            status="completed",
+            provider_request_id="job-789",
+            provider_timing=ProviderTiming(
+                queue_duration_ms=FloatMetric(
+                    value=1200,
+                    source=MetricSource.PROVIDER,
+                    unit="ms",
+                ),
+                execution_duration_ms=FloatMetric(
+                    value=3400,
+                    source=MetricSource.PROVIDER,
+                    unit="ms",
+                ),
+            ),
+            raw_metadata={"worker_id": "worker-789"},
+        )
+
+        with patch.object(
+            provider,
+            "complete",
+            new=AsyncMock(return_value=model_response),
+        ):
+            response = await provider.generate("Testprompt")
+
+        self.assertEqual(response.queue_duration_ms, 1200)
+        self.assertEqual(response.execution_duration_ms, 3400)
+        self.assertEqual(response.provider_request_id, "job-789")
+        self.assertEqual(response.worker_id, "worker-789")
 
     async def test_timed_out_job_becomes_timeout_error(
         self,
