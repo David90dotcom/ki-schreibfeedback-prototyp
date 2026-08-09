@@ -217,6 +217,181 @@ button:disabled {
     font-size: 0.95rem;
 }
 
+.readiness-panel {
+    margin-top: 18px;
+    padding: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+.readiness-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.readiness-header h4 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.readiness-header p {
+    margin: 2px 0 0;
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.compact-button {
+    flex: 0 0 auto;
+    margin: 0;
+    padding: 8px 11px;
+    font-size: 0.9rem;
+}
+
+.readiness-values,
+.technical-values {
+    display: grid;
+    grid-template-columns:
+        repeat(2, minmax(0, 1fr));
+    gap: 12px 18px;
+    margin: 16px 0 0;
+}
+
+.readiness-values div,
+.technical-values div {
+    min-width: 0;
+}
+
+.readiness-values dt,
+.technical-values dt {
+    color: var(--muted);
+    font-size: 0.85rem;
+}
+
+.readiness-values dd,
+.technical-values dd {
+    margin: 4px 0 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    max-width: 100%;
+    padding: 5px 9px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    line-height: 1.35;
+    border: 1px solid;
+    border-radius: 999px;
+}
+
+.status-badge::before {
+    width: 8px;
+    height: 8px;
+    flex: 0 0 auto;
+    content: "";
+    background: currentColor;
+    border-radius: 50%;
+}
+
+.status-badge.status-neutral {
+    color: #475467;
+    background: #f2f4f7;
+    border-color: #d0d5dd;
+}
+
+.status-badge.status-success {
+    color: #087443;
+    background: var(--success-bg);
+    border-color: var(--success-border);
+}
+
+.status-badge.status-info {
+    color: #175cd3;
+    background: var(--info-bg);
+    border-color: var(--info-border);
+}
+
+.status-badge.status-warning {
+    color: #92400e;
+    background: var(--warning-bg);
+    border-color: var(--warning-border);
+}
+
+.status-badge.status-limited {
+    color: #9a3412;
+    background: #fff7ed;
+    border-color: #fdba74;
+}
+
+.status-badge.status-error {
+    color: #b42318;
+    background: var(--error-bg);
+    border-color: var(--error-border);
+}
+
+.readiness-note {
+    margin: 14px 0 0;
+    color: var(--muted);
+    font-size: 0.88rem;
+}
+
+.technical-details {
+    margin-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.technical-details summary {
+    padding-top: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.technical-details[open] summary {
+    margin-bottom: 10px;
+}
+
+.technical-details p {
+    margin: 8px 0 0;
+}
+
+.technical-summary {
+    font-weight: 600;
+}
+
+.technical-unavailable {
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
+.worker-list {
+    display: grid;
+    gap: 8px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.worker-list li {
+    display: grid;
+    gap: 2px;
+    padding: 10px;
+    font-size: 0.88rem;
+    background: #f9fafb;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow-wrap: anywhere;
+}
+
+.worker-list li span {
+    color: var(--muted);
+}
+
 .loading-indicator {
     margin-top: 16px;
     padding: 14px 16px;
@@ -262,6 +437,10 @@ button:disabled {
     border-color: var(--error-border);
 }
 
+.analysis-response:empty {
+    display: none;
+}
+
 .metadata {
     display: grid;
     grid-template-columns:
@@ -294,6 +473,45 @@ button:disabled {
     background: #f9fafb;
     border: 1px solid var(--border);
     border-radius: 10px;
+}
+
+.warm-window-note {
+    display: grid;
+    gap: 3px;
+    margin: 0 0 18px;
+    padding: 12px 14px;
+    color: #175cd3;
+    background: var(--info-bg);
+    border: 1px solid var(--info-border);
+    border-radius: 10px;
+}
+
+.warm-window-note span {
+    color: #344054;
+    font-size: 0.9rem;
+}
+
+.result-technical-details {
+    margin-top: 18px;
+}
+
+.active-worker-list {
+    margin-top: 14px;
+}
+
+.active-worker-list h4 {
+    margin: 0 0 8px;
+    font-size: 0.95rem;
+}
+
+.compact-worker-list li {
+    display: list-item;
+    margin-left: 1.25rem;
+    padding: 3px 0;
+    color: var(--muted);
+    background: transparent;
+    border: 0;
+    list-style: disc;
 }
 
 .feedback > :first-child {
@@ -376,6 +594,20 @@ button:disabled {
     }
 
     .metadata {
+        grid-template-columns: 1fr;
+    }
+
+    .readiness-header {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .compact-button {
+        width: 100%;
+    }
+
+    .readiness-values,
+    .technical-values {
         grid-template-columns: 1fr;
     }
 }

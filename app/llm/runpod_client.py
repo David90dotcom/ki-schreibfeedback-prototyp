@@ -54,7 +54,7 @@ class RunPodProvider:
         api_key: str | None,
         endpoint_id: str | None,
         model_name: str,
-        job_timeout_seconds: float = 600.0,
+        job_timeout_seconds: float = 1200.0,
         poll_interval_seconds: float = 1.0,
     ) -> None:
         self.api_key = api_key.strip() if api_key else None
@@ -92,6 +92,15 @@ class RunPodProvider:
             provider=self.provider_name,
             model=response.actual_model_name,
             text=response.text,
+            queue_duration_ms=(
+                response.provider_timing.queue_duration_ms.value
+            ),
+            execution_duration_ms=(
+                response.provider_timing.execution_duration_ms.value
+            ),
+            provider_request_id=response.provider_request_id,
+            worker_id=self._worker_id(response.raw_metadata),
+            raw_metadata=response.raw_metadata,
         )
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
@@ -726,6 +735,10 @@ class RunPodProvider:
                 "delay_time_ms": delay_time,
                 "execution_time_ms": execution_time,
                 "finish_reason": finish_reason,
+                "worker_id": self._worker_id(
+                    payload,
+                    output,
+                ),
             },
         )
 
@@ -758,6 +771,19 @@ class RunPodProvider:
             return None
         if isinstance(value, (int, float)) and value >= 0:
             return float(value)
+        return None
+
+    @staticmethod
+    def _worker_id(*sources: dict[str, Any]) -> str | None:
+        """Übernimmt eine Worker-ID nur, wenn RunPod sie tatsächlich meldet."""
+
+        for source in sources:
+            for key in ("workerId", "worker_id", "worker"):
+                value = source.get(key)
+
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+
         return None
 
     @staticmethod

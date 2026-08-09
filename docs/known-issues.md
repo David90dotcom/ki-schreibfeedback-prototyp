@@ -8,7 +8,7 @@
 | Bereich | Ergebnisdarstellung |
 | Priorität | niedrig |
 | Release-blockierend | nein |
-| Status | vorgemerkt |
+| Status | in Version 0.6 behoben |
 
 ### Beobachtung
 
@@ -20,4 +20,22 @@ Die fachliche Rückmeldung ist vollständig verfügbar. Betroffen ist ausschlie�
 
 ### Vorgesehene Verbesserung
 
-In einer späteren Version soll ein sicherer Markdown-Renderer mit enger Element- und Attribut-Allowlist ergänzt werden. Modellinhalt darf dabei nicht ungeprüft als HTML in die Seite gelangen. Automatisierte Tests sollen insbesondere Überschriften, Hervorhebungen, Trennlinien, Links sowie die Abwehr von Script- und Event-Handler-Inhalten abdecken.
+Version 0.6 verwendet einen sicheren Markdown-Renderer mit enger Element- und Attribut-Allowlist. HTML, aktive Links, Bilder und Code-Markup werden nicht aktiviert; automatisierte Sicherheitstests decken diese Fälle ab.
+
+## RUNPOD-006-01: Hostabhängige Cold-Start-Abstürze
+
+| Feld | Bewertung |
+|---|---|
+| Betroffene Version | 0.6 |
+| Bereich | RunPod Serverless / vLLM |
+| Priorität | mittel |
+| Release-blockierend | nein |
+| Status | transparent gemacht, extern verbleibend |
+
+### Beobachtung
+
+Einzelne neu bereitgestellte Worker können beim vLLM-/Triton-Warm-up mit einem CUDA-Fehler abbrechen. RunPod kann anschließend einen Ersatzworker starten; ein bereits erfolgreich gestarteter warmer Worker verarbeitet weitere Anfragen zuverlässig und deutlich schneller.
+
+### Behandlung in der Anwendung
+
+Die Anwendung verlängert ihr eigenes Queue-/Cold-Start-Limit auf 1200 Sekunden, zeigt Endpointstatus und laufende Wartezeit und trennt nach Erfolg `delayTime` von `executionTime`. Das RunPod-Idle-Timeout wird für den Prüfungsbetrieb auf 3600 Sekunden festgelegt. Diese Maßnahmen verbessern Transparenz und Nutzbarkeit, beseitigen aber keinen externen CUDA-/Hostfehler.

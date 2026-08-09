@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
 from pydantic import Field
@@ -111,6 +111,11 @@ class LLMResponse:
     provider: str
     model: str
     text: str
+    queue_duration_ms: float | None = None
+    execution_duration_ms: float | None = None
+    provider_request_id: str | None = None
+    worker_id: str | None = None
+    raw_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class LLMProvider(Protocol):

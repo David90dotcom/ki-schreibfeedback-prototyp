@@ -286,6 +286,94 @@
                 Hardwarevergleich. Alle vier verwenden dasselbe Modell;
                 die Endpoint-IDs bleiben ausschließlich im Backend.
             </p>
+
+            <section
+                id="runpod-readiness"
+                class="readiness-panel"
+                data-status-url="{{ url_for('runpod_status') }}"
+                data-idle-timeout-minutes="{{ runpod_idle_timeout_minutes }}"
+                aria-live="polite"
+            >
+                <div class="readiness-header">
+                    <div>
+                        <h4>RunPod-Betriebsbereitschaft</h4>
+                        <p>
+                            Aktuelle Momentaufnahme für das ausgewählte
+                            Inferenzziel
+                        </p>
+                    </div>
+
+                    <button
+                        id="refresh-runpod-status"
+                        class="secondary-button compact-button"
+                        type="button"
+                    >
+                        Aktualisieren
+                    </button>
+                </div>
+
+                <dl class="readiness-values">
+                    <div>
+                        <dt>Worker</dt>
+                        <dd>
+                            <span
+                                id="runpod-worker-status"
+                                class="status-badge status-neutral"
+                            >
+                                Status wird geladen …
+                            </span>
+                        </dd>
+                    </div>
+
+                    <div>
+                        <dt>GPU-Verfügbarkeit</dt>
+                        <dd>
+                            <span
+                                id="runpod-supply-status"
+                                class="status-badge status-neutral"
+                            >
+                                Wird geladen …
+                            </span>
+                        </dd>
+                    </div>
+
+                    <div>
+                        <dt>Warmhaltefenster</dt>
+                        <dd id="runpod-warm-window">
+                            Bis zu {{ runpod_idle_timeout_minutes }} Minuten
+                            nach der letzten erfolgreichen Anfrage
+                        </dd>
+                    </div>
+
+                    <div>
+                        <dt>Stand</dt>
+                        <dd>
+                            <time id="runpod-status-time">–</time>
+                        </dd>
+                    </div>
+                </dl>
+
+                <p
+                    id="runpod-status-note"
+                    class="readiness-note"
+                >
+                    Die Supply-Angabe beschreibt die allgemeine
+                    RunPod-Kapazität und garantiert keinen erfolgreichen
+                    Workerstart.
+                </p>
+
+                <details class="technical-details">
+                    <summary>Technische Workerdetails</summary>
+
+                    <div id="runpod-worker-details">
+                        <p>
+                            Details werden geladen. Sie erscheinen nur,
+                            wenn der API-Key die erforderliche
+                            Leseberechtigung besitzt.
+                        </p>
+                    </div>
+                </details>
+            </section>
         </section>
 
         <label for="student_text">
@@ -343,45 +431,12 @@
     </form>
 </section>
 
-{% if error %}
-<section class="card error">
-    <h2>Fehler</h2>
-    <p>{{ error }}</p>
-</section>
-{% endif %}
-
-{% if result %}
-<section class="card result">
-    <h2>Ergebnis</h2>
-
-    <dl class="metadata">
-        <div>
-            <dt>Anbieter</dt>
-            <dd>{{ result.provider }}</dd>
-        </div>
-
-        <div>
-            <dt>Modell</dt>
-            <dd>{{ result.model }}</dd>
-        </div>
-
-        {% if result_hardware %}
-            <div>
-                <dt>Hardware</dt>
-                <dd>{{ result_hardware }}</dd>
-            </div>
-        {% endif %}
-
-        <div>
-            <dt>Antwortzeit</dt>
-            <dd>{{ result.duration_ms }} ms</dd>
-        </div>
-    </dl>
-
-    <div class="feedback">
-        {{ result.feedback | feedback_markdown }}
-    </div>
-</section>
-{% endif %}
+<div
+    id="analysis-response"
+    class="analysis-response"
+    aria-live="polite"
+>
+    {% include "analysis_response.html" %}
+</div>
 
 {% endblock %}

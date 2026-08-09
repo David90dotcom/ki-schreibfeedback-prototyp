@@ -1,0 +1,166 @@
+{% if error %}
+<section class="card error" data-analysis-error>
+    <h2>Fehler</h2>
+    <p>{{ error }}</p>
+</section>
+{% endif %}
+
+{% if result %}
+<section class="card result" data-analysis-result>
+    <h2>Ergebnis</h2>
+
+    <dl class="metadata">
+        <div>
+            <dt>Anbieter</dt>
+            <dd>{{ result.provider }}</dd>
+        </div>
+
+        <div>
+            <dt>Modell</dt>
+            <dd>{{ result.model }}</dd>
+        </div>
+
+        {% if result_endpoint_label %}
+            <div>
+                <dt>Gewählter GPU-Endpunkt</dt>
+                <dd>{{ result_endpoint_label }}</dd>
+            </div>
+        {% endif %}
+
+        <div>
+            <dt>Gesamtzeit</dt>
+            <dd>{{ result.duration_ms | duration_ms }}</dd>
+        </div>
+
+        {% if result.provider == "runpod" %}
+            <div>
+                <dt>Warte-/Bereitstellungszeit</dt>
+                <dd>{{ result.queue_duration_ms | duration_ms }}</dd>
+            </div>
+
+            <div>
+                <dt>KI-Verarbeitungszeit</dt>
+                <dd>{{ result.execution_duration_ms | duration_ms }}</dd>
+            </div>
+        {% endif %}
+    </dl>
+
+    {% if result.provider == "runpod" and runpod_warm_window %}
+        <aside class="warm-window-note">
+            {% if runpod_warm_window.configurationVerified %}
+                <strong>
+                    Worker voraussichtlich bis etwa
+                    <time
+                        datetime="{{ runpod_warm_window.estimatedUntil }}"
+                        data-local-datetime="{{ runpod_warm_window.estimatedUntil }}"
+                    >
+                        {{ runpod_warm_window.idleTimeoutMinutes }} Minuten
+                        nach Abschluss
+                    </time>
+                    warm.
+                </strong>
+            {% else %}
+                <strong>
+                    Erwartetes Warmhaltefenster: bis zu
+                    {{ runpod_warm_window.idleTimeoutMinutes }} Minuten
+                    nach Abschluss.
+                </strong>
+            {% endif %}
+
+            <span>
+                {% if runpod_warm_window.configurationVerified %}
+                    Die Schätzung basiert auf dem aus RunPod gelesenen
+                    Idle-Timeout.
+                {% else %}
+                    Die RunPod-Einstellung war nicht lesbar; angezeigt
+                    wird der erwartete Wert aus der Web-Konfiguration.
+                {% endif %}
+                Das ist keine garantierte Reservierung; das Zeitfenster
+                beginnt nach jeder erfolgreichen Anfrage neu.
+            </span>
+        </aside>
+    {% endif %}
+
+    <div class="feedback">
+        {{ result.feedback | feedback_markdown }}
+    </div>
+
+    {% if result.provider == "runpod" %}
+        <details
+            class="technical-details result-technical-details"
+            data-runpod-result-details
+            data-endpoint-key="{{ selected_runpod_endpoint }}"
+            data-worker-id="{{ result.worker_id or '' }}"
+        >
+            <summary>Technische Details</summary>
+
+            <dl class="technical-values">
+                <div>
+                    <dt>Gewähltes Inferenzziel</dt>
+                    <dd>{{ result_endpoint_label }}</dd>
+                </div>
+
+                <div>
+                    <dt>RunPod-Job-ID</dt>
+                    <dd>{{ result.provider_request_id or "Nicht gemeldet" }}</dd>
+                </div>
+
+                <div>
+                    <dt>Worker-ID</dt>
+                    <dd data-result-worker-id>
+                        {{ result.worker_id or "Nicht vom Job gemeldet" }}
+                    </dd>
+                </div>
+
+                <div>
+                    <dt>Tatsächlich verwendete GPU</dt>
+                    <dd data-result-actual-gpu>
+                        Nicht eindeutig von RunPod gemeldet
+                    </dd>
+                </div>
+
+                <div>
+                    <dt>Release-Version</dt>
+                    <dd data-result-release>Wird geprüft …</dd>
+                </div>
+
+                <div>
+                    <dt>Rechenzentrum</dt>
+                    <dd data-result-datacenter>Wird geprüft …</dd>
+                </div>
+
+                <div>
+                    <dt>GPU-Verfügbarkeit bei Abschluss</dt>
+                    <dd data-result-supply>Wird geprüft …</dd>
+                </div>
+
+                <div>
+                    <dt>Konfiguriertes Idle-Timeout</dt>
+                    <dd data-result-idle-timeout>Wird geprüft …</dd>
+                </div>
+
+                <div>
+                    <dt>Workerlimit</dt>
+                    <dd data-result-worker-limit>Wird geprüft …</dd>
+                </div>
+
+                <div>
+                    <dt>FlashBoot</dt>
+                    <dd data-result-flashboot>Wird geprüft …</dd>
+                </div>
+            </dl>
+
+            <div
+                class="active-worker-list"
+                data-result-active-workers
+            ></div>
+
+            <p class="readiness-note">
+                Eine konkrete GPU wird nur dann als verwendet angezeigt,
+                wenn RunPod den Job eindeutig einer Worker-ID zuordnet.
+                Andernfalls bleiben die aktiven Worker separat sichtbar.
+            </p>
+        </details>
+    {% endif %}
+</section>
+{% endif %}

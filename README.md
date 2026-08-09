@@ -1,8 +1,8 @@
-# KI-Schreibfeedback-Prototyp 0.5.0
+# KI-Schreibfeedback-Prototyp 0.6
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.5.0 stellt die Anwendung produktiv per HTTPS bereit und verwendet für RunPod einen vLLM-Worker.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.6 ergänzt auswählbare GPU-Endpunkte, sichere Markdown-Darstellung und eine transparente Anzeige von Supply, Workerzustand, Cold Start sowie getrennten Warte- und Verarbeitungszeiten.
 
-> **Aktueller Projektstand: Version 0.5.0.** Das geschützte Online-Deployment auf DigitalOcean sowie die serverlose GPU-Inferenz auf RunPod wurden automatisiert und Ende-zu-Ende getestet. Das [Abnahmeprotokoll](docs/abnahme-v0.5.0.md) dokumentiert den geprüften Release-Stand.
+> **Aktueller Entwicklungsstand: Version 0.6.** Das [Abnahmeprotokoll 0.5.0](docs/abnahme-v0.5.0.md) dokumentiert weiterhin den letzten vollständig produktiv abgenommenen Release. Die neuen Transparenzfunktionen von 0.6 sind automatisiert getestet und müssen nach dem Web-Redeployment noch einmal Ende-zu-Ende gegen die echten RunPod-Endpunkte geprüft werden.
 
 ## Versionsstand und Ziel
 
@@ -10,9 +10,10 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, loka
 |---|---|---|
 | **0.3** | abgeschlossen | Provider-Auswahl für Ollama, OpenAI und RunPod, RunPod-Worker, Konfiguration und automatisierte Tests |
 | **0.4** | abgeschlossen | Serverseitige Anmeldung, geschützte Web- und Modellrouten, sichere Sitzungen, Login-Begrenzung und CSRF-Schutz |
-| **0.5.0** | aktuell | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
+| **0.5.0** | abgeschlossen | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
+| **0.6** | in Abnahme | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Supply-/Workerstatus, Live-Warteanzeige, getrennte Zeiten und Warmhalteprognose |
 
-Version 0.5.0 ist der erste produktiv bereitgestellte und Ende-zu-Ende abgenommene Stand. Weitere Funktionen und Designänderungen werden in nachfolgenden Versionen ergänzt.
+Version 0.5.0 ist der erste produktiv bereitgestellte und Ende-zu-Ende abgenommene Stand. Version 0.6 baut additiv darauf auf; Modell-Payload und vLLM-Startkonfiguration bleiben unverändert.
 
 ## Architektur
 
@@ -50,6 +51,12 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI kann
 - RunPod-Serverless-Worker mit vLLM und `mistralai/Ministral-3-14B-Instruct-2512`
 - Validierung von Modell, Eingabe, Ausgabeformat und erlaubten Generierungsoptionen im Worker
 - Anzeige von Provider, tatsächlich verwendetem Modell und Gesamtdauer
+- Auswahl zwischen Standard-Pool, RTX 4090, RTX 5090 und RTX 6000 Ada über serverseitig erlaubte Endpoint-IDs
+- RunPod-Betriebsbereitschaft mit konkretem Workerstatus und allgemeiner Supply-Stufe `HIGH`, `MEDIUM`, `LOW` oder `NONE`
+- verständlicher Live-Status mit laufendem Zeitmesser während Queue, Cold Start und Modellverarbeitung
+- getrennte Anzeige von Gesamtzeit, RunPod-`delayTime` und RunPod-`executionTime`
+- vorsichtige Warmhalteprognose auf Basis des konfigurierten Idle-Timeouts
+- aufklappbare technische Workerdetails, sofern der RunPod-Key die erforderliche Leseberechtigung besitzt
 - Docker-Image für die FastAPI-Webanwendung und reproduzierbare Docker-Compose-Konfiguration
 - Caddy-Reverse-Proxy mit automatischem HTTPS und permanenter `www`-Weiterleitung
 - Container-Healthcheck, automatische Neustarts und begrenzte Logdateigrößen
@@ -145,6 +152,18 @@ Das produktiv geprüfte Modell lautet `mistralai/Ministral-3-14B-Instruct-2512`.
 
 Container-Build, Endpoint, Queue-Verarbeitung, Scale-to-zero-Kaltstart und Rückgabe des Schreibfeedbacks an die Webanwendung wurden für Version 0.5.0 produktiv geprüft.
 
+Für den Prüfungsbetrieb gelten drei voneinander unabhängige Zeitwerte:
+
+| Wert | Einstellung | Bedeutung |
+|---|---:|---|
+| App-Wartezeit | `RUNPOD_JOB_TIMEOUT_SECONDS=1200` | Die Web-App wartet bis zu 20 Minuten einschließlich Queue und Cold Start. |
+| Endpoint-Ausführungslimit | `600 s` in RunPod | Maximale Laufzeit eines bereits übernommenen Modellauftrags. |
+| Endpoint-Idle-Timeout | `3600 s` in RunPod | Ein erfolgreicher Worker bleibt danach bis zu 60 Minuten warm. |
+
+`RUNPOD_IDLE_TIMEOUT_SECONDS=3600` dokumentiert den in der RunPod-Konsole eingestellten Wert für die Oberfläche; die Web-App kann das externe Endpoint-Setting nicht selbst verändern. Deshalb muss `Idle timeout = 3600 sec` bei allen verwendeten RunPod-Endpunkten separat gesetzt sein. Das Warmhaltefenster ist kostenpflichtig und keine garantierte Reservierung.
+
+Die Health-API funktioniert mit der normalen Queue-Berechtigung. Für Supply und technische Workerdetails benötigt der API-Key zusätzlich lesenden Zugriff auf den GPU-Katalog beziehungsweise die Serverless-Worker-API. Fehlt diese Berechtigung, zeigt die Anwendung ausdrücklich „Nicht abrufbar“ statt eine Hardwarezuordnung zu raten. Weitere Einzelheiten stehen in [RunPod-Transparenz in Version 0.6](docs/runpod-transparenz-v0.6.md).
+
 ## Tests
 
 Die automatisierten Tests führen keine echten Modellanfragen aus:
@@ -155,14 +174,14 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der geprüfte Stand von Version 0.5.0 umfasst 38 erfolgreiche Tests und 3 erfolgreiche Subtests. Sie decken Browser- und Providerauswahl, Produktionsbeschränkungen, RunPod-Client und -Worker sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JSON-Prüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der aktuelle Stand umfasst 48 erfolgreiche Tests einschließlich der drei Hardware-Zuordnungs-Subtests. Sie decken Browser- und Providerauswahl, Produktionsbeschränkungen, RunPod-Client und -Worker, Supply-/Health-Abbildung, fehlende Leseberechtigungen, Zeitmetriken sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 
 - [Abnahmeprotokoll für Version 0.5.0](docs/abnahme-v0.5.0.md)
 - [Bekannte Einschränkungen](docs/known-issues.md)
 
-Die Modellantwort wird derzeit sicher als reiner Text dargestellt. Enthält sie Markdown-Syntax wie `###`, `**` oder `---`, bleiben diese Zeichen sichtbar. Diese Darstellungsabweichung ist für Version 0.5.0 als nicht blockierende UI-Verbesserung vorgemerkt.
+Die Modellantwort wird in Version 0.6 mit einer engen, sicheren Markdown-Konfiguration dargestellt. HTML, aktive Links, Bilder und Code-Markup aus Modellantworten werden nicht aktiviert. Die verbleibende zentrale Einschränkung ist der hostabhängige RunPod-Cold-Start; die Anwendung macht ihn transparent, kann ihn aber nicht verhindern.
 
 ## Sicherheit und Datenschutz
 

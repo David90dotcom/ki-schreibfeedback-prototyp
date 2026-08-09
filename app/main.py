@@ -43,6 +43,7 @@ from app.services.feedback_service import (
     FeedbackResult,
     FeedbackService,
 )
+from app.services.runpod_status_service import RunPodStatusService
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -65,26 +66,58 @@ RUNPOD_ENDPOINT_CATALOG = (
         "RunPod Standard – automatischer 48-GB-GPU-Pool",
         "runpod_endpoint_id",
         "RUNPOD_ENDPOINT_ID",
+        (
+            "NVIDIA L40",
+            "NVIDIA L40S",
+            "NVIDIA RTX 6000 Ada Generation",
+        ),
     ),
     (
         "rtx4090_24gb",
         "RTX 4090 – 24 GB",
         "runpod_endpoint_rtx4090_id",
         "RUNPOD_ENDPOINT_RTX4090_ID",
+        ("NVIDIA GeForce RTX 4090",),
     ),
     (
         "rtx5090_32gb",
         "RTX 5090 – 32 GB",
         "runpod_endpoint_rtx5090_id",
         "RUNPOD_ENDPOINT_RTX5090_ID",
+        ("NVIDIA GeForce RTX 5090",),
     ),
     (
         "rtx6000ada_48gb",
         "RTX 6000 Ada – 48 GB",
         "runpod_endpoint_rtx6000_ada_id",
         "RUNPOD_ENDPOINT_RTX6000_ADA_ID",
+        ("NVIDIA RTX 6000 Ada Generation",),
     ),
 )
+
+
+def _format_duration_ms(value: float | int | None) -> str:
+    """Formatiert technische Millisekunden prüferfreundlich."""
+
+    if value is None:
+        return "Nicht verfügbar"
+
+    milliseconds = max(0.0, float(value))
+
+    if milliseconds < 1000:
+        return f"{milliseconds:.0f} ms"
+
+    seconds = milliseconds / 1000
+
+    if seconds < 60:
+        return f"{seconds:.1f}".replace(".", ",") + " s"
+
+    minutes = int(seconds // 60)
+    remaining_seconds = seconds % 60
+    formatted_seconds = (
+        f"{remaining_seconds:.1f}".replace(".", ",")
+    )
+    return f"{minutes} min {formatted_seconds} s"
 
 
 def _runtime_session_secret() -> str:
@@ -133,6 +166,7 @@ templates = Jinja2Templates(
 templates.env.filters[
     "feedback_markdown"
 ] = render_feedback_markdown
+templates.env.filters["duration_ms"] = _format_duration_ms
 
 
 feedback_service = FeedbackService(
@@ -158,6 +192,11 @@ feedback_service = FeedbackService(
         ),
     },
     max_input_chars=settings.max_input_chars,
+)
+
+runpod_status_service = RunPodStatusService(
+    api_key=settings.runpod_api_key,
+    idle_timeout_seconds=settings.runpod_idle_timeout_seconds,
 )
 
 login_rate_limiter = LoginRateLimiter(
@@ -226,6 +265,7 @@ def _runpod_endpoint_options() -> list[dict[str, object]]:
             label,
             settings_attribute,
             _environment_variable,
+            _gpu_type_ids,
         ) in RUNPOD_ENDPOINT_CATALOG
     ]
 
@@ -255,6 +295,7 @@ def _runpod_endpoint_label(
         label,
         _settings_attribute,
         _environment_variable,
+        _gpu_type_ids,
     ) in RUNPOD_ENDPOINT_CATALOG:
         if endpoint_key == known_key:
             return label
@@ -262,6 +303,23 @@ def _runpod_endpoint_label(
     raise ValueError(
         "Die ausgewählte RunPod-Hardwarekonfiguration "
         "ist nicht erlaubt."
+    )
+
+
+def _runpod_endpoint_definition(
+    endpoint_key: str,
+) -> tuple[str, str, str, str, tuple[str, ...]] | None:
+    """Löst einen Browser-Key ausschließlich über die feste Allowlist auf."""
+
+    normalized_key = endpoint_key.strip().lower()
+
+    return next(
+        (
+            definition
+            for definition in RUNPOD_ENDPOINT_CATALOG
+            if definition[0] == normalized_key
+        ),
+        None,
     )
 
 
@@ -279,6 +337,7 @@ def _template_context(
     openai_override_used: bool = False,
     selected_runpod_endpoint: str | None = None,
     result: FeedbackResult | None = None,
+    runpod_warm_window: dict[str, object] | None = None,
     error: str | None = None,
 ) -> dict[str, object]:
     provider_options = _provider_options()
@@ -315,10 +374,10 @@ def _template_context(
         )
     )
 
-    result_hardware = None
+    result_endpoint_label = None
 
     if result is not None and result.provider == "runpod":
-        result_hardware = _runpod_endpoint_label(
+        result_endpoint_label = _runpod_endpoint_label(
             selected_runpod_endpoint_key
         )
 
@@ -369,7 +428,11 @@ def _template_context(
         "openai_override_used": openai_override_used,
         "runpod_endpoint_options": _runpod_endpoint_options(),
         "selected_runpod_endpoint": selected_runpod_endpoint_key,
-        "result_hardware": result_hardware,
+        "result_endpoint_label": result_endpoint_label,
+        "runpod_warm_window": runpod_warm_window,
+        "runpod_idle_timeout_minutes": (
+            settings.runpod_idle_timeout_seconds // 60
+        ),
     }
 
 
@@ -574,32 +637,28 @@ def _provider_for_request(
             or RUNPOD_DEFAULT_ENDPOINT_KEY
         )
 
-        for (
-            allowed_key,
-            label,
-            settings_attribute,
-            environment_variable,
-        ) in RUNPOD_ENDPOINT_CATALOG:
-            if endpoint_key != allowed_key:
-                continue
+        definition = _runpod_endpoint_definition(endpoint_key)
 
-            endpoint_id = getattr(
-                settings,
-                settings_attribute,
-            )
-
-            if not endpoint_id:
-                raise ValueError(
-                    f"{label} ist noch nicht konfiguriert. "
-                    f"Hinterlege {environment_variable} in der "
-                    ".env-Datei."
-                )
-
-            break
-        else:
+        if definition is None:
             raise ValueError(
                 "Die ausgewählte RunPod-Hardwarekonfiguration "
                 "ist nicht erlaubt."
+            )
+
+        (
+            _allowed_key,
+            label,
+            settings_attribute,
+            environment_variable,
+            _gpu_type_ids,
+        ) = definition
+        endpoint_id = getattr(settings, settings_attribute)
+
+        if not endpoint_id:
+            raise ValueError(
+                f"{label} ist noch nicht konfiguriert. "
+                f"Hinterlege {environment_variable} in der "
+                ".env-Datei."
             )
 
         return RunPodProvider(
@@ -826,6 +885,67 @@ async def ollama_models(
     }
 
 
+@app.get("/api/runpod/status")
+async def runpod_status(
+    request: Request,
+    response: Response,
+    endpoint_key: str = Query(
+        default=RUNPOD_DEFAULT_ENDPOINT_KEY,
+        max_length=64,
+    ),
+) -> dict[str, object]:
+    """Liefert Status- und Supply-Daten ohne Inferenzauftrag."""
+
+    if _authenticated_user(request) is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"message": "Anmeldung erforderlich."},
+        )
+
+    response.headers["Cache-Control"] = "no-store"
+
+    definition = _runpod_endpoint_definition(endpoint_key)
+
+    if definition is None:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    "Die ausgewählte RunPod-Hardwarekonfiguration "
+                    "ist nicht erlaubt."
+                )
+            },
+        )
+
+    (
+        allowed_key,
+        label,
+        settings_attribute,
+        environment_variable,
+        gpu_type_ids,
+    ) = definition
+    endpoint_id = getattr(settings, settings_attribute)
+
+    if not endpoint_id:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": (
+                    f"{label} ist noch nicht konfiguriert. "
+                    f"Hinterlege {environment_variable} in der "
+                    ".env-Datei."
+                )
+            },
+        )
+
+    return await runpod_status_service.snapshot(
+        endpoint_key=allowed_key,
+        endpoint_label=label,
+        endpoint_id=endpoint_id,
+        gpu_type_ids=gpu_type_ids,
+    )
+
+
 @app.post("/analyze", response_class=HTMLResponse)
 async def analyze(
     request: Request,
@@ -849,6 +969,7 @@ async def analyze(
 
     result: FeedbackResult | None = None
     error: str | None = None
+    runpod_warm_window: dict[str, object] | None = None
 
     openai_override_used = (
         settings.browser_overrides_allowed
@@ -873,11 +994,27 @@ async def analyze(
             provider_key=provider,
             provider_override=provider_override,
         )
+
+        if result.provider == "runpod":
+            endpoint_key = (
+                runpod_endpoint.strip().lower()
+                or RUNPOD_DEFAULT_ENDPOINT_KEY
+            )
+            runpod_warm_window = (
+                runpod_status_service.mark_success(endpoint_key)
+            )
     except Exception as exc:
         error = str(exc)
 
+    template_name = (
+        "analysis_response.html"
+        if request.headers.get("X-Requested-With")
+        == "XMLHttpRequest"
+        else "index.html"
+    )
+
     return templates.TemplateResponse(
-        name="index.html",
+        name=template_name,
         request=request,
         context=_template_context(
             csrf_token=get_or_create_csrf_token(
@@ -894,6 +1031,7 @@ async def analyze(
             openai_override_used=openai_override_used,
             selected_runpod_endpoint=runpod_endpoint,
             result=result,
+            runpod_warm_window=runpod_warm_window,
             error=error,
         ),
     )
