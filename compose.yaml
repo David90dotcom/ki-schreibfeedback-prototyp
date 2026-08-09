@@ -9,7 +9,6 @@ services:
     restart: unless-stopped
     env_file:
       - path: .env
-        format: raw
     environment:
       APP_MODE: production
       ANALYSIS_DATABASE_PATH: /app/data/analysis_runs.sqlite3
