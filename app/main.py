@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -67,6 +68,21 @@ CUSTOM_MODEL_VALUE = "__custom__"
 OLLAMA_FALLBACK_BASE_URL = "http://localhost:11434"
 MAX_MODEL_NAME_CHARS = 200
 SESSION_COOKIE_NAME = "ki-schreibfeedback-session"
+RUNPOD_JOB_STATUS_REFRESH_TIMEOUT_SECONDS = 3.0
+
+
+def _static_asset_version() -> str:
+    """Erzeugt eine Cache-Kennung aus den ausgelieferten Frontend-Dateien."""
+
+    digest = hashlib.sha256()
+
+    for filename in ("app.js", "style.css"):
+        digest.update((BASE_DIR / "static" / filename).read_bytes())
+
+    return digest.hexdigest()[:12]
+
+
+STATIC_ASSET_VERSION = _static_asset_version()
 
 OPENAI_MODEL_CATALOG = (
     ("gpt-5.6-luna", "GPT-5.6 Luna – günstig"),
@@ -183,6 +199,9 @@ templates.env.filters[
     "feedback_markdown"
 ] = render_feedback_markdown
 templates.env.filters["duration_ms"] = _format_duration_ms
+templates.env.globals[
+    "static_asset_version"
+] = STATIC_ASSET_VERSION
 
 
 feedback_service = FeedbackService(
@@ -1063,7 +1082,10 @@ async def _refresh_tracked_runpod_job(
     provider = _runpod_provider(endpoint_id=job.endpoint_id)
 
     try:
-        payload = await provider.get_job_status(job.job_id)
+        payload = await asyncio.wait_for(
+            provider.get_job_status(job.job_id),
+            timeout=RUNPOD_JOB_STATUS_REFRESH_TIMEOUT_SECONDS,
+        )
         raw_status = payload.get("status")
 
         if not isinstance(raw_status, str) or not raw_status.strip():
@@ -1104,6 +1126,11 @@ async def _refresh_tracked_runpod_job(
             )
             return None
 
+        return _tracked_runpod_job_payload(
+            job,
+            status_fresh=False,
+        )
+    except asyncio.TimeoutError:
         return _tracked_runpod_job_payload(
             job,
             status_fresh=False,

@@ -4,6 +4,7 @@
     const CUSTOM_MODEL_VALUE = "__custom__";
     const SLOW_RESPONSE_DELAY_MS = 8000;
     const RUNPOD_STATUS_POLL_INTERVAL_MS = 3000;
+    const RUNPOD_JOBS_REQUEST_TIMEOUT_MS = 8000;
 
     const form = document.querySelector("#analysis-form");
 
@@ -547,6 +548,11 @@
         }
 
         runpodJobsRequestInFlight = true;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(
+            () => controller.abort(),
+            RUNPOD_JOBS_REQUEST_TIMEOUT_MS
+        );
 
         try {
             const parameters = new URLSearchParams({
@@ -554,7 +560,10 @@
             });
             const response = await fetch(
                 `${jobsUrl}?${parameters}`,
-                {headers: {Accept: "application/json"}}
+                {
+                    headers: {Accept: "application/json"},
+                    signal: controller.signal,
+                }
             );
             const payload = await response.json();
 
@@ -608,14 +617,25 @@
 
             return payload;
         } catch (error) {
-            const message =
-                error instanceof Error
+            const requestTimedOut =
+                error instanceof DOMException &&
+                error.name === "AbortError";
+            const message = requestTimedOut
+                ? "Die gespeicherten Anfragen konnten nicht rechtzeitig geladen werden. Bitte erneut versuchen."
+                : error instanceof Error
                     ? error.message
                     : "Aktive RunPod-Anfragen konnten nicht geladen werden.";
-            renderActiveRunpodJobs([]);
+            runpodActiveJobs.replaceChildren();
+            addTextElement(
+                runpodActiveJobs,
+                "p",
+                message,
+                "hint status-error"
+            );
             setRunpodJobManagerStatus(message, "error");
             return null;
         } finally {
+            window.clearTimeout(timeoutId);
             runpodJobsRequestInFlight = false;
         }
     }
