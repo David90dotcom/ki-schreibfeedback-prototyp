@@ -291,7 +291,6 @@
                 id="runpod-readiness"
                 class="readiness-panel"
                 data-status-url="{{ url_for('runpod_status') }}"
-                data-idle-timeout-minutes="{{ runpod_idle_timeout_minutes }}"
                 aria-live="polite"
             >
                 <div class="readiness-header">
@@ -326,26 +325,6 @@
                     </div>
 
                     <div>
-                        <dt>GPU-Verfügbarkeit</dt>
-                        <dd>
-                            <span
-                                id="runpod-supply-status"
-                                class="status-badge status-neutral"
-                            >
-                                Wird geladen …
-                            </span>
-                        </dd>
-                    </div>
-
-                    <div>
-                        <dt>Warmhaltefenster</dt>
-                        <dd id="runpod-warm-window">
-                            Bis zu {{ runpod_idle_timeout_minutes }} Minuten
-                            nach der letzten erfolgreichen Anfrage
-                        </dd>
-                    </div>
-
-                    <div>
                         <dt>Stand</dt>
                         <dd>
                             <time id="runpod-status-time">–</time>
@@ -353,26 +332,44 @@
                     </div>
                 </dl>
 
-                <p
-                    id="runpod-status-note"
-                    class="readiness-note"
+                <section
+                    class="aggregate-worker-status"
+                    aria-labelledby="aggregate-worker-status-title"
                 >
-                    Die Supply-Angabe beschreibt die allgemeine
-                    RunPod-Kapazität und garantiert keinen erfolgreichen
-                    Workerstart.
-                </p>
+                    <h5 id="aggregate-worker-status-title">
+                        Aggregierter Status
+                    </h5>
 
-                <details class="technical-details">
-                    <summary>Technische Workerdetails</summary>
-
-                    <div id="runpod-worker-details">
-                        <p>
-                            Details werden geladen. Sie erscheinen nur,
-                            wenn der API-Key die erforderliche
-                            Leseberechtigung besitzt.
-                        </p>
-                    </div>
-                </details>
+                    <dl
+                        id="runpod-aggregate-status"
+                        class="worker-count-grid"
+                    >
+                        <div>
+                            <dt>Idle</dt>
+                            <dd data-worker-count="idle">–</dd>
+                        </div>
+                        <div>
+                            <dt>Bereit</dt>
+                            <dd data-worker-count="ready">–</dd>
+                        </div>
+                        <div>
+                            <dt>Laufend</dt>
+                            <dd data-worker-count="running">–</dd>
+                        </div>
+                        <div>
+                            <dt>Startend</dt>
+                            <dd data-worker-count="initializing">–</dd>
+                        </div>
+                        <div>
+                            <dt>Gedrosselt</dt>
+                            <dd data-worker-count="throttled">–</dd>
+                        </div>
+                        <div>
+                            <dt>Fehlerhaft</dt>
+                            <dd data-worker-count="unhealthy">–</dd>
+                        </div>
+                    </dl>
+                </section>
             </section>
         </section>
 
