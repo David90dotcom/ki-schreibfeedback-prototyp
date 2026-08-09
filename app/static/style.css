@@ -172,6 +172,21 @@ button:disabled {
     background: #f3f4f6;
 }
 
+.danger-button {
+    color: #b42318;
+    background: #ffffff;
+    border: 1px solid #fda29b;
+}
+
+.danger-button:hover {
+    color: #ffffff;
+    background: #b42318;
+}
+
+.danger-button[hidden] {
+    display: none;
+}
+
 .status-message {
     min-height: 1.5em;
     margin: 10px 0 0;
@@ -382,6 +397,101 @@ button:disabled {
     font-size: 0.88rem;
 }
 
+.runpod-job-manager {
+    margin-top: 12px;
+    padding: 0 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.runpod-job-manager summary {
+    padding: 12px 0;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.runpod-job-manager[open] {
+    padding-bottom: 14px;
+}
+
+.runpod-job-manager[open] summary {
+    border-bottom: 1px solid var(--border);
+}
+
+.runpod-job-manager h5 {
+    margin: 14px 0 8px;
+    font-size: 0.92rem;
+}
+
+.runpod-active-jobs > .hint {
+    margin: 8px 0 0;
+}
+
+.runpod-job-list {
+    display: grid;
+    gap: 8px;
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+.runpod-job-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+}
+
+.runpod-job-information {
+    display: grid;
+    min-width: 0;
+}
+
+.runpod-job-id {
+    overflow-wrap: anywhere;
+    font-size: 0.85rem;
+}
+
+.runpod-job-meta {
+    margin-top: 3px;
+    color: var(--muted);
+    font-size: 0.82rem;
+}
+
+.runpod-job-cancel {
+    flex: 0 0 auto;
+}
+
+.manual-job-cancel {
+    margin-top: 14px;
+    padding-top: 1px;
+    border-top: 1px solid var(--border);
+}
+
+.manual-job-cancel label {
+    margin-top: 10px;
+    font-size: 0.9rem;
+}
+
+.manual-job-cancel-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.manual-job-cancel-controls input {
+    min-width: 0;
+}
+
+.manual-job-cancel-controls button {
+    align-self: stretch;
+}
+
 .technical-details {
     margin-top: 14px;
     border-top: 1px solid var(--border);
@@ -439,6 +549,49 @@ button:disabled {
     background: var(--info-bg);
     border: 1px solid var(--info-border);
     border-radius: 10px;
+}
+
+.loading-indicator.loading-warning {
+    background: var(--warning-bg);
+    border-color: var(--warning-border);
+}
+
+.loading-indicator.loading-warning .loading-bar {
+    background: #fde68a;
+}
+
+.loading-indicator.loading-warning .loading-bar span {
+    background: #d97706;
+}
+
+.loading-indicator.loading-success {
+    background: var(--success-bg);
+    border-color: var(--success-border);
+}
+
+.loading-indicator.loading-success .loading-bar {
+    background: #bbf7d0;
+}
+
+.loading-indicator.loading-success .loading-bar span {
+    background: #16865a;
+}
+
+.loading-indicator.loading-error {
+    background: var(--error-bg);
+    border-color: var(--error-border);
+}
+
+.loading-indicator.loading-error .loading-bar {
+    background: #fecaca;
+}
+
+.loading-indicator.loading-error .loading-bar span {
+    background: #b42318;
+}
+
+#cancel-current-runpod-job {
+    margin-top: 12px;
 }
 
 .loading-bar {
@@ -654,5 +807,19 @@ button:disabled {
 
     .worker-count-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .runpod-job-list li {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .runpod-job-cancel,
+    .manual-job-cancel-controls button {
+        width: 100%;
+    }
+
+    .manual-job-cancel-controls {
+        grid-template-columns: 1fr;
     }
 }

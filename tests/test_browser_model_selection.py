@@ -74,6 +74,18 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('id="runpod-worker-status"', response.text)
         self.assertIn('id="runpod-status-time"', response.text)
         self.assertIn('id="runpod-aggregate-status"', response.text)
+        self.assertIn('id="runpod-job-manager"', response.text)
+        self.assertIn('id="runpod-active-jobs"', response.text)
+        self.assertIn('id="manual-runpod-job-id"', response.text)
+        self.assertIn(
+            'id="cancel-current-runpod-job"',
+            response.text,
+        )
+        self.assertIn(
+            'name="runpod_tracking_id"',
+            response.text,
+        )
+        self.assertIn("Hängende Anfragen verwalten", response.text)
         self.assertIn('data-worker-count="idle"', response.text)
         self.assertIn('data-worker-count="ready"', response.text)
         self.assertIn('data-worker-count="running"', response.text)
@@ -120,6 +132,15 @@ class BrowserModelSelectionTests(unittest.TestCase):
             "Ein laufender Worker ist nicht automatisch deinem Auftrag zugeordnet",
             script,
         )
+        self.assertIn(
+            "Deine Anfrage wartet in der RunPod-Warteschlange",
+            script,
+        )
+        self.assertIn(
+            "Ein Worker verarbeitet jetzt deine Anfrage",
+            script,
+        )
+        self.assertIn('setRunpodLoadingTone("success")', script)
 
     def test_production_page_hides_ollama_and_override_fields(self) -> None:
         production_settings = replace(

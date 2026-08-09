@@ -39,3 +39,21 @@ Einzelne neu bereitgestellte Worker können beim vLLM-/Triton-Warm-up mit einem 
 ### Behandlung in der Anwendung
 
 Die Anwendung verlängert ihr eigenes Queue-/Cold-Start-Limit auf 1200 Sekunden, zeigt Endpointstatus und laufende Wartezeit und trennt nach Erfolg `delayTime` von `executionTime`. Das RunPod-Idle-Timeout wird für den Prüfungsbetrieb auf 3600 Sekunden festgelegt. Diese Maßnahmen verbessern Transparenz und Nutzbarkeit, beseitigen aber keinen externen CUDA-/Hostfehler.
+
+## RUNPOD-006-02: Fremde oder ältere Queue-Jobs sind nicht automatisch auflistbar
+
+| Feld | Bewertung |
+|---|---|
+| Betroffene Version | 0.6 |
+| Bereich | RunPod Serverless / Auftragsverwaltung |
+| Priorität | niedrig |
+| Release-blockierend | nein |
+| Status | durch manuellen Einzelabbruch behandelt |
+
+### Beobachtung
+
+RunPods dokumentierte Queue-API liefert über `/health` nur aggregierte Anzahlen. Sie stellt keine öffentliche Operation bereit, mit der die Web-App sämtliche einzelnen Job-IDs eines Endpoints nachträglich abrufen kann.
+
+### Behandlung in der Anwendung
+
+Neue Aufträge werden unmittelbar nach `/run` technisch und ohne Schülertext persistent registriert und können automatisch aufgelistet werden. Für Jobs, die vor dieser Funktion oder außerhalb der Web-App entstanden sind, kann die Request-ID manuell eingegeben und über `/cancel/{job_id}` einzeln abgebrochen werden. `/purge-queue` wird nicht angeboten, weil die Operation alle wartenden Jobs des Endpoints betreffen würde.

@@ -1,6 +1,6 @@
 # KI-Schreibfeedback-Prototyp 0.6
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.6 ergänzt auswählbare GPU-Endpunkte, sichere Markdown-Darstellung und eine transparente Anzeige von Supply, Workerzustand, Cold Start sowie getrennten Warte- und Verarbeitungszeiten.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.6 ergänzt auswählbare GPU-Endpunkte, sichere Markdown-Darstellung, einen verständlichen Worker- und Jobstatus, getrennte Warte- und Verarbeitungszeiten sowie den gezielten Abbruch hängender Anfragen.
 
 > **Aktueller Entwicklungsstand: Version 0.6.** Das [Abnahmeprotokoll 0.5.0](docs/abnahme-v0.5.0.md) dokumentiert weiterhin den letzten vollständig produktiv abgenommenen Release. Die neuen Transparenzfunktionen von 0.6 sind automatisiert getestet und müssen nach dem Web-Redeployment noch einmal Ende-zu-Ende gegen die echten RunPod-Endpunkte geprüft werden.
 
@@ -11,7 +11,7 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, loka
 | **0.3** | abgeschlossen | Provider-Auswahl für Ollama, OpenAI und RunPod, RunPod-Worker, Konfiguration und automatisierte Tests |
 | **0.4** | abgeschlossen | Serverseitige Anmeldung, geschützte Web- und Modellrouten, sichere Sitzungen, Login-Begrenzung und CSRF-Schutz |
 | **0.5.0** | abgeschlossen | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
-| **0.6** | in Abnahme | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Supply-/Workerstatus, Live-Warteanzeige, getrennte Zeiten und Warmhalteprognose |
+| **0.6** | in Abnahme | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
 
 Version 0.5.0 ist der erste produktiv bereitgestellte und Ende-zu-Ende abgenommene Stand. Version 0.6 baut additiv darauf auf; Modell-Payload und vLLM-Startkonfiguration bleiben unverändert.
 
@@ -31,7 +31,7 @@ Startseite und Analysefunktion sind nur nach erfolgreicher Anmeldung erreichbar.
 
 Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI kann ein serverseitiger Standard-Key hinterlegt werden. Browserseitige Provider- und Key-Overrides sind ausschließlich im lokalen Entwicklungsmodus erlaubt. RunPod ist im produktiven Abnahmeszenario vorausgewählt.
 
-## Funktionsumfang von Version 0.5.0
+## Aktueller Funktionsumfang
 
 - serverseitige Anmeldung mit einem konfigurierbaren Prüferkonto
 - Argon2-Passworthash statt Klartextpasswort in der Konfiguration
@@ -52,11 +52,13 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI kann
 - Validierung von Modell, Eingabe, Ausgabeformat und erlaubten Generierungsoptionen im Worker
 - Anzeige von Provider, tatsächlich verwendetem Modell und Gesamtdauer
 - Auswahl zwischen Standard-Pool, RTX 4090, RTX 5090 und RTX 6000 Ada über serverseitig erlaubte Endpoint-IDs
-- RunPod-Betriebsbereitschaft mit konkretem Workerstatus und allgemeiner Supply-Stufe `HIGH`, `MEDIUM`, `LOW` oder `NONE`
+- kompakte RunPod-Betriebsbereitschaft mit Worker-Kapazität, Zeitpunkt und aggregierten Workerzahlen
 - verständlicher Live-Status mit laufendem Zeitmesser während Queue, Cold Start und Modellverarbeitung
+- individueller Jobstatus mit Orange für `IN_QUEUE` und Grün erst ab `IN_PROGRESS` beziehungsweise `RUNNING`
+- persistente technische Registrierung aktiver RunPod-Jobs ohne Schülertext oder Prompt
+- eingeklappte Verwaltung zum gezielten Abbruch registrierter und manuell angegebener Altjobs
 - getrennte Anzeige von Gesamtzeit, RunPod-`delayTime` und RunPod-`executionTime`
-- vorsichtige Warmhalteprognose auf Basis des konfigurierten Idle-Timeouts
-- aufklappbare technische Workerdetails, sofern der RunPod-Key die erforderliche Leseberechtigung besitzt
+- intern beibehaltene, aber in der bereinigten GUI ausgeblendete Supply-, Warmhalte- und Workerdetaildaten
 - Docker-Image für die FastAPI-Webanwendung und reproduzierbare Docker-Compose-Konfiguration
 - Caddy-Reverse-Proxy mit automatischem HTTPS und permanenter `www`-Weiterleitung
 - Container-Healthcheck, automatische Neustarts und begrenzte Logdateigrößen
@@ -162,7 +164,9 @@ Für den Prüfungsbetrieb gelten drei voneinander unabhängige Zeitwerte:
 
 `RUNPOD_IDLE_TIMEOUT_SECONDS=3600` dokumentiert den in der RunPod-Konsole eingestellten Wert für die Oberfläche; die Web-App kann das externe Endpoint-Setting nicht selbst verändern. Deshalb muss `Idle timeout = 3600 sec` bei allen verwendeten RunPod-Endpunkten separat gesetzt sein. Das Warmhaltefenster ist kostenpflichtig und keine garantierte Reservierung.
 
-Die Health-API funktioniert mit der normalen Queue-Berechtigung. Für Supply und technische Workerdetails benötigt der API-Key zusätzlich lesenden Zugriff auf den GPU-Katalog beziehungsweise die Serverless-Worker-API. Fehlt diese Berechtigung, zeigt die Anwendung ausdrücklich „Nicht abrufbar“ statt eine Hardwarezuordnung zu raten. Weitere Einzelheiten stehen in [RunPod-Transparenz in Version 0.6](docs/runpod-transparenz-v0.6.md).
+Die Health-API funktioniert mit der normalen Queue-Berechtigung. Für die intern weiterhin vorhandenen Supply- und technischen Workerdaten benötigt der API-Key zusätzlich lesenden Zugriff auf den GPU-Katalog beziehungsweise die Serverless-Worker-API. Fehlt diese Berechtigung, erfindet die Anwendung keine Hardwarezuordnung. Weitere Einzelheiten stehen in [RunPod-Transparenz in Version 0.6](docs/runpod-transparenz-v0.6.md).
+
+Die bereinigte 0.6-Oberfläche zeigt diese Verwaltungsdetails vorübergehend nicht an. Zusätzlich registriert sie die Job-ID jedes von der Web-App gestarteten RunPod-Auftrags in der persistenten technischen SQLite-Datei. Unter „Hängende Anfragen verwalten“ lassen sich aktive Jobs einzeln abbrechen. Für ältere oder direkt in RunPod gestartete Jobs kann die Request-ID manuell eingegeben werden. Der Abbruch beendet nur den konkreten Job, nicht den Worker; ein pauschales Leeren der Queue ist nicht Teil der Oberfläche.
 
 ## Tests
 
@@ -174,7 +178,7 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der aktuelle Stand umfasst 48 erfolgreiche Tests einschließlich der drei Hardware-Zuordnungs-Subtests. Sie decken Browser- und Providerauswahl, Produktionsbeschränkungen, RunPod-Client und -Worker, Supply-/Health-Abbildung, fehlende Leseberechtigungen, Zeitmetriken sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der aktuelle Stand umfasst 68 erfolgreiche Tests einschließlich der acht Subtests. Sie decken Browser- und Providerauswahl, Produktionsbeschränkungen, RunPod-Client und -Worker, Supply-/Health-Abbildung, individuelle Jobstatus, persistente Jobregistrierung, Einzelabbruch, manuellen Altjob-Abbruch, Zeitmetriken sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 

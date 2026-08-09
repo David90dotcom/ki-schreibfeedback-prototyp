@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 
 import httpx
 
@@ -15,6 +15,7 @@ from app.domain.model_catalog import ModelParameters
 from app.llm.base import ModelRequest, ModelResponse
 from app.llm.errors import (
     ProviderAuthenticationError,
+    ProviderInvalidRequestError,
     ProviderTimeoutError,
 )
 from app.llm.runpod_client import RunPodProvider
@@ -45,6 +46,145 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(provider.job_timeout_seconds, 1200.0)
+
+    async def test_cancel_job_uses_exact_request_id(self) -> None:
+        recorded_requests: list[httpx.Request] = []
+        callback = AsyncMock()
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            recorded_requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "id": "job-to-cancel-e1",
+                    "status": "CANCELLED",
+                },
+            )
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+        )
+        provider = RunPodProvider(
+            api_key=self.API_KEY,
+            endpoint_id=self.ENDPOINT_ID,
+            model_name=self.MODEL_NAME,
+            job_status_callback=callback,
+        )
+
+        with patch(
+            "app.llm.runpod_client.httpx.AsyncClient",
+            return_value=client,
+        ) as mocked_client:
+            payload = await provider.cancel_job(
+                "job-to-cancel-e1"
+            )
+
+        self.assertEqual(
+            payload,
+            {
+                "id": "job-to-cancel-e1",
+                "status": "CANCELLED",
+            },
+        )
+        self.assertEqual(len(recorded_requests), 1)
+        self.assertEqual(recorded_requests[0].method, "POST")
+        self.assertEqual(
+            recorded_requests[0].url.path,
+            f"/v2/{self.ENDPOINT_ID}/cancel/job-to-cancel-e1",
+        )
+        self.assertEqual(
+            mocked_client.call_args.kwargs["headers"]["Authorization"],
+            f"Bearer {self.API_KEY}",
+        )
+        callback.assert_awaited_once_with(
+            "job-to-cancel-e1",
+            "CANCELLED",
+        )
+
+    async def test_cancel_job_rejects_path_injection(self) -> None:
+        provider = self._provider()
+
+        with patch(
+            "app.llm.runpod_client.httpx.AsyncClient"
+        ) as client_class:
+            with self.assertRaisesRegex(
+                ProviderInvalidRequestError,
+                "kein gültiges Format",
+            ):
+                await provider.cancel_job("../../purge-queue")
+
+        client_class.assert_not_called()
+
+    async def test_complete_reports_individual_job_statuses(
+        self,
+    ) -> None:
+        callback = AsyncMock()
+        status_requests = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal status_requests
+
+            if request.url.path.endswith("/run"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "tracked-job-e1",
+                        "status": "IN_QUEUE",
+                    },
+                )
+
+            status_requests += 1
+            return httpx.Response(
+                200,
+                json={
+                    "id": "tracked-job-e1",
+                    "status": "COMPLETED",
+                    "output": {
+                        "model": self.MODEL_NAME,
+                        "choices": [
+                            {
+                                "message": {
+                                    "content": "Fertiges Feedback",
+                                },
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    },
+                },
+            )
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+        )
+        provider = RunPodProvider(
+            api_key=self.API_KEY,
+            endpoint_id=self.ENDPOINT_ID,
+            model_name=self.MODEL_NAME,
+            poll_interval_seconds=0.01,
+            job_status_callback=callback,
+        )
+
+        with (
+            patch(
+                "app.llm.runpod_client.httpx.AsyncClient",
+                return_value=client,
+            ),
+            patch(
+                "app.llm.runpod_client.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+        ):
+            response = await provider.complete(self._request())
+
+        self.assertEqual(response.text, "Fertiges Feedback")
+        self.assertEqual(status_requests, 1)
+        self.assertEqual(
+            callback.await_args_list,
+            [
+                call("tracked-job-e1", "IN_QUEUE"),
+                call("tracked-job-e1", "COMPLETED"),
+            ],
+        )
 
     @staticmethod
     def _request() -> ModelRequest:
