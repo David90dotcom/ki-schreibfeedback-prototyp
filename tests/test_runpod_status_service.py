@@ -244,6 +244,10 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
                 )
 
             if request.method == "POST" and request.url.path == "/graphql":
+                self.assertEqual(
+                    request.url.params["api_key"],
+                    self.API_KEY,
+                )
                 body = json.loads(request.content)
                 self.assertEqual(
                     body["variables"]["endpointId"],
@@ -357,6 +361,7 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
             self.ENDPOINT_ID,
             json.dumps(snapshot),
         )
+        self.assertNotIn(self.API_KEY, json.dumps(snapshot))
         self.assertEqual(
             sum(request.method == "POST" for request in requests),
             1,
@@ -381,13 +386,17 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
             if request.url.path.startswith("/v2/serverless/"):
                 return httpx.Response(500)
 
-            if request.url.path.startswith("/v2/catalog/gpus/"):
+            if request.url.path.endswith("/v2/catalog/gpus"):
                 return httpx.Response(
                     200,
                     json={
-                        "id": self.GPU_TYPE_ID,
-                        "pool": "ADA_24",
-                        "availability": "MEDIUM",
+                        "gpus": [
+                            {
+                                "id": self.GPU_TYPE_ID,
+                                "pool": "ADA_24",
+                                "availability": "MEDIUM",
+                            }
+                        ]
                     },
                 )
 
@@ -418,6 +427,14 @@ class RunPodStatusServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(snapshot["technical"]["aggregateAvailable"])
         self.assertEqual(snapshot["technical"]["source"], "health")
         self.assertEqual(snapshot["technical"]["counts"]["throttled"], 1)
+        self.assertIn(
+            "GraphQL-Rückfall",
+            snapshot["configuration"]["message"],
+        )
+        self.assertIn(
+            "GraphQL-Rückfall",
+            snapshot["technical"]["diagnosticMessage"],
+        )
 
 
 if __name__ == "__main__":
