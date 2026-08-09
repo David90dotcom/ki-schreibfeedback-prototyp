@@ -1,6 +1,9 @@
+import asyncio
 import secrets
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
+from uuid import UUID, uuid4
 
 import httpx
 from fastapi import (
@@ -26,9 +29,16 @@ from app.config import (
 )
 from app.feedback_markdown import render_feedback_markdown
 from app.llm.base import LLMProvider
+from app.llm.errors import (
+    ProviderError,
+    ProviderInvalidRequestError,
+)
 from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
-from app.llm.runpod_client import RunPodProvider
+from app.llm.runpod_client import (
+    RunPodJobStatusCallback,
+    RunPodProvider,
+)
 from app.security import (
     LoginRateLimiter,
     authenticated_username,
@@ -42,6 +52,12 @@ from app.security import (
 from app.services.feedback_service import (
     FeedbackResult,
     FeedbackService,
+)
+from app.services.runpod_job_store import (
+    ACTIVE_RUNPOD_JOB_STATUSES,
+    RunPodJobStore,
+    RunPodJobStoreError,
+    RunPodTrackedJob,
 )
 from app.services.runpod_status_service import RunPodStatusService
 
@@ -199,6 +215,10 @@ runpod_status_service = RunPodStatusService(
     idle_timeout_seconds=settings.runpod_idle_timeout_seconds,
 )
 
+runpod_job_store = RunPodJobStore(
+    settings.analysis_database_path
+)
+
 login_rate_limiter = LoginRateLimiter(
     max_attempts=settings.login_rate_limit_attempts,
     window_seconds=(
@@ -336,6 +356,7 @@ def _template_context(
     openai_custom_model: str = "",
     openai_override_used: bool = False,
     selected_runpod_endpoint: str | None = None,
+    runpod_tracking_id: str | None = None,
     result: FeedbackResult | None = None,
     runpod_warm_window: dict[str, object] | None = None,
     error: str | None = None,
@@ -428,6 +449,9 @@ def _template_context(
         "openai_override_used": openai_override_used,
         "runpod_endpoint_options": _runpod_endpoint_options(),
         "selected_runpod_endpoint": selected_runpod_endpoint_key,
+        "runpod_tracking_id": (
+            runpod_tracking_id or str(uuid4())
+        ),
         "result_endpoint_label": result_endpoint_label,
         "runpod_warm_window": runpod_warm_window,
         "runpod_idle_timeout_minutes": (
@@ -521,6 +545,94 @@ def _validate_model_name(
     return model_name
 
 
+def _validate_runpod_tracking_id(raw_tracking_id: str) -> str:
+    """Akzeptiert ausschließlich kanonische UUIDs aus dem Analyseformular."""
+
+    try:
+        tracking_id = UUID(raw_tracking_id.strip())
+    except (AttributeError, ValueError) as exc:
+        raise ValueError(
+            "Die technische RunPod-Tracking-ID ist ungültig."
+        ) from exc
+
+    return str(tracking_id)
+
+
+def _configured_runpod_endpoint(
+    endpoint_key: str,
+) -> tuple[str, str, str]:
+    """Löst einen öffentlichen Key auf eine konfigurierte Endpoint-ID auf."""
+
+    normalized_key = (
+        endpoint_key.strip().lower()
+        or RUNPOD_DEFAULT_ENDPOINT_KEY
+    )
+    definition = _runpod_endpoint_definition(normalized_key)
+
+    if definition is None:
+        raise ValueError(
+            "Die ausgewählte RunPod-Hardwarekonfiguration "
+            "ist nicht erlaubt."
+        )
+
+    (
+        allowed_key,
+        label,
+        settings_attribute,
+        environment_variable,
+        _gpu_type_ids,
+    ) = definition
+    endpoint_id = getattr(settings, settings_attribute)
+
+    if not endpoint_id:
+        raise ValueError(
+            f"{label} ist noch nicht konfiguriert. "
+            f"Hinterlege {environment_variable} in der .env-Datei."
+        )
+
+    return allowed_key, label, endpoint_id
+
+
+def _runpod_provider(
+    *,
+    endpoint_id: str,
+    job_status_callback: RunPodJobStatusCallback | None = None,
+) -> RunPodProvider:
+    return RunPodProvider(
+        api_key=settings.runpod_api_key,
+        endpoint_id=endpoint_id,
+        model_name=settings.runpod_model,
+        job_timeout_seconds=(
+            settings.runpod_job_timeout_seconds
+        ),
+        poll_interval_seconds=(
+            settings.runpod_poll_interval_seconds
+        ),
+        job_status_callback=job_status_callback,
+    )
+
+
+def _runpod_job_status_callback(
+    *,
+    tracking_id: str,
+    endpoint_key: str,
+    endpoint_id: str,
+) -> RunPodJobStatusCallback:
+    async def record_job_status(
+        job_id: str,
+        status: str,
+    ) -> None:
+        await runpod_job_store.record_status(
+            tracking_id=tracking_id,
+            job_id=job_id,
+            endpoint_key=endpoint_key,
+            endpoint_id=endpoint_id,
+            status=status,
+        )
+
+    return record_job_status
+
+
 def _validate_ollama_base_url(
     raw_base_url: str,
 ) -> str:
@@ -572,6 +684,7 @@ def _provider_for_request(
     openai_custom_model: str,
     openai_api_key: str,
     runpod_endpoint: str,
+    runpod_tracking_id: str,
 ) -> LLMProvider:
     if provider_key == "ollama":
         if not _ollama_available():
@@ -632,44 +745,19 @@ def _provider_for_request(
         )
 
     if provider_key == "runpod":
-        endpoint_key = (
-            runpod_endpoint.strip().lower()
-            or RUNPOD_DEFAULT_ENDPOINT_KEY
+        endpoint_key, _label, endpoint_id = (
+            _configured_runpod_endpoint(runpod_endpoint)
+        )
+        tracking_id = _validate_runpod_tracking_id(
+            runpod_tracking_id
         )
 
-        definition = _runpod_endpoint_definition(endpoint_key)
-
-        if definition is None:
-            raise ValueError(
-                "Die ausgewählte RunPod-Hardwarekonfiguration "
-                "ist nicht erlaubt."
-            )
-
-        (
-            _allowed_key,
-            label,
-            settings_attribute,
-            environment_variable,
-            _gpu_type_ids,
-        ) = definition
-        endpoint_id = getattr(settings, settings_attribute)
-
-        if not endpoint_id:
-            raise ValueError(
-                f"{label} ist noch nicht konfiguriert. "
-                f"Hinterlege {environment_variable} in der "
-                ".env-Datei."
-            )
-
-        return RunPodProvider(
-            api_key=settings.runpod_api_key,
+        return _runpod_provider(
             endpoint_id=endpoint_id,
-            model_name=settings.runpod_model,
-            job_timeout_seconds=(
-                settings.runpod_job_timeout_seconds
-            ),
-            poll_interval_seconds=(
-                settings.runpod_poll_interval_seconds
+            job_status_callback=_runpod_job_status_callback(
+                tracking_id=tracking_id,
+                endpoint_key=endpoint_key,
+                endpoint_id=endpoint_id,
             ),
         )
 
@@ -946,6 +1034,202 @@ async def runpod_status(
     )
 
 
+def _tracked_runpod_job_payload(
+    job: RunPodTrackedJob,
+    *,
+    status_fresh: bool,
+) -> dict[str, object]:
+    now = datetime.now(timezone.utc)
+    age_seconds = max(
+        0,
+        int((now - job.created_at).total_seconds()),
+    )
+
+    return {
+        "trackingId": job.tracking_id,
+        "jobId": job.job_id,
+        "endpointKey": job.endpoint_key,
+        "status": job.status,
+        "createdAt": job.created_at.isoformat(),
+        "updatedAt": job.updated_at.isoformat(),
+        "ageSeconds": age_seconds,
+        "statusFresh": status_fresh,
+    }
+
+
+async def _refresh_tracked_runpod_job(
+    job: RunPodTrackedJob,
+) -> dict[str, object] | None:
+    provider = _runpod_provider(endpoint_id=job.endpoint_id)
+
+    try:
+        payload = await provider.get_job_status(job.job_id)
+        raw_status = payload.get("status")
+
+        if not isinstance(raw_status, str) or not raw_status.strip():
+            return _tracked_runpod_job_payload(
+                job,
+                status_fresh=False,
+            )
+
+        status = raw_status.strip().upper()
+        await runpod_job_store.update_known_job(
+            endpoint_id=job.endpoint_id,
+            job_id=job.job_id,
+            status=status,
+        )
+
+        if status not in ACTIVE_RUNPOD_JOB_STATUSES:
+            return None
+
+        refreshed_job = RunPodTrackedJob(
+            tracking_id=job.tracking_id,
+            job_id=job.job_id,
+            endpoint_key=job.endpoint_key,
+            endpoint_id=job.endpoint_id,
+            status=status,
+            created_at=job.created_at,
+            updated_at=datetime.now(timezone.utc),
+        )
+        return _tracked_runpod_job_payload(
+            refreshed_job,
+            status_fresh=True,
+        )
+    except ProviderError as exc:
+        if exc.status_code == 404:
+            await runpod_job_store.update_known_job(
+                endpoint_id=job.endpoint_id,
+                job_id=job.job_id,
+                status="NOT_FOUND",
+            )
+            return None
+
+        return _tracked_runpod_job_payload(
+            job,
+            status_fresh=False,
+        )
+
+
+@app.get("/api/runpod/jobs")
+async def runpod_jobs(
+    request: Request,
+    response: Response,
+    endpoint_key: str = Query(
+        default=RUNPOD_DEFAULT_ENDPOINT_KEY,
+        max_length=64,
+    ),
+) -> dict[str, object]:
+    """Liefert aktive, von dieser Web-App registrierte RunPod-Jobs."""
+
+    if _authenticated_user(request) is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"message": "Anmeldung erforderlich."},
+        )
+
+    response.headers["Cache-Control"] = "no-store"
+
+    try:
+        allowed_key, label, _endpoint_id = (
+            _configured_runpod_endpoint(endpoint_key)
+        )
+        tracked_jobs = await runpod_job_store.list_active(
+            endpoint_key=allowed_key,
+        )
+        refreshed_jobs = await asyncio.gather(
+            *(
+                _refresh_tracked_runpod_job(job)
+                for job in tracked_jobs
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": str(exc)},
+        ) from exc
+    except RunPodJobStoreError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"message": str(exc)},
+        ) from exc
+
+    return {
+        "endpoint": {
+            "key": allowed_key,
+            "label": label,
+        },
+        "checkedAt": datetime.now(timezone.utc).isoformat(),
+        "jobs": [
+            job
+            for job in refreshed_jobs
+            if job is not None
+        ],
+    }
+
+
+@app.post("/api/runpod/jobs/cancel")
+async def cancel_runpod_job(
+    request: Request,
+    endpoint_key: str = Form(..., max_length=64),
+    job_id: str = Form(..., max_length=200),
+    csrf_token: str = Form("", max_length=256),
+) -> dict[str, object]:
+    """Bricht genau einen Job eines erlaubten RunPod-Endpoints ab."""
+
+    if _authenticated_user(request) is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"message": "Anmeldung erforderlich."},
+        )
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        allowed_key, label, endpoint_id = (
+            _configured_runpod_endpoint(endpoint_key)
+        )
+        provider = _runpod_provider(endpoint_id=endpoint_id)
+        payload = await provider.cancel_job(job_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": str(exc)},
+        ) from exc
+    except ProviderError as exc:
+        if isinstance(exc, ProviderInvalidRequestError):
+            status_code = 422
+        elif exc.status_code == 404:
+            status_code = 404
+        else:
+            status_code = 502
+        raise HTTPException(
+            status_code=status_code,
+            detail={"message": exc.message},
+        ) from exc
+
+    normalized_job_id = job_id.strip()
+    status = str(payload.get("status") or "CANCELLED").strip().upper()
+
+    try:
+        await runpod_job_store.update_known_job(
+            endpoint_id=endpoint_id,
+            job_id=normalized_job_id,
+            status=status,
+        )
+    except RunPodJobStoreError:
+        pass
+
+    return {
+        "endpoint": {
+            "key": allowed_key,
+            "label": label,
+        },
+        "jobId": normalized_job_id,
+        "status": status,
+        "message": "Die RunPod-Anfrage wurde abgebrochen.",
+    }
+
+
 @app.post("/analyze", response_class=HTMLResponse)
 async def analyze(
     request: Request,
@@ -959,6 +1243,7 @@ async def analyze(
     openai_custom_model: str = Form(""),
     openai_api_key: str = Form(""),
     runpod_endpoint: str = Form("", max_length=64),
+    runpod_tracking_id: str = Form("", max_length=64),
 ) -> Response:
     authenticated_user = _authenticated_user(request)
 
@@ -978,6 +1263,9 @@ async def analyze(
     )
 
     try:
+        if provider == "runpod" and not runpod_tracking_id.strip():
+            runpod_tracking_id = str(uuid4())
+
         provider_override = _provider_for_request(
             provider_key=provider,
             ollama_base_url=ollama_base_url,
@@ -987,6 +1275,7 @@ async def analyze(
             openai_custom_model=openai_custom_model,
             openai_api_key=openai_api_key,
             runpod_endpoint=runpod_endpoint,
+            runpod_tracking_id=runpod_tracking_id,
         )
 
         result = await feedback_service.analyze_text(

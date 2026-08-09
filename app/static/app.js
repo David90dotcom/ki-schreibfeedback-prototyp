@@ -54,6 +54,24 @@
     const runpodAggregateStatus = form.querySelector(
         "#runpod-aggregate-status"
     );
+    const runpodTrackingInput = form.querySelector(
+        "#runpod-tracking-id"
+    );
+    const runpodJobManager = form.querySelector(
+        "#runpod-job-manager"
+    );
+    const runpodActiveJobs = form.querySelector(
+        "#runpod-active-jobs"
+    );
+    const manualRunpodJobId = form.querySelector(
+        "#manual-runpod-job-id"
+    );
+    const cancelManualRunpodJobButton = form.querySelector(
+        "#cancel-manual-runpod-job"
+    );
+    const runpodJobManagerStatus = form.querySelector(
+        "#runpod-job-manager-status"
+    );
     const runpodStatusNote = form.querySelector(
         "#runpod-status-note"
     );
@@ -72,6 +90,9 @@
     const loadingHint = form.querySelector(
         "#loading-hint"
     );
+    const cancelCurrentRunpodJobButton = form.querySelector(
+        "#cancel-current-runpod-job"
+    );
     const analysisResponse = document.querySelector(
         "#analysis-response"
     );
@@ -83,6 +104,10 @@
     let liveMessage = "";
     let liveHint = "";
     let latestRunpodSnapshot = null;
+    let activeRunpodTrackingId = null;
+    let currentRunpodJobId = null;
+    let currentRunpodJobStatus = null;
+    let runpodJobsRequestInFlight = false;
     const runpodStatusRequestsInFlight = new Set();
 
     function updateCustomModelField(modelSelect) {
@@ -142,6 +167,7 @@
 
         if (selectedProvider === "runpod") {
             void loadRunpodStatus();
+            void loadRunpodJobs();
         }
     }
 
@@ -344,6 +370,345 @@
 
         parent.append(element);
         return element;
+    }
+
+    function generateTrackingId() {
+        if (typeof window.crypto?.randomUUID === "function") {
+            return window.crypto.randomUUID();
+        }
+
+        const bytes = new Uint8Array(16);
+        window.crypto.getRandomValues(bytes);
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        const hex = [...bytes]
+            .map((value) => value.toString(16).padStart(2, "0"))
+            .join("");
+
+        return [
+            hex.slice(0, 8),
+            hex.slice(8, 12),
+            hex.slice(12, 16),
+            hex.slice(16, 20),
+            hex.slice(20),
+        ].join("-");
+    }
+
+    function formatJobAge(seconds) {
+        if (!Number.isInteger(seconds) || seconds < 0) {
+            return "Dauer unbekannt";
+        }
+
+        if (seconds < 60) {
+            return `${seconds} s`;
+        }
+
+        const minutes = Math.floor(seconds / 60);
+
+        if (minutes < 60) {
+            return `${minutes} min`;
+        }
+
+        const hours = Math.floor(minutes / 60);
+        const remainingMinutes = minutes % 60;
+        return remainingMinutes
+            ? `${hours} h ${remainingMinutes} min`
+            : `${hours} h`;
+    }
+
+    function runpodJobStatusLabel(status) {
+        const labels = {
+            IN_QUEUE: "Wartet in Queue",
+            IN_PROGRESS: "Wird verarbeitet",
+            RUNNING: "Wird verarbeitet",
+        };
+
+        return labels[status] || status || "Status unbekannt";
+    }
+
+    function setRunpodJobManagerStatus(message, tone) {
+        if (!runpodJobManagerStatus) {
+            return;
+        }
+
+        runpodJobManagerStatus.textContent = message;
+        runpodJobManagerStatus.className = "status-message";
+
+        if (tone) {
+            runpodJobManagerStatus.classList.add(`status-${tone}`);
+        }
+    }
+
+    function setRunpodLoadingTone(tone) {
+        loadingIndicator.classList.remove(
+            "loading-neutral",
+            "loading-warning",
+            "loading-success",
+            "loading-error"
+        );
+        loadingIndicator.classList.add(`loading-${tone}`);
+    }
+
+    function updateLiveMessageFromJob(job) {
+        if (!job) {
+            return;
+        }
+
+        if (job.status === "IN_QUEUE") {
+            setRunpodLoadingTone("warning");
+            setLiveMessage(
+                "Deine Anfrage wartet in der RunPod-Warteschlange",
+                `Request-ID ${job.jobId} · bisher ${formatJobAge(
+                    job.ageSeconds
+                )}`
+            );
+            return;
+        }
+
+        if (["IN_PROGRESS", "RUNNING"].includes(job.status)) {
+            setRunpodLoadingTone("success");
+            setLiveMessage(
+                "Ein Worker verarbeitet jetzt deine Anfrage",
+                `Request-ID ${job.jobId} · Abbruch bleibt bis zum Abschluss möglich.`
+            );
+        }
+    }
+
+    function renderActiveRunpodJobs(jobs) {
+        if (!runpodActiveJobs) {
+            return;
+        }
+
+        runpodActiveJobs.replaceChildren();
+
+        if (!jobs.length) {
+            addTextElement(
+                runpodActiveJobs,
+                "p",
+                "Keine aktiven, von dieser Web-App registrierten Anfragen.",
+                "hint"
+            );
+            return;
+        }
+
+        const list = document.createElement("ul");
+        list.className = "runpod-job-list";
+
+        jobs.forEach((job) => {
+            const item = document.createElement("li");
+            const information = document.createElement("div");
+            information.className = "runpod-job-information";
+            addTextElement(
+                information,
+                "code",
+                job.jobId,
+                "runpod-job-id"
+            );
+            addTextElement(
+                information,
+                "span",
+                `${runpodJobStatusLabel(job.status)} · ${formatJobAge(
+                    job.ageSeconds
+                )}${job.statusFresh ? "" : " · letzter bekannter Stand"}`,
+                "runpod-job-meta"
+            );
+
+            const cancelButton = document.createElement("button");
+            cancelButton.type = "button";
+            cancelButton.className =
+                "danger-button compact-button runpod-job-cancel";
+            cancelButton.textContent = "Abbrechen";
+            cancelButton.addEventListener("click", () => {
+                void cancelRunpodJob(job.jobId, cancelButton);
+            });
+
+            item.append(information, cancelButton);
+            list.append(item);
+        });
+
+        runpodActiveJobs.append(list);
+    }
+
+    async function loadRunpodJobs({live = false} = {}) {
+        if (
+            !runpodJobManager ||
+            !runpodEndpointSelect ||
+            providerSelect.value !== "runpod" ||
+            runpodJobsRequestInFlight
+        ) {
+            return null;
+        }
+
+        const jobsUrl = runpodJobManager.dataset.jobsUrl;
+        const selectedEndpoint = runpodEndpointSelect.value;
+
+        if (!jobsUrl || !selectedEndpoint) {
+            return null;
+        }
+
+        runpodJobsRequestInFlight = true;
+
+        try {
+            const parameters = new URLSearchParams({
+                endpoint_key: selectedEndpoint,
+            });
+            const response = await fetch(
+                `${jobsUrl}?${parameters}`,
+                {headers: {Accept: "application/json"}}
+            );
+            const payload = await response.json();
+
+            if (response.status === 401) {
+                window.location.assign("/login");
+                return null;
+            }
+
+            if (!response.ok) {
+                throw new Error(
+                    payload?.detail?.message ||
+                        "Aktive RunPod-Anfragen konnten nicht geladen werden."
+                );
+            }
+
+            if (runpodEndpointSelect.value !== selectedEndpoint) {
+                return null;
+            }
+
+            const jobs = Array.isArray(payload.jobs)
+                ? payload.jobs
+                : [];
+            renderActiveRunpodJobs(jobs);
+
+            const currentJob = activeRunpodTrackingId
+                ? jobs.find(
+                    (job) =>
+                        job.trackingId === activeRunpodTrackingId
+                )
+                : null;
+
+            if (currentJob) {
+                currentRunpodJobId = currentJob.jobId;
+                currentRunpodJobStatus = currentJob.status;
+
+                if (cancelCurrentRunpodJobButton) {
+                    cancelCurrentRunpodJobButton.hidden = false;
+                }
+
+                if (live) {
+                    updateLiveMessageFromJob(currentJob);
+                }
+            } else if (!activeRunpodTrackingId) {
+                currentRunpodJobId = null;
+                currentRunpodJobStatus = null;
+
+                if (cancelCurrentRunpodJobButton) {
+                    cancelCurrentRunpodJobButton.hidden = true;
+                }
+            }
+
+            return payload;
+        } catch (error) {
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : "Aktive RunPod-Anfragen konnten nicht geladen werden.";
+            renderActiveRunpodJobs([]);
+            setRunpodJobManagerStatus(message, "error");
+            return null;
+        } finally {
+            runpodJobsRequestInFlight = false;
+        }
+    }
+
+    async function cancelRunpodJob(jobId, triggerButton = null) {
+        if (!runpodJobManager || !runpodEndpointSelect || !jobId) {
+            return;
+        }
+
+        const confirmed = window.confirm(
+            `Soll genau diese RunPod-Anfrage abgebrochen werden?\n\n${jobId}`
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        const cancelUrl = runpodJobManager.dataset.cancelUrl;
+        const csrfToken = form.querySelector(
+            'input[name="csrf_token"]'
+        )?.value;
+
+        if (!cancelUrl || !csrfToken) {
+            setRunpodJobManagerStatus(
+                "Die Anfrage kann momentan nicht bestätigt werden.",
+                "error"
+            );
+            return;
+        }
+
+        if (triggerButton) {
+            triggerButton.disabled = true;
+        }
+
+        setRunpodJobManagerStatus(
+            "RunPod-Anfrage wird abgebrochen …",
+            null
+        );
+
+        try {
+            const formData = new FormData();
+            formData.set("endpoint_key", runpodEndpointSelect.value);
+            formData.set("job_id", jobId);
+            formData.set("csrf_token", csrfToken);
+
+            const response = await fetch(cancelUrl, {
+                method: "POST",
+                body: formData,
+                headers: {Accept: "application/json"},
+            });
+            const payload = await response.json();
+
+            if (response.status === 401) {
+                window.location.assign("/login");
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(
+                    payload?.detail?.message ||
+                        "Die RunPod-Anfrage konnte nicht abgebrochen werden."
+                );
+            }
+
+            setRunpodJobManagerStatus(payload.message, "success");
+
+            if (jobId === currentRunpodJobId) {
+                setRunpodLoadingTone("error");
+                setLiveMessage(
+                    "Deine RunPod-Anfrage wurde abgebrochen",
+                    `Request-ID ${jobId}`
+                );
+                currentRunpodJobStatus = "CANCELLED";
+                cancelCurrentRunpodJobButton.hidden = true;
+            }
+
+            if (manualRunpodJobId?.value.trim() === jobId) {
+                manualRunpodJobId.value = "";
+            }
+
+            await loadRunpodJobs();
+            void loadRunpodStatus();
+        } catch (error) {
+            const message =
+                error instanceof Error
+                    ? error.message
+                    : "Die RunPod-Anfrage konnte nicht abgebrochen werden.";
+            setRunpodJobManagerStatus(message, "error");
+        } finally {
+            if (triggerButton) {
+                triggerButton.disabled = false;
+            }
+        }
     }
 
     function formatWorkerCounts(counts) {
@@ -792,6 +1157,19 @@
     }
 
     function updateLiveRunpodMessage(snapshot) {
+        if (currentRunpodJobStatus === "CANCELLED") {
+            return;
+        }
+
+        if (
+            currentRunpodJobId &&
+            ["IN_QUEUE", "IN_PROGRESS", "RUNNING"].includes(
+                currentRunpodJobStatus
+            )
+        ) {
+            return;
+        }
+
         const state = snapshot?.worker?.state;
         const jobs = snapshot?.worker?.jobs || {};
         const queuedJobs = Number.isInteger(jobs.inQueue)
@@ -851,6 +1229,7 @@
 
     function startRunpodLiveTracking() {
         loadingStartedAt = Date.now();
+        setRunpodLoadingTone("neutral");
         setLiveMessage(
             "Auftrag wird an RunPod übermittelt",
             "Der Status des ausgewählten Endpoints wird regelmäßig geprüft."
@@ -861,9 +1240,11 @@
             1000
         );
         void loadRunpodStatus({live: true});
+        void loadRunpodJobs({live: true});
         runpodPollingTimer = window.setInterval(
             () => {
                 void loadRunpodStatus({live: true});
+                void loadRunpodJobs({live: true});
             },
             RUNPOD_STATUS_POLL_INTERVAL_MS
         );
@@ -891,6 +1272,10 @@
         loadingIndicator.hidden = false;
 
         if (providerSelect.value === "runpod") {
+            activeRunpodTrackingId =
+                runpodTrackingInput?.value || null;
+            currentRunpodJobId = null;
+            currentRunpodJobStatus = null;
             startRunpodLiveTracking();
             return;
         }
@@ -934,6 +1319,24 @@
             submitButton.dataset.defaultLabel ||
             "Feedback generieren";
         loadingIndicator.hidden = true;
+        loadingIndicator.classList.remove(
+            "loading-neutral",
+            "loading-warning",
+            "loading-success",
+            "loading-error"
+        );
+
+        activeRunpodTrackingId = null;
+        currentRunpodJobId = null;
+        currentRunpodJobStatus = null;
+
+        if (cancelCurrentRunpodJobButton) {
+            cancelCurrentRunpodJobButton.hidden = true;
+        }
+
+        if (runpodTrackingInput) {
+            runpodTrackingInput.value = generateTrackingId();
+        }
     }
 
     function renderClientError(message) {
@@ -1221,7 +1624,10 @@
     if (runpodEndpointSelect) {
         runpodEndpointSelect.addEventListener("change", () => {
             latestRunpodSnapshot = null;
+            currentRunpodJobId = null;
+            currentRunpodJobStatus = null;
             void loadRunpodStatus();
+            void loadRunpodJobs();
         });
     }
 
@@ -1230,6 +1636,51 @@
             "click",
             () => {
                 void loadRunpodStatus();
+                void loadRunpodJobs();
+            }
+        );
+    }
+
+    if (runpodJobManager) {
+        runpodJobManager.addEventListener("toggle", () => {
+            if (runpodJobManager.open) {
+                void loadRunpodJobs();
+            }
+        });
+    }
+
+    if (cancelManualRunpodJobButton && manualRunpodJobId) {
+        cancelManualRunpodJobButton.addEventListener(
+            "click",
+            () => {
+                const jobId = manualRunpodJobId.value.trim();
+
+                if (!manualRunpodJobId.reportValidity() || !jobId) {
+                    setRunpodJobManagerStatus(
+                        "Bitte gib eine gültige RunPod-Request-ID ein.",
+                        "error"
+                    );
+                    return;
+                }
+
+                void cancelRunpodJob(
+                    jobId,
+                    cancelManualRunpodJobButton
+                );
+            }
+        );
+    }
+
+    if (cancelCurrentRunpodJobButton) {
+        cancelCurrentRunpodJobButton.addEventListener(
+            "click",
+            () => {
+                if (currentRunpodJobId) {
+                    void cancelRunpodJob(
+                        currentRunpodJobId,
+                        cancelCurrentRunpodJobButton
+                    );
+                }
             }
         );
     }
@@ -1245,6 +1696,7 @@
             latestRunpodSnapshot === null
         ) {
             void loadRunpodStatus();
+            void loadRunpodJobs();
         }
     });
 

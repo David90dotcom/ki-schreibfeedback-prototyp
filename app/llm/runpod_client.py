@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import re
+from collections.abc import Awaitable, Callable
 from time import perf_counter
 from typing import Any
 from urllib.parse import quote
@@ -41,6 +44,16 @@ TERMINAL_JOB_STATUSES = {
     "CANCELLED",
     "TIMED_OUT",
 }
+RUNPOD_JOB_ID_PATTERN = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$"
+)
+RunPodJobStatusCallback = Callable[
+    [str, str],
+    Awaitable[None],
+]
+
+logger = logging.getLogger(__name__)
+
 
 class RunPodProvider:
     """Adapter für einen RunPod-Serverless-Queue-Endpunkt."""
@@ -56,12 +69,14 @@ class RunPodProvider:
         model_name: str,
         job_timeout_seconds: float = 1200.0,
         poll_interval_seconds: float = 1.0,
+        job_status_callback: RunPodJobStatusCallback | None = None,
     ) -> None:
         self.api_key = api_key.strip() if api_key else None
         self.endpoint_id = endpoint_id.strip() if endpoint_id else None
         self.model_name = model_name.strip()
         self.job_timeout_seconds = float(job_timeout_seconds)
         self.poll_interval_seconds = float(poll_interval_seconds)
+        self.job_status_callback = job_status_callback
 
         if not self.model_name:
             raise ValueError("Der RunPod-Modellname darf nicht leer sein.")
@@ -227,6 +242,40 @@ class RunPodProvider:
             latency_ms=self._elapsed_ms(started_at),
         )
 
+    async def get_job_status(self, job_id: str) -> dict[str, Any]:
+        """Liest den Zustand eines bekannten RunPod-Jobs."""
+
+        self._validate_configuration(self.model_name)
+        validated_job_id = self._validate_job_id(job_id)
+
+        async with self._create_http_client() as client:
+            payload = await self._request_json(
+                client=client,
+                method="GET",
+                url=self._url("status", validated_job_id),
+                model_name=self.model_name,
+                operation="status",
+            )
+
+        status = self._job_status(payload, operation="status")
+        await self._notify_job_status(validated_job_id, status)
+        return payload
+
+    async def cancel_job(self, job_id: str) -> dict[str, Any]:
+        """Bricht genau einen wartenden oder laufenden RunPod-Job ab."""
+
+        self._validate_configuration(self.model_name)
+        validated_job_id = self._validate_job_id(job_id)
+
+        async with self._create_http_client() as client:
+            payload = await self._cancel_job(
+                client=client,
+                job_id=validated_job_id,
+                model_name=self.model_name,
+            )
+
+        return payload
+
     def _validate_configuration(self, model_name: str) -> None:
         if not self.api_key:
             raise ProviderAuthenticationError(
@@ -246,6 +295,18 @@ class RunPodProvider:
                 provider_id=self.provider_id,
                 model_name=model_name,
             )
+
+    def _validate_job_id(self, job_id: str) -> str:
+        normalized = job_id.strip()
+
+        if not RUNPOD_JOB_ID_PATTERN.fullmatch(normalized):
+            raise ProviderInvalidRequestError(
+                "Die RunPod-Request-ID besitzt kein gültiges Format.",
+                provider_id=self.provider_id,
+                model_name=self.model_name,
+            )
+
+        return normalized
 
     def _create_http_client(self) -> httpx.AsyncClient:
         return httpx.AsyncClient(
@@ -348,6 +409,7 @@ class RunPodProvider:
                 )
 
             status = raw_status.strip().upper()
+            await self._notify_job_status(job_id, status)
 
             if status == "COMPLETED":
                 return payload
@@ -456,15 +518,64 @@ class RunPodProvider:
         model_name: str,
     ) -> None:
         try:
-            await self._request_json(
+            await self._cancel_job(
                 client=client,
-                method="POST",
-                url=self._url("cancel", job_id),
+                job_id=job_id,
                 model_name=model_name,
-                operation="cancel",
             )
         except ProviderError:
             pass
+
+    async def _cancel_job(
+        self,
+        *,
+        client: httpx.AsyncClient,
+        job_id: str,
+        model_name: str,
+    ) -> dict[str, Any]:
+        payload = await self._request_json(
+            client=client,
+            method="POST",
+            url=self._url("cancel", job_id),
+            model_name=model_name,
+            operation="cancel",
+        )
+        status = self._job_status(payload, operation="cancel")
+        await self._notify_job_status(job_id, status)
+        return payload
+
+    def _job_status(
+        self,
+        payload: dict[str, Any],
+        *,
+        operation: str,
+    ) -> str:
+        raw_status = payload.get("status")
+
+        if not isinstance(raw_status, str) or not raw_status.strip():
+            raise self._invalid_response(
+                "Die RunPod-Antwort enthält keinen Jobstatus.",
+                self.model_name,
+                operation,
+            )
+
+        return raw_status.strip().upper()
+
+    async def _notify_job_status(
+        self,
+        job_id: str,
+        status: str,
+    ) -> None:
+        if self.job_status_callback is None:
+            return
+
+        try:
+            await self.job_status_callback(job_id, status)
+        except Exception:
+            logger.exception(
+                "Der technische RunPod-Jobstatus konnte nicht "
+                "gespeichert werden."
+            )
 
     async def _request_json(
         self,

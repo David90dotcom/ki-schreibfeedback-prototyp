@@ -215,6 +215,11 @@ class Settings:
         maximum=3600,
     )
 
+    analysis_database_path: str = _first_configured_value(
+        "ANALYSIS_DATABASE_PATH",
+        fallback="data/analysis_runs.sqlite3",
+    )
+
     max_input_chars: int = int(
         os.getenv("MAX_INPUT_CHARS", "8000")
     )

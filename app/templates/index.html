@@ -12,6 +12,13 @@
             value="{{ csrf_token }}"
         >
 
+        <input
+            id="runpod-tracking-id"
+            type="hidden"
+            name="runpod_tracking_id"
+            value="{{ runpod_tracking_id }}"
+        >
+
         <label for="provider">Modellanbieter</label>
 
         <select id="provider" name="provider">
@@ -371,6 +378,76 @@
                     </dl>
                 </section>
             </section>
+
+            <details
+                id="runpod-job-manager"
+                class="runpod-job-manager"
+                data-jobs-url="{{ url_for('runpod_jobs') }}"
+                data-cancel-url="{{ url_for('cancel_runpod_job') }}"
+            >
+                <summary>Hängende Anfragen verwalten</summary>
+
+                <p class="hint">
+                    Hier kannst du einzelne wartende oder laufende
+                    Anfragen abbrechen. Der Worker selbst wird dadurch
+                    nicht beendet.
+                </p>
+
+                <section aria-labelledby="active-runpod-jobs-title">
+                    <h5 id="active-runpod-jobs-title">
+                        Von dieser Web-App registrierte Anfragen
+                    </h5>
+
+                    <div
+                        id="runpod-active-jobs"
+                        class="runpod-active-jobs"
+                        aria-live="polite"
+                    >
+                        <p class="hint">Aktive Anfragen werden geladen …</p>
+                    </div>
+                </section>
+
+                <section class="manual-job-cancel">
+                    <h5>Ältere Request-ID manuell abbrechen</h5>
+
+                    <label for="manual-runpod-job-id">
+                        RunPod-Request-ID
+                    </label>
+
+                    <div class="manual-job-cancel-controls">
+                        <input
+                            id="manual-runpod-job-id"
+                            type="text"
+                            maxlength="200"
+                            autocomplete="off"
+                            spellcheck="false"
+                            placeholder="zum Beispiel 1ce415e5-…-e1"
+                            pattern="[A-Za-z0-9][A-Za-z0-9._:-]{0,199}"
+                        >
+
+                        <button
+                            id="cancel-manual-runpod-job"
+                            class="danger-button compact-button"
+                            type="button"
+                        >
+                            Anfrage abbrechen
+                        </button>
+                    </div>
+
+                    <p class="hint">
+                        Für Anfragen, die vor dieser Funktion oder direkt
+                        in der RunPod-Konsole gestartet wurden. Achte auf
+                        das oben ausgewählte Inferenzziel.
+                    </p>
+                </section>
+
+                <p
+                    id="runpod-job-manager-status"
+                    class="status-message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+            </details>
         </section>
 
         <label for="student_text">
@@ -424,6 +501,15 @@
                 id="loading-hint"
                 class="loading-hint"
             ></p>
+
+            <button
+                id="cancel-current-runpod-job"
+                class="danger-button compact-button"
+                type="button"
+                hidden
+            >
+                Diese Anfrage abbrechen
+            </button>
         </section>
     </form>
 </section>
