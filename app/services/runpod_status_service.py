@@ -198,6 +198,51 @@ class RunPodStatusService:
                             and technical.get("fallbackEligible")
                         ):
                             technical = graphql_result["technical"]
+                    else:
+                        graphql_message = self._safe_string(
+                            graphql_result.get("message")
+                        )
+                        graphql_permission_missing = bool(
+                            graphql_result.get("permissionMissing")
+                        )
+
+                        if (
+                            not configuration.get("available")
+                            and configuration.get("fallbackEligible")
+                        ):
+                            configuration = {
+                                **configuration,
+                                "permissionMissing": bool(
+                                    configuration.get(
+                                        "permissionMissing"
+                                    )
+                                    or graphql_permission_missing
+                                ),
+                                "message": self._combine_messages(
+                                    self._safe_string(
+                                        configuration.get("message")
+                                    ),
+                                    graphql_message,
+                                ),
+                            }
+
+                        if (
+                            not technical.get("available")
+                            and technical.get("fallbackEligible")
+                        ):
+                            technical = {
+                                **technical,
+                                "permissionMissing": bool(
+                                    technical.get("permissionMissing")
+                                    or graphql_permission_missing
+                                ),
+                                "message": self._combine_messages(
+                                    self._safe_string(
+                                        technical.get("message")
+                                    ),
+                                    graphql_message,
+                                ),
+                            }
 
                 if (
                     not technical.get("available")
@@ -431,22 +476,14 @@ class RunPodStatusService:
                 "GPU-Konfiguration."
             )
 
-        if gpu_pools:
-            catalog = await self._cached(
-                ("gpu-catalog",),
-                self.supply_cache_seconds,
-                lambda: self._read_gpu_catalog(client),
-            )
-        else:
-            sorted_gpu_type_ids = tuple(sorted(gpu_type_ids))
-            catalog = await self._cached(
-                ("gpu-types", *sorted_gpu_type_ids),
-                self.supply_cache_seconds,
-                lambda: self._read_gpu_types(
-                    client,
-                    sorted_gpu_type_ids,
-                ),
-            )
+        # Der Listen-Endpunkt liefert Pool- und Einzel-GPU-Supply in
+        # derselben Antwort. So bleibt die Filterlogik identisch und ein
+        # zusätzlicher Beta-Aufruf pro GPU-ID entfällt.
+        catalog = await self._cached(
+            ("gpu-catalog",),
+            self.supply_cache_seconds,
+            lambda: self._read_gpu_catalog(client),
+        )
 
         if not catalog.get("available"):
             return self._unavailable_supply(
@@ -510,111 +547,6 @@ class RunPodStatusService:
             ),
             "permissionMissing": False,
             "configurationVerified": not used_fallback,
-        }
-
-    async def _read_gpu_types(
-        self,
-        client: httpx.AsyncClient,
-        gpu_type_ids: tuple[str, ...],
-    ) -> dict[str, Any]:
-        results = await asyncio.gather(
-            *(
-                self._read_gpu_type(client, gpu_type_id)
-                for gpu_type_id in gpu_type_ids
-            )
-        )
-        gpus = [
-            result["gpu"]
-            for result in results
-            if result.get("available") and result.get("gpu")
-        ]
-
-        if gpus:
-            return {
-                "available": True,
-                "permissionMissing": False,
-                "gpus": gpus,
-                "message": "GPU-Klassen erfolgreich geladen.",
-            }
-
-        first_failure = next(
-            (
-                result
-                for result in results
-                if not result.get("available")
-            ),
-            {},
-        )
-        return {
-            "available": False,
-            "permissionMissing": bool(
-                first_failure.get("permissionMissing")
-            ),
-            "gpus": [],
-            "message": str(
-                first_failure.get("message")
-                or "Die GPU-Klassen sind nicht abrufbar."
-            ),
-        }
-
-    async def _read_gpu_type(
-        self,
-        client: httpx.AsyncClient,
-        gpu_type_id: str,
-    ) -> dict[str, Any]:
-        encoded_id = quote(gpu_type_id, safe="")
-        status_code, payload, failure = await self._get_json(
-            client,
-            (
-                f"{RUNPOD_MANAGEMENT_API_BASE_URL}/catalog/gpus/"
-                f"{encoded_id}"
-            ),
-            params={
-                "include": "AVAILABILITY",
-                "product": "SERVERLESS",
-                "count": "1",
-            },
-        )
-
-        if status_code != 200 or payload is None:
-            permission_missing = status_code == 403
-            return {
-                "available": False,
-                "permissionMissing": permission_missing,
-                "message": (
-                    "Dem RunPod-API-Key fehlt die Leseberechtigung "
-                    "für den GPU-Katalog."
-                    if permission_missing
-                    else self._failure_message(
-                        "Die GPU-Klasse ist momentan nicht abrufbar.",
-                        status_code,
-                        failure,
-                    )
-                ),
-            }
-
-        raw_level = self._safe_string(payload.get("availability"))
-        level = raw_level.upper() if raw_level else "UNAVAILABLE"
-        gpu_id = self._safe_string(payload.get("id"))
-
-        if gpu_id is None or level not in SUPPLY_LEVELS:
-            return {
-                "available": False,
-                "permissionMissing": False,
-                "message": (
-                    "RunPod lieferte für diese GPU-Klasse keine "
-                    "auswertbare Supply-Stufe."
-                ),
-            }
-
-        return {
-            "available": True,
-            "permissionMissing": False,
-            "gpu": {
-                "id": gpu_id,
-                "pool": self._safe_string(payload.get("pool")),
-                "level": level,
-            },
         }
 
     async def _read_gpu_catalog(
@@ -780,6 +712,7 @@ class RunPodStatusService:
         status_code, payload, failure = await self._post_json(
             client,
             RUNPOD_GRAPHQL_API_URL,
+            params={"api_key": str(self.api_key)},
             json_body={
                 "query": RUNPOD_ENDPOINT_STATUS_QUERY,
                 "variables": {"endpointId": endpoint_id},
@@ -789,6 +722,7 @@ class RunPodStatusService:
         if status_code != 200 or payload is None:
             return {
                 "available": False,
+                "permissionMissing": status_code in {401, 403},
                 "message": self._failure_message(
                     "Auch der offizielle GraphQL-Rückfall ist momentan "
                     "nicht abrufbar.",
@@ -800,6 +734,9 @@ class RunPodStatusService:
         if isinstance(payload.get("errors"), list):
             return {
                 "available": False,
+                "permissionMissing": self._graphql_permission_missing(
+                    payload.get("errors")
+                ),
                 "message": (
                     "RunPod konnte die Endpoint-Daten auch über den "
                     "GraphQL-Rückfall nicht bereitstellen."
@@ -977,10 +914,15 @@ class RunPodStatusService:
         client: httpx.AsyncClient,
         url: str,
         *,
+        params: dict[str, str] | None = None,
         json_body: dict[str, Any],
     ) -> tuple[int | None, dict[str, Any] | None, str | None]:
         try:
-            response = await client.post(url, json=json_body)
+            response = await client.post(
+                url,
+                params=params,
+                json=json_body,
+            )
         except httpx.TimeoutException:
             return None, None, "timeout"
         except httpx.RequestError:
@@ -1224,6 +1166,37 @@ class RunPodStatusService:
             or (
                 status_code is not None
                 and 500 <= status_code <= 599
+            )
+        )
+
+    @staticmethod
+    def _combine_messages(
+        first: str | None,
+        second: str | None,
+    ) -> str:
+        return " ".join(
+            message
+            for message in (first, second)
+            if message
+        )
+
+    @classmethod
+    def _graphql_permission_missing(cls, errors: Any) -> bool:
+        if not isinstance(errors, list):
+            return False
+
+        text = " ".join(
+            cls._safe_string(error.get("message")) or ""
+            for error in errors
+            if isinstance(error, dict)
+        ).lower()
+        return any(
+            marker in text
+            for marker in (
+                "access denied",
+                "forbidden",
+                "permission",
+                "unauthorized",
             )
         )
 
