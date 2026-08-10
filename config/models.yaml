@@ -43,6 +43,23 @@ providers:
         - time_to_first_token
         - cost_tracking
 
+  - id: mistral
+    display_name: Mistral AI
+    processing_location: cloud
+    enabled: true
+    capabilities:
+      health_check: false
+      model_discovery: false
+      supported_model_capabilities:
+        - streaming
+        - structured_output
+        - native_json_schema
+        - input_token_usage
+        - output_token_usage
+        - provider_timing
+        - time_to_first_token
+        - cost_tracking
+
   - id: runpod
     display_name: RunPod Serverless
     processing_location: cloud
@@ -210,3 +227,115 @@ models:
       temperature: null
       max_output_tokens: 4000
       reasoning_effort: medium
+
+  - id: mistral-small-latest
+    provider_id: mistral
+    provider_model_name: mistral-small-latest
+    display_name: Mistral Small
+    description: Kostengünstiges Mistral-Cloudmodell für Feedbackanalyse und Modellvergleiche.
+    role: feedback
+    enabled: true
+
+    capabilities:
+      streaming: true
+      structured_output: true
+      native_json_schema: true
+      reasoning: false
+      reasoning_efforts: []
+      input_token_usage: true
+      output_token_usage: true
+      reasoning_token_usage: false
+      cached_input_token_usage: false
+      cache_write_token_usage: false
+      provider_timing: false
+      time_to_first_token: true
+      cost_tracking: true
+
+    default_parameters:
+      temperature: 0.15
+      max_output_tokens: 4000
+      reasoning_effort: null
+
+  - id: mistral-ministral-14b-2512
+    provider_id: mistral
+    provider_model_name: ministral-14b-2512
+    display_name: Ministral 3 14B
+    description: Cloudvariante derselben Ministral-3-14B-Modellgeneration wie beim lokalen und selbst betriebenen Vergleichsmodell.
+    role: feedback
+    enabled: true
+
+    capabilities:
+      streaming: true
+      structured_output: true
+      native_json_schema: true
+      reasoning: false
+      reasoning_efforts: []
+      input_token_usage: true
+      output_token_usage: true
+      reasoning_token_usage: false
+      cached_input_token_usage: false
+      cache_write_token_usage: false
+      provider_timing: false
+      time_to_first_token: true
+      cost_tracking: true
+
+    default_parameters:
+      temperature: 0.15
+      max_output_tokens: 4000
+      reasoning_effort: null
+
+  - id: mistral-medium-latest
+    provider_id: mistral
+    provider_model_name: mistral-medium-latest
+    display_name: Mistral Medium
+    description: Ausgewogenes Mistral-Cloudmodell für Qualitäts- und Leistungsvergleiche.
+    role: feedback
+    enabled: true
+
+    capabilities:
+      streaming: true
+      structured_output: true
+      native_json_schema: true
+      reasoning: false
+      reasoning_efforts: []
+      input_token_usage: true
+      output_token_usage: true
+      reasoning_token_usage: false
+      cached_input_token_usage: false
+      cache_write_token_usage: false
+      provider_timing: false
+      time_to_first_token: true
+      cost_tracking: true
+
+    default_parameters:
+      temperature: 0.15
+      max_output_tokens: 4000
+      reasoning_effort: null
+
+  - id: mistral-large-latest
+    provider_id: mistral
+    provider_model_name: mistral-large-latest
+    display_name: Mistral Large
+    description: Leistungsstarkes Mistral-Cloudmodell für anspruchsvolle Qualitätsvergleiche.
+    role: feedback
+    enabled: true
+
+    capabilities:
+      streaming: true
+      structured_output: true
+      native_json_schema: true
+      reasoning: false
+      reasoning_efforts: []
+      input_token_usage: true
+      output_token_usage: true
+      reasoning_token_usage: false
+      cached_input_token_usage: false
+      cache_write_token_usage: false
+      provider_timing: false
+      time_to_first_token: true
+      cost_tracking: true
+
+    default_parameters:
+      temperature: 0.15
+      max_output_tokens: 4000
+      reasoning_effort: null

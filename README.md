@@ -1,6 +1,6 @@
-# KI-Schreibfeedback-Prototyp 0.6.0
+# KI-Schreibfeedback-Prototyp 0.7 (Entwicklung)
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.6.0 ergänzt auswählbare GPU-Endpunkte, sichere Markdown-Darstellung, einen verständlichen Worker- und Jobstatus, getrennte Warte- und Verarbeitungszeiten sowie den gezielten Abbruch hängender Anfragen.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.7 ergänzt Mistral rein additiv als weiteren Cloudprovider mit drei Modellstufen, einem direkten Ministral-14B-Vergleichsmodell und freier Modell-ID; die Grundfunktionen des stabilen Releases 0.6.0 bleiben unverändert.
 
 > **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
 
@@ -12,7 +12,7 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, loka
 | **0.4** | abgeschlossen | Serverseitige Anmeldung, geschützte Web- und Modellrouten, sichere Sitzungen, Login-Begrenzung und CSRF-Schutz |
 | **0.5.0** | abgeschlossen | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
 | **0.6.0** | stabiler Release | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
-| **0.7** | nächste Entwicklungsversion | Weiterentwicklung ausschließlich auf Basis des unveränderten Tags `v0.6.0` |
+| **0.7** | in Entwicklung | Additive Mistral-API-Anbindung mit Ministral 14B, Small, Medium, Large und freier Modell-ID auf Basis des unveränderten Tags `v0.6.0` |
 
 Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Version 0.6.0 ist der neue stabile Standard; Modell-Payload und vLLM-Startkonfiguration bleiben gegenüber 0.5.0 unverändert.
 
@@ -26,11 +26,12 @@ flowchart TD
     D --> E["RunPod Serverless: vLLM + Ministral"]
     D --> F["OpenAI API (optional)"]
     D --> G["Ollama (nur lokal)"]
+    D --> H["Mistral API (optional)"]
 ```
 
 Startseite und Analysefunktion sind nur nach erfolgreicher Anmeldung erreichbar. Zugangsdaten werden serverseitig gegen einen Argon2-Passworthash geprüft. RunPod-API-Key, Endpoint-ID und weitere Secrets werden ausschließlich serverseitig aus der `.env` gelesen und nicht an den Browser übertragen.
 
-Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI kann ein serverseitiger Standard-Key hinterlegt werden. Browserseitige Provider- und Key-Overrides sind ausschließlich im lokalen Entwicklungsmodus erlaubt. RunPod ist im produktiven Abnahmeszenario vorausgewählt.
+Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und Mistral können serverseitige Standard-Keys hinterlegt werden. Browserseitige Provider- und Key-Overrides sind ausschließlich im lokalen Entwicklungsmodus erlaubt. RunPod ist im produktiven Abnahmeszenario vorausgewählt.
 
 ## Aktueller Funktionsumfang
 
@@ -41,13 +42,13 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI kann
 - Begrenzung wiederholter fehlgeschlagener Loginversuche pro erkanntem Client
 - CSRF-Schutz für Login, Logout und Analyseformular
 - Eingabe eines anonymisierten, abgetippten Beispieltexts
-- Auswahl zwischen lokalem Ollama, OpenAI und RunPod Serverless im Entwicklungsmodus
+- Auswahl zwischen lokalem Ollama, OpenAI, Mistral und RunPod Serverless im Entwicklungsmodus
 - Deaktivierung lokaler Ollama-Aufrufe im Produktionsmodus
-- konfigurierbare Standardmodelle für alle drei Provider
+- konfigurierbare Standardmodelle für alle vier Provider
 - dynamisches Laden der lokal installierten Ollama-Modelle
-- optionale Modell-ID für künftige oder nicht aufgelistete Ollama- und OpenAI-Modelle
+- optionale Modell-ID für künftige oder nicht aufgelistete Ollama-, OpenAI- und Mistral-Modelle
 - optional änderbare Ollama-API-Adresse für die lokale Entwicklung
-- optionaler OpenAI-Key für einen einzelnen lokalen Testaufruf
+- optionale OpenAI- und Mistral-Keys für jeweils einen einzelnen lokalen Testaufruf
 - asynchrone RunPod-Aufträge mit Statusabfrage, Zeitlimit und Abbruch bei Zeitüberschreitung
 - RunPod-Serverless-Worker mit vLLM und `mistralai/Ministral-3-14B-Instruct-2512`
 - Validierung von Modell, Eingabe, Ausgabeformat und erlaubten Generierungsoptionen im Worker
@@ -111,6 +112,7 @@ LOGIN_RATE_LIMIT_ATTEMPTS=5
 LOGIN_RATE_LIMIT_WINDOW_SECONDS=300
 
 OPENAI_API_KEY=
+MISTRAL_API_KEY=
 RUNPOD_API_KEY=
 RUNPOD_ENDPOINT_ID=
 ```
@@ -147,6 +149,12 @@ Das in der `.env` konfigurierte Modell ist vorausgewählt. Bekannte Modelle kön
 
 Standardmäßig wird der serverseitig konfigurierte OpenAI-Key verwendet. Für lokale Entwicklungstests kann alternativ ein Key für einen einzelnen Aufruf eingegeben werden. Dieser alternative Key wird nicht gespeichert und nach dem Absenden nicht erneut angezeigt.
 
+### Mistral
+
+Für die Mistral-Cloud-API werden `MISTRAL_API_KEY` und optional `MISTRAL_DEFAULT_MODEL` in der `.env` konfiguriert. Vorausgewählt ist `mistral-small-latest`; zusätzlich stehen `mistral-medium-latest` und `mistral-large-latest` als abgestufte Vergleichsmodelle bereit. `ministral-14b-2512` entspricht derselben Modellgeneration wie das lokal beziehungsweise über RunPod eingesetzte Ministral-3-14B-Modell und ermöglicht deshalb einen besonders direkten Bereitstellungsvergleich. Über „Andere Modell-ID …“ kann eine weitere von Mistral bereitgestellte Modell-ID verwendet werden.
+
+Wie bei OpenAI wird im Produktionsbetrieb ausschließlich der serverseitige Key verwendet. Ein optional im lokalen Entwicklungsmodus eingegebener Mistral-Key gilt nur für den einzelnen Aufruf, wird nicht gespeichert und danach nicht erneut angezeigt. Der Adapter verwendet den von Mistral dokumentierten OpenAI-kompatiblen API-Endpunkt `https://api.mistral.ai/v1`.
+
 ### RunPod Serverless
 
 Für RunPod werden ein vLLM-kompatibler Serverless-Endpoint sowie `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID` und `RUNPOD_DEFAULT_MODEL` in der `.env` benötigt.
@@ -179,7 +187,7 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der Release-Stand umfasst 69 erfolgreiche Tests einschließlich der acht Subtests. Sie decken Browser- und Providerauswahl, Produktionsbeschränkungen, RunPod-Client und -Worker, Supply-/Health-Abbildung, individuelle Jobstatus, persistente Jobregistrierung, Einzelabbruch, manuellen Altjob-Abbruch, Zeitmetriken sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der aktuelle Entwicklungsstand umfasst 74 erfolgreiche Tests einschließlich der acht Subtests. Sie decken Browser- und Providerauswahl, Mistral-Endpunkt, Modellstufen und freie Modell-ID, Produktionsbeschränkungen, RunPod-Client und -Worker, Supply-/Health-Abbildung, individuelle Jobstatus, persistente Jobregistrierung, Einzelabbruch, manuellen Altjob-Abbruch, Zeitmetriken sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 
@@ -196,7 +204,7 @@ Die Modellantwort wird in Version 0.6 mit einer engen, sicheren Markdown-Konfigu
 - Login, Logout und Analyseformular verwenden sitzungsgebundene CSRF-Tokens. Fehlende oder manipulierte Tokens werden mit HTTP 403 abgewiesen.
 - Standardmäßig sind nach fünf fehlgeschlagenen Anmeldungen pro erkanntem Client für fünf Minuten keine weiteren Versuche möglich. Der Zähler liegt im Arbeitsspeicher und wird bei einem Serverneustart zurückgesetzt; verteilte Angriffe werden dadurch allein nicht vollständig verhindert.
 - Für Tests dürfen ausschließlich erfundene oder vollständig anonymisierte Texte verwendet werden.
-- Der RunPod-Key, die Endpoint-ID und der standardmäßig verwendete OpenAI-Key gehören ausschließlich in die lokale beziehungsweise serverseitige `.env`.
-- Die frei änderbare Ollama-Adresse und das optionale OpenAI-Key-Feld sind nur für die lokale Entwicklung vorgesehen.
+- Der RunPod-Key, die Endpoint-ID sowie die standardmäßig verwendeten OpenAI- und Mistral-Keys gehören ausschließlich in die lokale beziehungsweise serverseitige `.env`.
+- Die frei änderbare Ollama-Adresse und die optionalen OpenAI- und Mistral-Key-Felder sind nur für die lokale Entwicklung vorgesehen.
 - Das Produktionsdeployment veröffentlicht ausschließlich Caddy auf Port 80/443; der Webcontainer ist nur an `127.0.0.1:8000` gebunden.
 - Die Modellantwort wird ausschließlich über die restriktive Markdown-Konfiguration gerendert; Raw HTML, aktive Links und Bilder bleiben deaktiviert.

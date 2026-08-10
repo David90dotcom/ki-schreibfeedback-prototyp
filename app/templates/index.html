@@ -258,6 +258,124 @@
         </section>
 
         <section
+            id="mistral-settings"
+            class="provider-settings"
+            data-provider-panel="mistral"
+        >
+            <h3>Mistral-Cloudmodell</h3>
+
+            {% if mistral_env_key_configured %}
+                <p class="configuration-status configuration-success">
+                    MISTRAL_API_KEY aus der .env-Datei ist
+                    hinterlegt und wird standardmäßig verwendet.
+                </p>
+            {% else %}
+                <p class="configuration-status configuration-warning">
+                    In der .env-Datei ist kein MISTRAL_API_KEY
+                    hinterlegt.
+
+                    {% if browser_overrides_allowed %}
+                        Gib unten einen Key ein oder ergänze
+                        die .env-Datei.
+                    {% else %}
+                        Ergänze den Key in der serverseitigen
+                        Konfiguration.
+                    {% endif %}
+                </p>
+            {% endif %}
+
+            {% if mistral_override_used %}
+                <p class="configuration-status configuration-info">
+                    Für den letzten Aufruf wurde der eingegebene
+                    alternative Key verwendet. Er wurde nicht gespeichert.
+                </p>
+            {% endif %}
+
+            {% if browser_overrides_allowed %}
+                <label for="mistral-api-key">
+                    Anderer Mistral-API-Key (optional)
+                </label>
+
+                <input
+                    id="mistral-api-key"
+                    name="mistral_api_key"
+                    type="password"
+                    value=""
+                    maxlength="500"
+                    autocomplete="off"
+                    spellcheck="false"
+                    placeholder="Leer lassen = MISTRAL_API_KEY aus .env verwenden"
+                >
+
+                <p class="hint">
+                    Ein hier eingetragener Key gilt nur für diesen
+                    Aufruf, wird nicht in die .env-Datei geschrieben
+                    und nach dem Absenden nicht erneut angezeigt.
+                </p>
+            {% else %}
+                <p class="hint">
+                    Im Online-Betrieb wird ausschließlich der
+                    serverseitig hinterlegte Mistral-Key verwendet.
+                </p>
+            {% endif %}
+
+            <label for="mistral-model">
+                Mistral-Modell
+            </label>
+
+            <select
+                id="mistral-model"
+                name="mistral_model"
+                data-model-select
+                data-default-model="{{ mistral_default_model }}"
+            >
+                {% for model_name, label in mistral_model_options %}
+                    <option
+                        value="{{ model_name }}"
+                        {% if model_name == selected_mistral_model %}selected{% endif %}
+                    >
+                        {{ label }}
+                        {% if model_name == mistral_default_model %}
+                            (Standard aus .env)
+                        {% endif %}
+                    </option>
+                {% endfor %}
+
+                <option
+                    value="{{ custom_model_value }}"
+                    {% if selected_mistral_model == custom_model_value %}selected{% endif %}
+                >
+                    Andere Modell-ID …
+                </option>
+            </select>
+
+            <div
+                class="custom-model"
+                data-custom-model-group
+            >
+                <label for="mistral-custom-model">
+                    Eigene Mistral-Modell-ID
+                </label>
+
+                <input
+                    id="mistral-custom-model"
+                    name="mistral_custom_model"
+                    type="text"
+                    value="{{ mistral_custom_model }}"
+                    maxlength="200"
+                    autocomplete="off"
+                    placeholder="zum Beispiel ministral-14b-latest"
+                    data-custom-model-input
+                >
+
+                <p class="hint">
+                    Für ein zukünftiges oder nicht aufgelistetes
+                    Mistral-Modell.
+                </p>
+            </div>
+        </section>
+
+        <section
             id="runpod-settings"
             class="provider-settings"
             data-provider-panel="runpod"

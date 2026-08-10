@@ -7,6 +7,7 @@ from threading import RLock
 
 from app.config import Settings
 from app.llm.base import ModelProvider
+from app.llm.mistral_client import MistralProvider
 from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
 from app.llm.runpod_client import RunPodProvider
@@ -340,6 +341,21 @@ def create_default_provider_factory(
         ),
         configuration_error=(
             "OPENAI_API_KEY ist nicht gesetzt. "
+            "Prüfe die lokale .env-Datei."
+        ),
+    )
+
+    factory.register(
+        provider_id="mistral",
+        builder=lambda: MistralProvider(
+            api_key=settings.mistral_api_key,
+            model_name=settings.mistral_model,
+        ),
+        configuration_check=lambda: bool(
+            settings.mistral_api_key
+        ),
+        configuration_error=(
+            "MISTRAL_API_KEY ist nicht gesetzt. "
             "Prüfe die lokale .env-Datei."
         ),
     )

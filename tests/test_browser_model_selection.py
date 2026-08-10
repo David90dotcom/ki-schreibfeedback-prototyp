@@ -69,6 +69,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('id="ollama-base-url"', response.text)
         self.assertIn('id="ollama-model"', response.text)
         self.assertIn('id="openai-model"', response.text)
+        self.assertIn('id="mistral-model"', response.text)
         self.assertIn('id="runpod-endpoint"', response.text)
         self.assertIn('id="runpod-readiness"', response.text)
         self.assertIn('id="runpod-worker-status"', response.text)
@@ -118,6 +119,16 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('value="rtx6000ada_48gb"', response.text)
         self.assertIn(main.settings.ollama_base_url, response.text)
         self.assertIn(main.settings.openai_model, response.text)
+        self.assertIn(main.settings.mistral_model, response.text)
+        self.assertIn('value="mistral"', response.text)
+        self.assertIn('value="ministral-14b-2512"', response.text)
+        self.assertIn(
+            "Ministral 3 14B – direkter Vergleich",
+            response.text,
+        )
+        self.assertIn("Mistral Small – günstig", response.text)
+        self.assertIn("Mistral Medium – ausgewogen", response.text)
+        self.assertIn("Mistral Large – höchste Leistung", response.text)
         self.assertIn("Cloud: RunPod Serverless", response.text)
         self.assertIn("Andere Modell-ID", response.text)
 
@@ -191,11 +202,23 @@ class BrowserModelSelectionTests(unittest.TestCase):
             response.text,
         )
         self.assertNotIn(
+            'id="mistral-api-key"',
+            response.text,
+        )
+        self.assertNotIn(
+            'name="mistral_api_key"',
+            response.text,
+        )
+        self.assertNotIn(
             production_settings.ollama_base_url,
             response.text,
         )
         self.assertIn(
             'id="openai-model"',
+            response.text,
+        )
+        self.assertIn(
+            'id="mistral-model"',
             response.text,
         )
         self.assertRegex(
@@ -392,6 +415,141 @@ class BrowserModelSelectionTests(unittest.TestCase):
             "configured-production-key",
             response.text,
         )
+
+    def test_selected_mistral_model_is_used(self) -> None:
+        captured: dict[str, str] = {}
+
+        async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
+            provider = kwargs["provider_override"]
+
+            if not isinstance(provider, main.MistralProvider):
+                raise AssertionError(
+                    "Es wurde kein MistralProvider übergeben."
+                )
+
+            captured["provider_key"] = str(kwargs["provider_key"])
+            captured["provider_name"] = provider.provider_name
+            captured["model"] = provider.model_name
+
+            return FeedbackResult(
+                provider="mistral",
+                model=provider.model_name,
+                feedback="Mistral-Testfeedback",
+                duration_ms=47,
+            )
+
+        with patch.object(
+            main.feedback_service,
+            "analyze_text",
+            new=AsyncMock(side_effect=fake_analyze_text),
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "mistral",
+                    "csrf_token": self.csrf_token,
+                    "mistral_model": "mistral-medium-latest",
+                    "mistral_api_key": "test-mistral-key",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["provider_key"], "mistral")
+        self.assertEqual(captured["provider_name"], "mistral")
+        self.assertEqual(
+            captured["model"],
+            "mistral-medium-latest",
+        )
+        self.assertIn("Mistral-Testfeedback", response.text)
+        self.assertIn("mistral-medium-latest", response.text)
+
+    def test_custom_mistral_model_is_used(self) -> None:
+        captured: dict[str, str] = {}
+
+        async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
+            provider = kwargs["provider_override"]
+            captured["model"] = provider.model_name  # type: ignore[attr-defined]
+
+            return FeedbackResult(
+                provider="mistral",
+                model=provider.model_name,  # type: ignore[attr-defined]
+                feedback="Freies Mistral-Testmodell",
+                duration_ms=49,
+            )
+
+        with patch.object(
+            main.feedback_service,
+            "analyze_text",
+            new=AsyncMock(side_effect=fake_analyze_text),
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "mistral",
+                    "csrf_token": self.csrf_token,
+                    "mistral_model": main.CUSTOM_MODEL_VALUE,
+                    "mistral_custom_model": "ministral-14b-latest",
+                    "mistral_api_key": "test-mistral-key",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["model"], "ministral-14b-latest")
+        self.assertIn("Freies Mistral-Testmodell", response.text)
+        self.assertIn("ministral-14b-latest", response.text)
+
+    def test_production_ignores_browser_mistral_api_key(self) -> None:
+        production_settings = replace(
+            main.settings,
+            app_mode="production",
+            mistral_api_key="configured-mistral-key",
+        )
+
+        async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
+            return FeedbackResult(
+                provider="mistral",
+                model="mistral-large-latest",
+                feedback="Produktions-Mistralfeedback",
+                duration_ms=54,
+            )
+
+        with (
+            patch.object(
+                main,
+                "settings",
+                production_settings,
+            ),
+            patch.object(
+                main,
+                "MistralProvider",
+            ) as provider_class,
+            patch.object(
+                main.feedback_service,
+                "analyze_text",
+                new=AsyncMock(side_effect=fake_analyze_text),
+            ),
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "mistral",
+                    "csrf_token": self.csrf_token,
+                    "mistral_model": "mistral-large-latest",
+                    "mistral_api_key": "browser-manipulated-key",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(provider_class.call_count, 1)
+        self.assertEqual(
+            provider_class.call_args.kwargs["api_key"],
+            "configured-mistral-key",
+        )
+        self.assertNotIn("browser-manipulated-key", response.text)
+        self.assertNotIn("configured-mistral-key", response.text)
 
     def test_selected_runpod_provider_is_used(self) -> None:
         captured: dict[str, str] = {}

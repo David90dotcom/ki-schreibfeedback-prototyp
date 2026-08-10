@@ -34,6 +34,7 @@ from app.llm.errors import (
     ProviderError,
     ProviderInvalidRequestError,
 )
+from app.llm.mistral_client import MistralProvider
 from app.llm.ollama_client import OllamaProvider
 from app.llm.openai_client import OpenAIProvider
 from app.llm.runpod_client import (
@@ -88,6 +89,16 @@ OPENAI_MODEL_CATALOG = (
     ("gpt-5.6-luna", "GPT-5.6 Luna – günstig"),
     ("gpt-5.6-terra", "GPT-5.6 Terra – ausgewogen"),
     ("gpt-5.6-sol", "GPT-5.6 Sol – höchste Leistung"),
+)
+
+MISTRAL_MODEL_CATALOG = (
+    (
+        "ministral-14b-2512",
+        "Ministral 3 14B – direkter Vergleich",
+    ),
+    ("mistral-small-latest", "Mistral Small – günstig"),
+    ("mistral-medium-latest", "Mistral Medium – ausgewogen"),
+    ("mistral-large-latest", "Mistral Large – höchste Leistung"),
 )
 
 RUNPOD_DEFAULT_ENDPOINT_KEY = "standard"
@@ -214,6 +225,10 @@ feedback_service = FeedbackService(
             api_key=settings.openai_api_key,
             model_name=settings.openai_model,
         ),
+        "mistral": MistralProvider(
+            api_key=settings.mistral_api_key,
+            model_name=settings.mistral_model,
+        ),
         "runpod": RunPodProvider(
             api_key=settings.runpod_api_key,
             endpoint_id=settings.runpod_endpoint_id,
@@ -264,6 +279,30 @@ def _openai_model_options() -> list[tuple[str, str]]:
     options.extend(
         (model_name, label)
         for model_name, label in OPENAI_MODEL_CATALOG
+        if model_name != configured_model
+    )
+
+    return options
+
+
+def _mistral_model_options() -> list[tuple[str, str]]:
+    """
+    Zeigt das Modell aus der .env-Datei immer zuerst an,
+    auch wenn es nicht im vordefinierten Katalog steht.
+    """
+    labels = dict(MISTRAL_MODEL_CATALOG)
+    configured_model = settings.mistral_model
+
+    options = [
+        (
+            configured_model,
+            labels.get(configured_model, configured_model),
+        )
+    ]
+
+    options.extend(
+        (model_name, label)
+        for model_name, label in MISTRAL_MODEL_CATALOG
         if model_name != configured_model
     )
 
@@ -374,6 +413,9 @@ def _template_context(
     selected_openai_model: str | None = None,
     openai_custom_model: str = "",
     openai_override_used: bool = False,
+    selected_mistral_model: str | None = None,
+    mistral_custom_model: str = "",
+    mistral_override_used: bool = False,
     selected_runpod_endpoint: str | None = None,
     runpod_tracking_id: str | None = None,
     result: FeedbackResult | None = None,
@@ -466,6 +508,17 @@ def _template_context(
             settings.openai_api_key
         ),
         "openai_override_used": openai_override_used,
+        "mistral_default_model": settings.mistral_model,
+        "mistral_model_options": _mistral_model_options(),
+        "selected_mistral_model": (
+            selected_mistral_model
+            or settings.mistral_model
+        ),
+        "mistral_custom_model": mistral_custom_model,
+        "mistral_env_key_configured": bool(
+            settings.mistral_api_key
+        ),
+        "mistral_override_used": mistral_override_used,
         "runpod_endpoint_options": _runpod_endpoint_options(),
         "selected_runpod_endpoint": selected_runpod_endpoint_key,
         "runpod_tracking_id": (
@@ -704,6 +757,9 @@ def _provider_for_request(
     openai_api_key: str,
     runpod_endpoint: str,
     runpod_tracking_id: str,
+    mistral_model: str = "",
+    mistral_custom_model: str = "",
+    mistral_api_key: str = "",
 ) -> LLMProvider:
     if provider_key == "ollama":
         if not _ollama_available():
@@ -760,6 +816,41 @@ def _provider_for_request(
                 openai_model,
                 openai_custom_model,
                 settings.openai_model,
+            ),
+        )
+
+    if provider_key == "mistral":
+        api_key = settings.mistral_api_key
+
+        if settings.browser_overrides_allowed:
+            api_key = (
+                mistral_api_key.strip()
+                or api_key
+            )
+
+        if not api_key:
+            error_message = (
+                "Kein Mistral-API-Key verfügbar. "
+                "Hinterlege MISTRAL_API_KEY in der "
+                ".env-Datei."
+            )
+
+            if settings.browser_overrides_allowed:
+                error_message = (
+                    "Kein Mistral-API-Key verfügbar. "
+                    "Hinterlege MISTRAL_API_KEY in der "
+                    ".env-Datei oder gib im optionalen "
+                    "Key-Feld einen Key für diesen Aufruf ein."
+                )
+
+            raise ValueError(error_message)
+
+        return MistralProvider(
+            api_key=api_key,
+            model_name=_validate_model_name(
+                mistral_model,
+                mistral_custom_model,
+                settings.mistral_model,
             ),
         )
 
@@ -1269,6 +1360,9 @@ async def analyze(
     openai_model: str = Form(""),
     openai_custom_model: str = Form(""),
     openai_api_key: str = Form(""),
+    mistral_model: str = Form(""),
+    mistral_custom_model: str = Form(""),
+    mistral_api_key: str = Form(""),
     runpod_endpoint: str = Form("", max_length=64),
     runpod_tracking_id: str = Form("", max_length=64),
 ) -> Response:
@@ -1288,6 +1382,11 @@ async def analyze(
         and provider == "openai"
         and bool(openai_api_key.strip())
     )
+    mistral_override_used = (
+        settings.browser_overrides_allowed
+        and provider == "mistral"
+        and bool(mistral_api_key.strip())
+    )
 
     try:
         if provider == "runpod" and not runpod_tracking_id.strip():
@@ -1301,6 +1400,9 @@ async def analyze(
             openai_model=openai_model,
             openai_custom_model=openai_custom_model,
             openai_api_key=openai_api_key,
+            mistral_model=mistral_model,
+            mistral_custom_model=mistral_custom_model,
+            mistral_api_key=mistral_api_key,
             runpod_endpoint=runpod_endpoint,
             runpod_tracking_id=runpod_tracking_id,
         )
@@ -1345,6 +1447,9 @@ async def analyze(
             selected_openai_model=openai_model,
             openai_custom_model=openai_custom_model,
             openai_override_used=openai_override_used,
+            selected_mistral_model=mistral_model,
+            mistral_custom_model=mistral_custom_model,
+            mistral_override_used=mistral_override_used,
             selected_runpod_endpoint=runpod_endpoint,
             result=result,
             runpod_warm_window=runpod_warm_window,
