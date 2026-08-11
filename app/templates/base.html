@@ -18,6 +18,8 @@
         src="{{ url_for('static', path='/app.js') }}?v={{ static_asset_version }}"
         defer
     ></script>
+
+    {% block scripts %}{% endblock %}
 </head>
 
 <body>
@@ -33,25 +35,35 @@
             </div>
 
             {% if authenticated_user %}
-                <div class="session-controls">
-                    <span>
-                        Angemeldet als {{ authenticated_user }}
-                    </span>
+                <div class="session-area">
+                    <nav
+                        class="app-navigation"
+                        aria-label="Hauptnavigation"
+                    >
+                        <a href="/">Textanalyse</a>
+                        <a href="/tasks">Bewertungsbögen</a>
+                    </nav>
 
-                    <form method="post" action="/logout">
-                        <input
-                            type="hidden"
-                            name="csrf_token"
-                            value="{{ csrf_token }}"
-                        >
+                    <div class="session-controls">
+                        <span>
+                            Angemeldet als {{ authenticated_user }}
+                        </span>
 
-                        <button
-                            class="secondary-button logout-button"
-                            type="submit"
-                        >
-                            Abmelden
-                        </button>
-                    </form>
+                        <form method="post" action="/logout">
+                            <input
+                                type="hidden"
+                                name="csrf_token"
+                                value="{{ csrf_token }}"
+                            >
+
+                            <button
+                                class="secondary-button logout-button"
+                                type="submit"
+                            >
+                                Abmelden
+                            </button>
+                        </form>
+                    </div>
                 </div>
             {% endif %}
         </header>

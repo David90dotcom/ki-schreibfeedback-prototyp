@@ -29,6 +29,7 @@ from app.config import (
     settings,
 )
 from app.feedback_markdown import render_feedback_markdown
+from app.domain.rubric import FeedbackTask
 from app.llm.base import LLMProvider
 from app.llm.errors import (
     ProviderError,
@@ -55,6 +56,10 @@ from app.services.feedback_service import (
     FeedbackResult,
     FeedbackService,
 )
+from app.services.rubric_feedback_service import (
+    RubricFeedbackResult,
+    RubricFeedbackService,
+)
 from app.services.runpod_job_store import (
     ACTIVE_RUNPOD_JOB_STATUSES,
     RunPodJobStore,
@@ -62,6 +67,11 @@ from app.services.runpod_job_store import (
     RunPodTrackedJob,
 )
 from app.services.runpod_status_service import RunPodStatusService
+from app.services.task_store import (
+    TaskNotFoundError,
+    TaskStore,
+    TaskStoreError,
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -77,7 +87,7 @@ def _static_asset_version() -> str:
 
     digest = hashlib.sha256()
 
-    for filename in ("app.js", "style.css"):
+    for filename in ("app.js", "rubrics.js", "style.css"):
         digest.update((BASE_DIR / "static" / filename).read_bytes())
 
     return digest.hexdigest()[:12]
@@ -243,6 +253,13 @@ feedback_service = FeedbackService(
     },
     max_input_chars=settings.max_input_chars,
 )
+
+rubric_feedback_service = RubricFeedbackService(
+    providers=feedback_service.providers,
+    max_input_chars=settings.max_input_chars,
+)
+
+task_store = TaskStore(settings.analysis_database_path)
 
 runpod_status_service = RunPodStatusService(
     api_key=settings.runpod_api_key,
@@ -418,8 +435,11 @@ def _template_context(
     mistral_override_used: bool = False,
     selected_runpod_endpoint: str | None = None,
     runpod_tracking_id: str | None = None,
-    result: FeedbackResult | None = None,
+    task_options: list[FeedbackTask] | None = None,
+    selected_task_id: str = "",
+    result: FeedbackResult | RubricFeedbackResult | None = None,
     runpod_warm_window: dict[str, object] | None = None,
+    storage_warning: str | None = None,
     error: str | None = None,
 ) -> dict[str, object]:
     provider_options = _provider_options()
@@ -470,8 +490,11 @@ def _template_context(
         "provider_options": provider_options,
         "selected_provider": selected_provider,
         "student_text": student_text,
+        "task_options": task_options or [],
+        "selected_task_id": selected_task_id,
         "result": result,
         "error": error,
+        "storage_warning": storage_warning,
         "custom_model_value": CUSTOM_MODEL_VALUE,
         "browser_overrides_allowed": (
             settings.browser_overrides_allowed
@@ -529,6 +552,87 @@ def _template_context(
         "runpod_idle_timeout_minutes": (
             settings.runpod_idle_timeout_seconds // 60
         ),
+    }
+
+
+TASK_NOTICE_MESSAGES = {
+    "created": "Aufgabe und Bewertungsbogen wurden gespeichert.",
+    "updated": "Aufgabe und Bewertungsbogen wurden aktualisiert.",
+    "duplicated": "Aufgabe und Bewertungsbogen wurden dupliziert.",
+    "deleted": "Der unbenutzte Bewertungsbogen wurde gelöscht.",
+    "archived": (
+        "Der bereits verwendete Bewertungsbogen wurde archiviert. "
+        "Vorhandene Analyseergebnisse bleiben erhalten."
+    ),
+}
+
+
+def _task_form_values(
+    task: FeedbackTask | None = None,
+) -> dict[str, object]:
+    if task is None:
+        return {
+            "title": "",
+            "subject": "Deutsch",
+            "grade_level": "",
+            "instructions": "",
+            "material": "",
+            "rubric_title": "",
+            "criteria": [""],
+        }
+
+    return {
+        "title": task.title,
+        "subject": task.subject,
+        "grade_level": task.grade_level,
+        "instructions": task.instructions,
+        "material": task.material,
+        "rubric_title": task.rubric.title,
+        "criteria": [
+            criterion.text
+            for criterion in task.rubric.criteria
+        ],
+    }
+
+
+def _submitted_task_form_values(
+    *,
+    title: str,
+    subject: str,
+    grade_level: str,
+    instructions: str,
+    material: str,
+    rubric_title: str,
+    criteria: list[str],
+) -> dict[str, object]:
+    return {
+        "title": title,
+        "subject": subject,
+        "grade_level": grade_level,
+        "instructions": instructions,
+        "material": material,
+        "rubric_title": rubric_title,
+        "criteria": criteria or [""],
+    }
+
+
+def _task_form_context(
+    *,
+    request: Request,
+    authenticated_user: str,
+    task: FeedbackTask | None,
+    values: dict[str, object],
+    error: str | None = None,
+) -> dict[str, object]:
+    return {
+        "app_name": settings.app_name,
+        "authenticated_user": authenticated_user,
+        "csrf_token": get_or_create_csrf_token(
+            request.session
+        ),
+        "task": task,
+        "values": values,
+        "error": error,
     }
 
 
@@ -984,6 +1088,271 @@ async def logout(
     return _redirect_to_login()
 
 
+@app.get("/tasks", response_class=HTMLResponse)
+async def tasks_page(
+    request: Request,
+    notice: str = Query(default="", max_length=32),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    error: str | None = None
+
+    try:
+        tasks = await task_store.list_tasks()
+    except TaskStoreError as exc:
+        tasks = []
+        error = str(exc)
+
+    return templates.TemplateResponse(
+        name="tasks.html",
+        request=request,
+        context={
+            "app_name": settings.app_name,
+            "authenticated_user": authenticated_user,
+            "csrf_token": get_or_create_csrf_token(
+                request.session
+            ),
+            "tasks": tasks,
+            "notice": TASK_NOTICE_MESSAGES.get(notice),
+            "error": error,
+        },
+    )
+
+
+@app.get("/tasks/new", response_class=HTMLResponse)
+async def new_task_page(
+    request: Request,
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    return templates.TemplateResponse(
+        name="task_form.html",
+        request=request,
+        context=_task_form_context(
+            request=request,
+            authenticated_user=authenticated_user,
+            task=None,
+            values=_task_form_values(),
+        ),
+    )
+
+
+@app.post("/tasks/new", response_class=HTMLResponse)
+async def create_task(
+    request: Request,
+    title: str = Form(""),
+    subject: str = Form(""),
+    grade_level: str = Form(""),
+    instructions: str = Form(""),
+    material: str = Form(""),
+    rubric_title: str = Form(""),
+    criteria: list[str] = Form(...),
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+    values = _submitted_task_form_values(
+        title=title,
+        subject=subject,
+        grade_level=grade_level,
+        instructions=instructions,
+        material=material,
+        rubric_title=rubric_title,
+        criteria=criteria,
+    )
+
+    try:
+        await task_store.create_task(
+            title=title,
+            subject=subject,
+            grade_level=grade_level,
+            instructions=instructions,
+            material=material,
+            rubric_title=rubric_title,
+            criteria=criteria,
+        )
+    except (ValueError, TaskStoreError) as exc:
+        return templates.TemplateResponse(
+            name="task_form.html",
+            request=request,
+            context=_task_form_context(
+                request=request,
+                authenticated_user=authenticated_user,
+                task=None,
+                values=values,
+                error=str(exc),
+            ),
+            status_code=(
+                422 if isinstance(exc, ValueError) else 500
+            ),
+        )
+
+    return RedirectResponse(
+        url="/tasks?notice=created",
+        status_code=303,
+    )
+
+
+@app.get("/tasks/{task_id}/edit", response_class=HTMLResponse)
+async def edit_task_page(
+    request: Request,
+    task_id: str,
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    task = await task_store.get_task(task_id)
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Die Aufgabe wurde nicht gefunden.",
+        )
+
+    return templates.TemplateResponse(
+        name="task_form.html",
+        request=request,
+        context=_task_form_context(
+            request=request,
+            authenticated_user=authenticated_user,
+            task=task,
+            values=_task_form_values(task),
+        ),
+    )
+
+
+@app.post("/tasks/{task_id}/edit", response_class=HTMLResponse)
+async def update_task(
+    request: Request,
+    task_id: str,
+    title: str = Form(""),
+    subject: str = Form(""),
+    grade_level: str = Form(""),
+    instructions: str = Form(""),
+    material: str = Form(""),
+    rubric_title: str = Form(""),
+    criteria: list[str] = Form(...),
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+    task = await task_store.get_task(task_id)
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Die Aufgabe wurde nicht gefunden.",
+        )
+
+    values = _submitted_task_form_values(
+        title=title,
+        subject=subject,
+        grade_level=grade_level,
+        instructions=instructions,
+        material=material,
+        rubric_title=rubric_title,
+        criteria=criteria,
+    )
+
+    try:
+        await task_store.update_task(
+            task_id,
+            title=title,
+            subject=subject,
+            grade_level=grade_level,
+            instructions=instructions,
+            material=material,
+            rubric_title=rubric_title,
+            criteria=criteria,
+        )
+    except (ValueError, TaskStoreError) as exc:
+        return templates.TemplateResponse(
+            name="task_form.html",
+            request=request,
+            context=_task_form_context(
+                request=request,
+                authenticated_user=authenticated_user,
+                task=task,
+                values=values,
+                error=str(exc),
+            ),
+            status_code=(
+                422 if isinstance(exc, ValueError) else 500
+            ),
+        )
+
+    return RedirectResponse(
+        url="/tasks?notice=updated",
+        status_code=303,
+    )
+
+
+@app.post("/tasks/{task_id}/duplicate")
+async def duplicate_task(
+    request: Request,
+    task_id: str,
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        await task_store.duplicate_task(task_id)
+    except TaskNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    return RedirectResponse(
+        url="/tasks?notice=duplicated",
+        status_code=303,
+    )
+
+
+@app.post("/tasks/{task_id}/delete")
+async def delete_task(
+    request: Request,
+    task_id: str,
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        delete_result = await task_store.delete_task(task_id)
+    except TaskNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    return RedirectResponse(
+        url=f"/tasks?notice={delete_result.action}",
+        status_code=303,
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(
     request: Request,
@@ -993,6 +1362,17 @@ async def index(
     if authenticated_user is None:
         return _redirect_to_login()
 
+    storage_warning: str | None = None
+
+    try:
+        tasks = await task_store.list_tasks()
+    except TaskStoreError:
+        tasks = []
+        storage_warning = (
+            "Die Bewertungsbögen konnten momentan nicht geladen werden. "
+            "Das bisherige Gesamtfeedback bleibt verfügbar."
+        )
+
     return templates.TemplateResponse(
         name="index.html",
         request=request,
@@ -1001,6 +1381,8 @@ async def index(
                 request.session
             ),
             authenticated_user=authenticated_user,
+            task_options=tasks,
+            storage_warning=storage_warning,
         ),
     )
 
@@ -1353,6 +1735,7 @@ async def analyze(
     request: Request,
     student_text: str = Form(...),
     provider: str = Form(...),
+    task_id: str = Form("", max_length=100),
     csrf_token: str = Form("", max_length=256),
     ollama_base_url: str = Form(""),
     ollama_model: str = Form(""),
@@ -1373,8 +1756,9 @@ async def analyze(
 
     _require_valid_csrf_token(request, csrf_token)
 
-    result: FeedbackResult | None = None
+    result: FeedbackResult | RubricFeedbackResult | None = None
     error: str | None = None
+    storage_warning: str | None = None
     runpod_warm_window: dict[str, object] | None = None
 
     openai_override_used = (
@@ -1407,11 +1791,55 @@ async def analyze(
             runpod_tracking_id=runpod_tracking_id,
         )
 
-        result = await feedback_service.analyze_text(
-            student_text=student_text,
-            provider_key=provider,
-            provider_override=provider_override,
-        )
+        selected_task_id = task_id.strip()
+
+        if selected_task_id:
+            selected_task = await task_store.get_task(
+                selected_task_id
+            )
+
+            if selected_task is None:
+                raise ValueError(
+                    "Die ausgewählte Aufgabe oder ihr Bewertungsbogen "
+                    "ist nicht mehr verfügbar."
+                )
+
+            result = await rubric_feedback_service.analyze_text(
+                student_text=student_text,
+                task=selected_task,
+                provider_key=provider,
+                provider_override=provider_override,
+            )
+
+            try:
+                await task_store.save_feedback_run(
+                    task=selected_task,
+                    student_text=student_text,
+                    provider=result.provider,
+                    model=result.model,
+                    duration_ms=result.duration_ms,
+                    feedback_payload=result.payload(),
+                    provider_request_id=(
+                        result.provider_request_id
+                    ),
+                    queue_duration_ms=(
+                        result.queue_duration_ms
+                    ),
+                    execution_duration_ms=(
+                        result.execution_duration_ms
+                    ),
+                )
+            except TaskStoreError:
+                storage_warning = (
+                    "Das Feedback wurde erfolgreich erzeugt, konnte "
+                    "aber nicht dauerhaft gespeichert werden."
+                )
+        else:
+            result = await feedback_service.analyze_text(
+                student_text=student_text,
+                provider_key=provider,
+                provider_override=provider_override,
+            )
 
         if result.provider == "runpod":
             endpoint_key = (
@@ -1423,6 +1851,16 @@ async def analyze(
             )
     except Exception as exc:
         error = str(exc)
+
+    try:
+        task_options = await task_store.list_tasks()
+    except TaskStoreError:
+        task_options = []
+
+        if error is None:
+            storage_warning = (
+                "Die Bewertungsbögen konnten momentan nicht geladen werden."
+            )
 
     template_name = (
         "analysis_response.html"
@@ -1441,6 +1879,8 @@ async def analyze(
             authenticated_user=authenticated_user,
             selected_provider=provider,
             student_text=student_text,
+            task_options=task_options,
+            selected_task_id=task_id.strip(),
             ollama_base_url=ollama_base_url,
             selected_ollama_model=ollama_model,
             ollama_custom_model=ollama_custom_model,
@@ -1453,6 +1893,7 @@ async def analyze(
             selected_runpod_endpoint=runpod_endpoint,
             result=result,
             runpod_warm_window=runpod_warm_window,
+            storage_warning=storage_warning,
             error=error,
         ),
     )

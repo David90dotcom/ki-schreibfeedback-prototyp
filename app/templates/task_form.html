@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block scripts %}
+<script
+    src="{{ url_for('static', path='/rubrics.js') }}?v={{ static_asset_version }}"
+    defer
+></script>
+{% endblock %}
+
+{% block content %}
+
+<section class="card">
+    <div class="form-heading">
+        <div>
+            <h2>
+                {% if task %}
+                    Aufgabe und Bewertungsbogen bearbeiten
+                {% else %}
+                    Aufgabe und Bewertungsbogen erstellen
+                {% endif %}
+            </h2>
+            <p class="hint">
+                Die Einzelkriterien werden beim Analysieren gemeinsam in
+                genau einer KI-Anfrage ausgewertet.
+            </p>
+        </div>
+
+        <a class="text-link" href="/tasks">Zur Verwaltung</a>
+    </div>
+
+    {% if error %}
+        <div class="form-error" role="alert">
+            {{ error }}
+        </div>
+    {% endif %}
+
+    <form
+        id="task-form"
+        method="post"
+        action="{% if task %}/tasks/{{ task.task_id }}/edit{% else %}/tasks/new{% endif %}"
+    >
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="{{ csrf_token }}"
+        >
+
+        <fieldset>
+            <legend>Aufgabe</legend>
+
+            <label for="task-title">Titel der Aufgabe</label>
+            <input
+                id="task-title"
+                name="title"
+                type="text"
+                value="{{ values.title }}"
+                maxlength="200"
+                required
+                placeholder="zum Beispiel Gedichtinterpretation Klasse 8"
+            >
+
+            <div class="two-column-fields">
+                <div>
+                    <label for="task-subject">Fach</label>
+                    <input
+                        id="task-subject"
+                        name="subject"
+                        type="text"
+                        value="{{ values.subject }}"
+                        maxlength="100"
+                        placeholder="Deutsch"
+                    >
+                </div>
+
+                <div>
+                    <label for="task-grade-level">
+                        Jahrgangsstufe
+                    </label>
+                    <input
+                        id="task-grade-level"
+                        name="grade_level"
+                        type="text"
+                        value="{{ values.grade_level }}"
+                        maxlength="100"
+                        placeholder="zum Beispiel 8"
+                    >
+                </div>
+            </div>
+
+            <label for="task-instructions">Aufgabenstellung</label>
+            <textarea
+                id="task-instructions"
+                name="instructions"
+                rows="6"
+                maxlength="12000"
+                required
+                placeholder="Was sollen die Schülerinnen und Schüler bearbeiten?"
+            >{{ values.instructions }}</textarea>
+
+            <label for="task-material">Material (optional)</label>
+            <textarea
+                id="task-material"
+                name="material"
+                rows="8"
+                maxlength="30000"
+                placeholder="zum Beispiel Gedichttext, Ausgangstext oder zusätzliche Hinweise"
+            >{{ values.material }}</textarea>
+        </fieldset>
+
+        <fieldset>
+            <legend>Bewertungsbogen</legend>
+
+            <label for="rubric-title">
+                Name des Bewertungsbogens
+            </label>
+            <input
+                id="rubric-title"
+                name="rubric_title"
+                type="text"
+                value="{{ values.rubric_title }}"
+                maxlength="200"
+                required
+                placeholder="zum Beispiel Grundanforderungen Gedichtinterpretation"
+            >
+
+            <div class="criteria-heading">
+                <div>
+                    <h3>Bewertungskriterien</h3>
+                    <p class="hint">
+                        Jedes Kriterium erhält später eine eigene
+                        Rückmeldung.
+                    </p>
+                </div>
+
+                <button
+                    class="secondary-button compact-button"
+                    type="button"
+                    data-add-criterion
+                >
+                    Kriterium hinzufügen
+                </button>
+            </div>
+
+            <div
+                class="criteria-editor"
+                data-criteria-list
+                data-max-criteria="30"
+            >
+                {% for criterion in values.criteria %}
+                    <div class="criterion-editor-item" data-criterion-item>
+                        <div class="criterion-editor-label">
+                            <label>
+                                Kriterium <span data-criterion-number>{{ loop.index }}</span>
+                            </label>
+
+                            <div class="criterion-order-controls">
+                                <button
+                                    class="secondary-button compact-button"
+                                    type="button"
+                                    data-move-up
+                                    aria-label="Kriterium nach oben verschieben"
+                                >
+                                    Nach oben
+                                </button>
+                                <button
+                                    class="secondary-button compact-button"
+                                    type="button"
+                                    data-move-down
+                                    aria-label="Kriterium nach unten verschieben"
+                                >
+                                    Nach unten
+                                </button>
+                                <button
+                                    class="danger-button compact-button"
+                                    type="button"
+                                    data-remove-criterion
+                                >
+                                    Entfernen
+                                </button>
+                            </div>
+                        </div>
+
+                        <textarea
+                            name="criteria"
+                            rows="3"
+                            maxlength="1500"
+                            required
+                            placeholder="zum Beispiel: Du hast einen Einleitungssatz mit Titel, Autor, Textart und Thema verfasst."
+                        >{{ criterion }}</textarea>
+                    </div>
+                {% endfor %}
+            </div>
+        </fieldset>
+
+        <div class="form-actions">
+            <button type="submit">
+                {% if task %}Änderungen speichern{% else %}Aufgabe speichern{% endif %}
+            </button>
+            <a class="button-link secondary-link" href="/tasks">
+                Abbrechen
+            </a>
+        </div>
+    </form>
+</section>
+
+{% endblock %}
