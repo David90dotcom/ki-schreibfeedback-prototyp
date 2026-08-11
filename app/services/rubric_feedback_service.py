@@ -95,7 +95,7 @@ class RubricFeedbackService:
             )
         if not task.rubric.criteria:
             raise ValueError(
-                "Der ausgewählte Bewertungsbogen enthält keine Kriterien."
+                "Die ausgewählte Feedback-Vorlage enthält keine Kriterien."
             )
 
         provider = (
@@ -155,9 +155,9 @@ class RubricFeedbackService:
 
         return f"""
 Du analysierst einen anonymisierten Schülertext ausschließlich anhand der
-übermittelten Aufgabe und der Bewertungskriterien.
+übermittelten Aufgabe und der Feedback-Kriterien.
 
-Erzeuge zu jedem Kriterium genau eine eigene Rückmeldung. Beurteile nur, was
+Erzeuge zu jedem Kriterium genau ein eigenes Feedback. Berücksichtige nur, was
 am Schülertext tatsächlich erkennbar ist. Erfinde keine Textbelege und schreibe
 keine fertige Musterlösung. Formuliere verständlich, wertschätzend, konkret und
 handlungsorientiert.
@@ -170,11 +170,11 @@ ohne zusätzlichen Text. Verwende exakt diese Struktur:
     {{
       "criterion_id": "ID aus der Eingabe",
       "status": "met | partially_met | not_met | not_assessable",
-      "feedback": "konkrete Rückmeldung zum Kriterium",
+      "feedback": "konkretes Feedback zum Kriterium",
       "next_step": "konkreter nächster Überarbeitungsschritt"
     }}
   ],
-  "overall_feedback": "kurze zusammenfassende Rückmeldung"
+  "overall_feedback": "kurzes zusammenfassendes Feedback"
 }}
 
 Jede criterion_id aus der Eingabe muss genau einmal vorkommen. Füge keine
@@ -267,8 +267,8 @@ Eingabe:
 
         if set(parsed_by_id) != set(expected_by_id):
             raise RubricFeedbackError(
-                "Die KI hat nicht zu jedem Bewertungskriterium eine "
-                "Rückmeldung erzeugt."
+                "Die KI hat nicht zu jedem Feedback-Kriterium ein "
+                "Feedback erzeugt."
             )
 
         overall_feedback = self._required_string(

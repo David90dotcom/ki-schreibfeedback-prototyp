@@ -37,7 +37,7 @@ class RubricExchangeError(ValueError):
 
 
 class RubricExchangeService:
-    """Erzeugt und validiert portable Bewertungsbogen-Exporte."""
+    """Erzeugt und validiert portable Feedback-Exporte."""
 
     @classmethod
     def export_task(cls, task: FeedbackTask) -> bytes:
@@ -75,12 +75,12 @@ class RubricExchangeService:
 
         if not task_tuple:
             raise RubricExchangeError(
-                "Es sind keine Bewertungsbögen für den Export vorhanden."
+                "Es sind keine Feedback-Vorlagen für den Export vorhanden."
             )
         if len(task_tuple) > MAX_RUBRIC_BUNDLE_TASKS:
             raise RubricExchangeError(
                 "Ein Gesamtexport darf höchstens "
-                f"{MAX_RUBRIC_BUNDLE_TASKS} Bewertungsbögen enthalten."
+                f"{MAX_RUBRIC_BUNDLE_TASKS} Feedback-Vorlagen enthalten."
             )
 
         exported_at = datetime.now(timezone.utc).isoformat()
@@ -91,7 +91,7 @@ class RubricExchangeService:
 
         if len(parts) > MAX_RUBRIC_BUNDLE_PARTS:
             raise RubricExchangeError(
-                "Die Bewertungsbögen benötigen zu viele Exportteile."
+                "Die Feedback-Vorlagen benötigen zu viele Exportteile."
             )
 
         manifest_parts: list[dict[str, object]] = []
@@ -223,7 +223,7 @@ class RubricExchangeService:
             )
         if document.get("format") != RUBRIC_EXPORT_FORMAT:
             raise RubricExchangeError(
-                "Die Datei ist kein Bewertungsbogen-Export dieser Anwendung."
+                "Die Datei ist kein Feedback-Export dieser Anwendung."
             )
 
         format_version = document.get("format_version")
@@ -257,19 +257,19 @@ class RubricExchangeService:
 
         if not isinstance(tasks, list) or not tasks:
             raise RubricExchangeError(
-                "Die Importdatei enthält keine Bewertungsbögen."
+                "Die Importdatei enthält keine Feedback-Vorlagen."
             )
         if len(tasks) > MAX_RUBRIC_IMPORT_TASKS:
             raise RubricExchangeError(
                 "Eine Importdatei darf höchstens "
-                f"{MAX_RUBRIC_IMPORT_TASKS} Bewertungsbögen enthalten."
+                f"{MAX_RUBRIC_IMPORT_TASKS} Feedback-Vorlagen enthalten."
             )
         if (
             export_type == RUBRIC_EXPORT_TYPE_SINGLE
             and len(tasks) != 1
         ):
             raise RubricExchangeError(
-                "Ein Einzelexport muss genau einen Bewertungsbogen enthalten."
+                "Ein Einzelexport muss genau eine Feedback-Vorlage enthalten."
             )
 
         return tuple(
@@ -397,7 +397,7 @@ class RubricExchangeService:
 
                 if len(drafts) != total_task_count:
                     raise RubricExchangeError(
-                        "Die Gesamtanzahl der Bewertungsbögen stimmt nicht."
+                        "Die Gesamtanzahl der Feedback-Vorlagen stimmt nicht."
                     )
 
                 return tuple(drafts)
@@ -422,7 +422,7 @@ class RubricExchangeService:
     ) -> tuple[list[Mapping[object, object]], int]:
         if manifest.get("format") != RUBRIC_BUNDLE_FORMAT:
             raise RubricExchangeError(
-                "Die Datei ist kein Bewertungsbogen-Gesamtpaket dieser "
+                "Die Datei ist kein Feedback-Gesamtpaket dieser "
                 "Anwendung."
             )
 
@@ -445,7 +445,7 @@ class RubricExchangeService:
             or total_task_count > MAX_RUBRIC_BUNDLE_TASKS
         ):
             raise RubricExchangeError(
-                "Die Gesamtanzahl der Bewertungsbögen ist ungültig."
+                "Die Gesamtanzahl der Feedback-Vorlagen ist ungültig."
             )
 
         parts = manifest.get("parts")
@@ -550,7 +550,7 @@ class RubricExchangeService:
 
         if len(tasks) == 1:
             raise RubricExchangeError(
-                "Ein einzelner Bewertungsbogen überschreitet die sichere "
+                "Eine einzelne Feedback-Vorlage überschreitet die sichere "
                 "Größe eines Exportteils."
             )
 
@@ -568,6 +568,7 @@ class RubricExchangeService:
 
     @staticmethod
     def _bundle_part_name(position: int) -> str:
+        # Versioned exchange contract; keep stable for existing ZIP bundles.
         return f"parts/bewertungsboegen-{position:04d}.json"
 
     @staticmethod
@@ -649,12 +650,12 @@ class RubricExchangeService:
     ) -> None:
         if task_count < 1:
             raise RubricExchangeError(
-                "Es sind keine Bewertungsbögen für den Export vorhanden."
+                "Es sind keine Feedback-Vorlagen für den Export vorhanden."
             )
         if task_count > MAX_RUBRIC_IMPORT_TASKS:
             raise RubricExchangeError(
                 "Ein einzelner JSON-Export darf höchstens "
-                f"{MAX_RUBRIC_IMPORT_TASKS} Bewertungsbögen enthalten. "
+                f"{MAX_RUBRIC_IMPORT_TASKS} Feedback-Vorlagen enthalten. "
                 "Verwende für größere Bestände das Gesamtpaket."
             )
         if len(content) > MAX_RUBRIC_IMPORT_BYTES:
@@ -723,21 +724,21 @@ class RubricExchangeService:
     ) -> FeedbackTaskDraft:
         if not isinstance(value, Mapping):
             raise RubricExchangeError(
-                f"Bewertungsbogen {position} ist kein JSON-Objekt."
+                f"Feedback {position} ist kein JSON-Objekt."
             )
 
         rubric = value.get("rubric")
 
         if not isinstance(rubric, Mapping):
             raise RubricExchangeError(
-                f"Bewertungsbogen {position} enthält keinen gültigen Bogen."
+                f"Feedback {position} enthält keine gültige Kriterienvorlage."
             )
 
         criteria = rubric.get("criteria")
 
         if not isinstance(criteria, list):
             raise RubricExchangeError(
-                f"Bewertungsbogen {position} enthält keine Kriterienliste."
+                f"Feedback {position} enthält keine Kriterienliste."
             )
 
         criterion_texts: list[str] = []
@@ -749,7 +750,7 @@ class RubricExchangeService:
             if not isinstance(criterion, Mapping):
                 raise RubricExchangeError(
                     "Kriterium "
-                    f"{criterion_position} in Bewertungsbogen {position} "
+                    f"{criterion_position} in Feedback {position} "
                     "ist kein JSON-Objekt."
                 )
 
@@ -758,7 +759,7 @@ class RubricExchangeService:
                     criterion,
                     "text",
                     "Kriterium "
-                    f"{criterion_position} in Bewertungsbogen {position}",
+                    f"{criterion_position} in Feedback {position}",
                 )
             )
 
@@ -766,7 +767,7 @@ class RubricExchangeService:
 
         if type(source_archived) is not bool:
             raise RubricExchangeError(
-                f"Bewertungsbogen {position} enthält einen ungültigen "
+                f"Feedback {position} enthält einen ungültigen "
                 "Archivstatus."
             )
 
@@ -774,32 +775,32 @@ class RubricExchangeService:
             title=cls._required_string(
                 value,
                 "title",
-                f"Bewertungsbogen {position}",
+                f"Feedback {position}",
             ),
             subject=cls._optional_string(
                 value,
                 "subject",
-                f"Bewertungsbogen {position}",
+                f"Feedback {position}",
             ),
             grade_level=cls._optional_string(
                 value,
                 "grade_level",
-                f"Bewertungsbogen {position}",
+                f"Feedback {position}",
             ),
             instructions=cls._required_string(
                 value,
                 "instructions",
-                f"Bewertungsbogen {position}",
+                f"Feedback {position}",
             ),
             material=cls._optional_string(
                 value,
                 "material",
-                f"Bewertungsbogen {position}",
+                f"Feedback {position}",
             ),
             rubric_title=cls._required_string(
                 rubric,
                 "title",
-                f"Bewertungsbogen {position}",
+                f"Feedback {position}",
             ),
             criteria=tuple(criterion_texts),
         )

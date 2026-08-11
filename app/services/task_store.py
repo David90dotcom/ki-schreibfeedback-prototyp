@@ -34,7 +34,7 @@ class TaskNotFoundError(TaskStoreError):
 
 
 class TaskStore:
-    """Verwaltet Aufgaben und Bewertungsbögen in SQLite."""
+    """Verwaltet Aufgaben und Feedback-Vorlagen in SQLite."""
 
     def __init__(self, database_path: str | Path) -> None:
         self.database_path = Path(database_path)
@@ -99,7 +99,7 @@ class TaskStore:
 
         if not drafts:
             raise ValueError(
-                "Die Importdatei enthält keine Bewertungsbögen."
+                "Die Importdatei enthält keine Feedback-Vorlagen."
             )
 
         normalized_tasks = tuple(
@@ -341,7 +341,7 @@ class TaskStore:
 
             except sqlite3.Error as exc:
                 raise TaskStoreError(
-                    "Die Bewertungsbögen konnten nicht importiert werden."
+                    "Die Feedback-Vorlagen konnten nicht importiert werden."
                 ) from exc
 
     def _update_task_sync(
@@ -909,7 +909,7 @@ class TaskStore:
         )
         normalized_rubric_title = TaskStore._required_text(
             rubric_title,
-            "Bitte gib einen Namen für den Bewertungsbogen ein.",
+            "Bitte gib einen Namen für das Feedback ein.",
             200,
         )
         normalized_subject = subject.strip()
@@ -935,16 +935,16 @@ class TaskStore:
 
         if not normalized_criteria:
             raise ValueError(
-                "Der Bewertungsbogen benötigt mindestens ein Kriterium."
+                "Die Feedback-Vorlage benötigt mindestens ein Kriterium."
             )
         if len(normalized_criteria) > MAX_CRITERIA:
             raise ValueError(
-                "Ein Bewertungsbogen darf höchstens "
+                "Eine Feedback-Vorlage darf höchstens "
                 f"{MAX_CRITERIA} Kriterien enthalten."
             )
         if any(not criterion for criterion in normalized_criteria):
             raise ValueError(
-                "Bitte fülle alle Bewertungskriterien aus oder entferne "
+                "Bitte fülle alle Feedback-Kriterien aus oder entferne "
                 "leere Felder."
             )
         if any(
@@ -952,7 +952,7 @@ class TaskStore:
             for criterion in normalized_criteria
         ):
             raise ValueError(
-                "Ein Bewertungskriterium darf höchstens "
+                "Ein Feedback-Kriterium darf höchstens "
                 f"{MAX_CRITERION_CHARS} Zeichen lang sein."
             )
 

@@ -21,12 +21,12 @@
 
         <div class="task-selection">
             <label for="task-id">
-                Aufgabe und Bewertungsbogen
+                Aufgabe und Feedback
             </label>
 
             <select id="task-id" name="task_id">
                 <option value="">
-                    Ohne Bewertungsbogen – bisheriges Gesamtfeedback
+                    Ohne Feedback-Vorlage – bisheriges Gesamtfeedback
                 </option>
 
                 {% for task in task_options %}
@@ -108,7 +108,7 @@
                                 </div>
 
                                 <div>
-                                    <dt>Bewertungsbogen</dt>
+                                    <dt>Feedback</dt>
                                     <dd>{{ task.rubric.title }}</dd>
                                 </div>
 
@@ -133,14 +133,14 @@
 
             {% if task_options %}
                 <p class="hint">
-                    Mit einem Bewertungsbogen erhältst du eine eigene
-                    Rückmeldung zu jedem Kriterium.
-                    <a href="/tasks">Bewertungsbögen verwalten</a>
+                    Mit einer Feedback-Vorlage erhältst du ein eigenes
+                    Feedback zu jedem Kriterium.
+                    <a href="/tasks">Feedback verwalten</a>
                 </p>
             {% else %}
                 <p class="hint">
-                    Es wurde noch kein Bewertungsbogen angelegt.
-                    <a href="/tasks/new">Ersten Bewertungsbogen erstellen</a>
+                    Es wurde noch keine Feedback-Vorlage angelegt.
+                    <a href="/tasks/new">Erstes Feedback erstellen</a>
                     oder das bisherige Gesamtfeedback verwenden.
                 </p>
             {% endif %}

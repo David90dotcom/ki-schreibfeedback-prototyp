@@ -116,7 +116,7 @@ class TaskManagementTests(unittest.TestCase):
                 "grade_level": "8",
                 "instructions": "Interpretiere das Gedicht.",
                 "material": "Beispielgedicht",
-                "rubric_title": "Bewertungsbogen Gedichtinterpretation",
+                "rubric_title": "Feedback Gedichtinterpretation",
                 "criteria": [
                     "Einleitung verfassen",
                     "Äußere Form beschreiben",
@@ -167,7 +167,7 @@ class TaskManagementTests(unittest.TestCase):
                 "grade_level": "8",
                 "instructions": "Analysiere das Gedicht.",
                 "material": "Beispielgedicht",
-                "rubric_title": "Überarbeiteter Bewertungsbogen",
+                "rubric_title": "Überarbeitetes Feedback",
                 "criteria": [
                     "Einleitung verfassen",
                     "Inhalt zusammenfassen",
@@ -239,7 +239,7 @@ class TaskManagementTests(unittest.TestCase):
                         if criterion.position == 0
                         else "Nicht erfüllt"
                     ),
-                    feedback="Konkrete Rückmeldung.",
+                    feedback="Konkretes Feedback.",
                     next_step="Konkreter nächster Schritt.",
                 )
                 for criterion in task.rubric.criteria
@@ -278,8 +278,10 @@ class TaskManagementTests(unittest.TestCase):
         old_analysis.assert_not_awaited()
         self.assertIn("Kriterium 1", response.text)
         self.assertIn("Teilweise erfüllt", response.text)
+        self.assertIn("<h4>Feedback</h4>", response.text)
         self.assertIn("Konkreter nächster Schritt", response.text)
         self.assertIn("Kurze Zusammenfassung", response.text)
+        self.assertNotIn("bewertungsbogen", response.text.lower())
         self.assertEqual(
             asyncio.run(
                 self.store.count_feedback_runs(task_id=task.task_id)
@@ -333,7 +335,7 @@ class TaskManagementTests(unittest.TestCase):
                 "csrf_token": "ungueltig",
                 "title": "Aufgabe",
                 "instructions": "Aufgabenstellung",
-                "rubric_title": "Bewertungsbogen",
+                "rubric_title": "Feedback",
                 "criteria": ["Kriterium"],
             },
         )
@@ -357,6 +359,7 @@ class TaskManagementTests(unittest.TestCase):
             response.text,
         )
         self.assertIn(
-            "Ohne Bewertungsbogen – bisheriges Gesamtfeedback",
+            "Ohne Feedback-Vorlage – bisheriges Gesamtfeedback",
             response.text,
         )
+        self.assertNotIn("bewertungsbogen", response.text.lower())

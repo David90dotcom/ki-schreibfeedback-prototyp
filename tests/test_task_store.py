@@ -57,7 +57,7 @@ class TaskStoreTests(unittest.TestCase):
                 grade_level="8",
                 instructions="Analysiere das vorliegende Gedicht.",
                 material="Ein kurzes Beispielgedicht.",
-                rubric_title="Bewertungsbogen Gedichtanalyse",
+                rubric_title="Feedback Gedichtanalyse",
                 criteria=[
                     "Einleitung verfassen",
                     "Inhalt zusammenfassen",
@@ -242,14 +242,14 @@ class TaskStoreTests(unittest.TestCase):
                     grade_level="8",
                     instructions="Bearbeite die Aufgabe.",
                     material="",
-                    rubric_title="Bewertungsbogen",
+                    rubric_title="Feedback",
                     criteria=[],
                 )
             )
 
         with self.assertRaisesRegex(
             ValueError,
-            "alle Bewertungskriterien",
+            "alle Feedback-Kriterien",
         ):
             asyncio.run(
                 self.store.create_task(
@@ -258,7 +258,7 @@ class TaskStoreTests(unittest.TestCase):
                     grade_level="8",
                     instructions="Bearbeite die Aufgabe.",
                     material="",
-                    rubric_title="Bewertungsbogen",
+                    rubric_title="Feedback",
                     criteria=["Gültig", "   "],
                 )
             )
@@ -271,7 +271,7 @@ class TaskStoreTests(unittest.TestCase):
                 grade_level="8",
                 instructions="Bearbeite die Aufgabe.",
                 material="",
-                rubric_title="Gültiger Bewertungsbogen",
+                rubric_title="Gültiges Feedback",
                 criteria=("Gültiges Kriterium",),
             ),
             FeedbackTaskDraft(
@@ -280,7 +280,7 @@ class TaskStoreTests(unittest.TestCase):
                 grade_level="8",
                 instructions="Bearbeite die Aufgabe.",
                 material="",
-                rubric_title="Ungültiger Bewertungsbogen",
+                rubric_title="Ungültiges Feedback",
                 criteria=(),
             ),
         )
@@ -301,7 +301,7 @@ class TaskStoreTests(unittest.TestCase):
                 grade_level="8",
                 instructions="Bearbeite die Aufgabe.",
                 material="",
-                rubric_title=f"Bewertungsbogen {position}",
+                rubric_title=f"Feedback {position}",
                 criteria=("Gültiges Kriterium",),
             )
             for position in range(2)

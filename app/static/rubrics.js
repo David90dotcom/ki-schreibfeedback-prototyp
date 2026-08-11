@@ -5,7 +5,7 @@
         (form) => {
             form.addEventListener("submit", (event) => {
                 const confirmed = window.confirm(
-                    "Möchtest du diesen Bewertungsbogen wirklich löschen? " +
+                    "Möchtest du diese Feedback-Vorlage wirklich löschen? " +
                     "Bereits erstellte Analyseergebnisse bleiben erhalten."
                 );
 

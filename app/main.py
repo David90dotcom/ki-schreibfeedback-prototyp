@@ -565,12 +565,12 @@ def _template_context(
 
 
 TASK_NOTICE_MESSAGES = {
-    "created": "Aufgabe und Bewertungsbogen wurden gespeichert.",
-    "updated": "Aufgabe und Bewertungsbogen wurden aktualisiert.",
-    "duplicated": "Aufgabe und Bewertungsbogen wurden dupliziert.",
-    "deleted": "Der unbenutzte Bewertungsbogen wurde gelöscht.",
+    "created": "Aufgabe und Feedback wurden gespeichert.",
+    "updated": "Aufgabe und Feedback wurden aktualisiert.",
+    "duplicated": "Aufgabe und Feedback wurden dupliziert.",
+    "deleted": "Die unbenutzte Feedback-Vorlage wurde gelöscht.",
     "archived": (
-        "Der bereits verwendete Bewertungsbogen wurde archiviert. "
+        "Die bereits verwendete Feedback-Vorlage wurde archiviert. "
         "Vorhandene Analyseergebnisse bleiben erhalten."
     ),
 }
@@ -582,10 +582,10 @@ def _task_notice_message(
 ) -> str | None:
     if notice == "imported" and imported_count > 0:
         if imported_count == 1:
-            return "Ein Bewertungsbogen wurde als neue Kopie importiert."
+            return "Eine Feedback-Vorlage wurde als neue Kopie importiert."
 
         return (
-            f"{imported_count} Bewertungsbögen wurden als neue Kopien "
+            f"{imported_count} Feedback-Vorlagen wurden als neue Kopien "
             "importiert."
         )
 
@@ -1202,7 +1202,7 @@ async def export_all_tasks(
     if not tasks:
         raise HTTPException(
             status_code=404,
-            detail="Es sind keine Bewertungsbögen für den Export vorhanden.",
+            detail="Es sind keine Feedback-Vorlagen für den Export vorhanden.",
         )
 
     try:
@@ -1215,7 +1215,7 @@ async def export_all_tasks(
 
     return _rubric_download_response(
         content,
-        "bewertungsboegen-gesamt.zip",
+        "feedback-gesamt.zip",
         media_type="application/zip",
     )
 
@@ -1244,7 +1244,7 @@ async def export_task(
 
     return _rubric_download_response(
         RubricExchangeService.export_task(task),
-        "bewertungsbogen-einzeln.json",
+        "feedback-einzeln.json",
     )
 
 
@@ -1574,7 +1574,7 @@ async def index(
     except TaskStoreError:
         tasks = []
         storage_warning = (
-            "Die Bewertungsbögen konnten momentan nicht geladen werden. "
+            "Die Feedback-Vorlagen konnten momentan nicht geladen werden. "
             "Das bisherige Gesamtfeedback bleibt verfügbar."
         )
 
@@ -2005,7 +2005,7 @@ async def analyze(
 
             if selected_task is None:
                 raise ValueError(
-                    "Die ausgewählte Aufgabe oder ihr Bewertungsbogen "
+                    "Die ausgewählte Aufgabe oder ihre Feedback-Vorlage "
                     "ist nicht mehr verfügbar."
                 )
 
@@ -2064,7 +2064,7 @@ async def analyze(
 
         if error is None:
             storage_warning = (
-                "Die Bewertungsbögen konnten momentan nicht geladen werden."
+                "Die Feedback-Vorlagen konnten momentan nicht geladen werden."
             )
 
     template_name = (

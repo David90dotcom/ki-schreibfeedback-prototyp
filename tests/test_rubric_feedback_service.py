@@ -49,7 +49,7 @@ def _task() -> FeedbackTask:
         material="Das Beispielgedicht",
         rubric=Rubric(
             rubric_id="rubric-1",
-            title="Bewertungsbogen Gedichtinterpretation",
+            title="Feedback Gedichtinterpretation",
             criteria=(
                 RubricCriterion(
                     criterion_id="criterion-1",

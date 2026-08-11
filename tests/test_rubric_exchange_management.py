@@ -109,9 +109,9 @@ class RubricExchangeManagementTests(unittest.TestCase):
             files={
                 "import_file": (
                     (
-                        "bewertungsboegen.zip"
+                        "feedback.zip"
                         if is_bundle
-                        else "bewertungsboegen.json"
+                        else "feedback.json"
                     ),
                     content,
                     (
@@ -138,6 +138,10 @@ class RubricExchangeManagementTests(unittest.TestCase):
         )
         self.assertIn(
             "attachment",
+            export_response.headers["content-disposition"],
+        )
+        self.assertIn(
+            "feedback-einzeln.json",
             export_response.headers["content-disposition"],
         )
         self.assertNotIn(source.task_id, export_response.text)
@@ -184,7 +188,7 @@ class RubricExchangeManagementTests(unittest.TestCase):
             "application/zip",
         )
         self.assertIn(
-            "bewertungsboegen-gesamt.zip",
+            "feedback-gesamt.zip",
             export_response.headers["content-disposition"],
         )
         exported_drafts = RubricExchangeService.parse_import(
@@ -217,7 +221,7 @@ class RubricExchangeManagementTests(unittest.TestCase):
                 grade_level="8",
                 instructions="Bearbeite die Aufgabe.",
                 material="",
-                rubric_title=f"Bewertungsbogen {position:03d}",
+                rubric_title=f"Feedback {position:03d}",
                 criteria=("Gültiges Kriterium",),
             )
             for position in range(201)
@@ -253,7 +257,7 @@ class RubricExchangeManagementTests(unittest.TestCase):
         )
         self.assertEqual(notice_response.status_code, 200)
         self.assertIn(
-            "201 Bewertungsbögen wurden als neue Kopien importiert.",
+            "201 Feedback-Vorlagen wurden als neue Kopien importiert.",
             notice_response.text,
         )
 
@@ -304,7 +308,7 @@ class RubricExchangeManagementTests(unittest.TestCase):
                     "instructions": "Bearbeite die Aufgabe.",
                     "material": "",
                     "rubric": {
-                        "title": "Gültiger Bewertungsbogen",
+                        "title": "Gültiges Feedback",
                         "criteria": [{"text": "Gültiges Kriterium"}],
                     },
                 },
@@ -315,7 +319,7 @@ class RubricExchangeManagementTests(unittest.TestCase):
                     "instructions": "Bearbeite die Aufgabe.",
                     "material": "",
                     "rubric": {
-                        "title": "Ungültiger Bewertungsbogen",
+                        "title": "Ungültiges Feedback",
                         "criteria": [],
                     },
                 },
@@ -343,7 +347,7 @@ class RubricExchangeManagementTests(unittest.TestCase):
                         instructions="Bearbeite die Aufgabe.",
                         material="",
                         rubric_title=(
-                            f"Bewertungsbogen {position:03d}"
+                            f"Feedback {position:03d}"
                         ),
                         criteria=("Gültiges Kriterium",),
                     )
@@ -431,7 +435,11 @@ class RubricExchangeManagementTests(unittest.TestCase):
         management_page = self.client.get("/tasks")
 
         self.assertIn("Gesamtexport", management_page.text)
-        self.assertIn("Bewertungsbogen importieren", management_page.text)
+        self.assertIn("Feedback importieren", management_page.text)
+        self.assertNotIn(
+            "bewertungsbogen",
+            management_page.text.lower(),
+        )
         self.assertIn(
             f"/tasks/{task.task_id}/export",
             management_page.text,
