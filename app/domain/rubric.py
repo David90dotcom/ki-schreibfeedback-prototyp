@@ -15,6 +15,7 @@ class FeedbackTaskDraft:
     material: str
     rubric_title: str
     criteria: tuple[str, ...]
+    criterion_titles: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,7 @@ class RubricCriterion:
     criterion_id: str
     text: str
     position: int
+    title: str = ""
 
 
 @dataclass(frozen=True)
@@ -66,6 +68,7 @@ class FeedbackTask:
                 "criteria": [
                     {
                         "criterion_id": criterion.criterion_id,
+                        "title": criterion.title,
                         "text": criterion.text,
                         "position": criterion.position,
                     }

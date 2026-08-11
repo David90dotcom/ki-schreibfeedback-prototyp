@@ -81,23 +81,21 @@
                     class="criterion-feedback-card criterion-status-{{ item.status }}"
                 >
                     <div class="criterion-feedback-header">
-                        <span class="criterion-number">
-                            Kriterium {{ loop.index }}
-                        </span>
+                        <h3>
+                            {{ item.criterion_title or ("Kriterium " ~ loop.index) }}
+                        </h3>
 
                         <span class="criterion-status-badge">
                             {{ item.status_label }}
                         </span>
                     </div>
 
-                    <h3>{{ item.criterion_text }}</h3>
-
                     <div class="criterion-feedback-body">
                         <h4>Feedback</h4>
-                        <p>{{ item.feedback }}</p>
+                        <p>{{ item.feedback | feedback_inline_markdown }}</p>
 
-                        <h4>Nächster Schritt</h4>
-                        <p>{{ item.next_step }}</p>
+                        <h4>Überarbeitung</h4>
+                        <p>{{ item.next_step | feedback_inline_markdown }}</p>
                     </div>
                 </article>
             {% endfor %}
@@ -105,7 +103,7 @@
 
         <section class="overall-feedback">
             <h3>Zusammenfassung</h3>
-            <p>{{ result.overall_feedback }}</p>
+            <p>{{ result.overall_feedback | feedback_inline_markdown }}</p>
         </section>
     {% else %}
         <div class="feedback">

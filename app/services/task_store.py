@@ -19,8 +19,9 @@ from app.domain.rubric import (
 )
 
 
-MAX_CRITERIA = 30
-MAX_CRITERION_CHARS = 1500
+MAX_CRITERIA = 100
+MAX_CRITERION_CHARS = 10000
+MAX_CRITERION_TITLE_CHARS = 120
 MAX_MATERIAL_CHARS = 30000
 MAX_TASK_INSTRUCTIONS_CHARS = 12000
 
@@ -36,8 +37,30 @@ class TaskNotFoundError(TaskStoreError):
 class TaskStore:
     """Verwaltet Aufgaben und Feedback-Vorlagen in SQLite."""
 
-    def __init__(self, database_path: str | Path) -> None:
+    def __init__(
+        self,
+        database_path: str | Path,
+        *,
+        max_criteria: int = MAX_CRITERIA,
+        max_criterion_chars: int = MAX_CRITERION_CHARS,
+    ) -> None:
+        if type(max_criteria) is not int or max_criteria <= 0:
+            raise ValueError(
+                "Die maximale Kriterienanzahl muss eine positive "
+                "Ganzzahl sein."
+            )
+        if (
+            type(max_criterion_chars) is not int
+            or max_criterion_chars <= 0
+        ):
+            raise ValueError(
+                "Die maximale Länge eines Feedback-Kriteriums muss "
+                "eine positive Ganzzahl sein."
+            )
+
         self.database_path = Path(database_path)
+        self.max_criteria = max_criteria
+        self.max_criterion_chars = max_criterion_chars
         self._write_lock = Lock()
 
     async def initialize(self) -> None:
@@ -75,6 +98,7 @@ class TaskStore:
         material: str,
         rubric_title: str,
         criteria: list[str] | tuple[str, ...],
+        criterion_titles: list[str] | tuple[str, ...] | None = None,
     ) -> FeedbackTask:
         normalized = self._validate_input(
             title=title,
@@ -84,6 +108,7 @@ class TaskStore:
             material=material,
             rubric_title=rubric_title,
             criteria=criteria,
+            criterion_titles=criterion_titles,
         )
 
         return await asyncio.to_thread(
@@ -111,6 +136,9 @@ class TaskStore:
                 material=draft.material,
                 rubric_title=draft.rubric_title,
                 criteria=draft.criteria,
+                criterion_titles=(
+                    draft.criterion_titles or None
+                ),
             )
             for draft in drafts
         )
@@ -131,6 +159,7 @@ class TaskStore:
         material: str,
         rubric_title: str,
         criteria: list[str] | tuple[str, ...],
+        criterion_titles: list[str] | tuple[str, ...] | None = None,
     ) -> FeedbackTask:
         normalized = self._validate_input(
             title=title,
@@ -140,6 +169,7 @@ class TaskStore:
             material=material,
             rubric_title=rubric_title,
             criteria=criteria,
+            criterion_titles=criterion_titles,
         )
 
         return await asyncio.to_thread(
@@ -168,6 +198,10 @@ class TaskStore:
             rubric_title=f"{source.rubric.title} (Kopie)",
             criteria=[
                 criterion.text
+                for criterion in source.rubric.criteria
+            ],
+            criterion_titles=[
+                criterion.title
                 for criterion in source.rubric.criteria
             ],
         )
@@ -409,6 +443,7 @@ class TaskStore:
                     self._insert_criteria(
                         connection,
                         existing.rubric.rubric_id,
+                        normalized["criterion_titles"],
                         normalized["criteria"],
                     )
 
@@ -661,6 +696,7 @@ class TaskStore:
                 criterion_id TEXT PRIMARY KEY,
                 rubric_id TEXT NOT NULL,
                 position INTEGER NOT NULL CHECK (position >= 0),
+                criterion_title TEXT NOT NULL,
                 criterion_text TEXT NOT NULL,
                 UNIQUE (rubric_id, position),
                 FOREIGN KEY (rubric_id)
@@ -701,6 +737,37 @@ class TaskStore:
             CREATE INDEX IF NOT EXISTS
                 idx_rubric_feedback_runs_task
             ON rubric_feedback_runs (task_id, created_at DESC);
+            """
+        )
+        TaskStore._migrate_criterion_titles(connection)
+
+    @staticmethod
+    def _migrate_criterion_titles(
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Ergänzt Überschriften in Datenbanken früherer Versionen."""
+
+        columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(rubric_criteria)"
+            ).fetchall()
+        }
+
+        if "criterion_title" in columns:
+            return
+
+        connection.execute(
+            """
+            ALTER TABLE rubric_criteria
+            ADD COLUMN criterion_title TEXT NOT NULL DEFAULT ''
+            """
+        )
+        connection.execute(
+            """
+            UPDATE rubric_criteria
+            SET criterion_title = 'Kriterium ' || (position + 1)
+            WHERE criterion_title = ''
             """
         )
 
@@ -762,6 +829,7 @@ class TaskStore:
         TaskStore._insert_criteria(
             connection,
             rubric_id,
+            normalized["criterion_titles"],
             normalized["criteria"],
         )
 
@@ -782,10 +850,20 @@ class TaskStore:
     def _insert_criteria(
         connection: sqlite3.Connection,
         rubric_id: str,
+        criterion_titles: object,
         criteria: object,
     ) -> None:
+        if not isinstance(criterion_titles, tuple):
+            raise TypeError(
+                "criterion_titles muss als Tupel normalisiert sein."
+            )
         if not isinstance(criteria, tuple):
             raise TypeError("criteria muss als Tupel normalisiert sein.")
+        if len(criterion_titles) != len(criteria):
+            raise ValueError(
+                "Kriterienüberschriften und Kriterien müssen "
+                "gleich lang sein."
+            )
 
         connection.executemany(
             """
@@ -793,18 +871,22 @@ class TaskStore:
                 criterion_id,
                 rubric_id,
                 position,
+                criterion_title,
                 criterion_text
             )
-            VALUES (?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?)
             """,
             [
                 (
                     str(uuid4()),
                     rubric_id,
                     position,
+                    criterion_title,
                     criterion,
                 )
-                for position, criterion in enumerate(criteria)
+                for position, (criterion_title, criterion) in enumerate(
+                    zip(criterion_titles, criteria, strict=True)
+                )
             ],
         )
 
@@ -850,7 +932,11 @@ class TaskStore:
 
         criterion_rows = connection.execute(
             """
-            SELECT criterion_id, criterion_text, position
+            SELECT
+                criterion_id,
+                criterion_title,
+                criterion_text,
+                position
             FROM rubric_criteria
             WHERE rubric_id = ?
             ORDER BY position
@@ -871,6 +957,7 @@ class TaskStore:
                 criteria=tuple(
                     RubricCriterion(
                         criterion_id=criterion_row["criterion_id"],
+                        title=criterion_row["criterion_title"],
                         text=criterion_row["criterion_text"],
                         position=criterion_row["position"],
                     )
@@ -886,8 +973,8 @@ class TaskStore:
             ),
         )
 
-    @staticmethod
     def _validate_input(
+        self,
         *,
         title: str,
         subject: str,
@@ -896,6 +983,7 @@ class TaskStore:
         material: str,
         rubric_title: str,
         criteria: list[str] | tuple[str, ...],
+        criterion_titles: list[str] | tuple[str, ...] | None,
     ) -> dict[str, object]:
         normalized_title = TaskStore._required_text(
             title,
@@ -937,10 +1025,10 @@ class TaskStore:
             raise ValueError(
                 "Die Feedback-Vorlage benötigt mindestens ein Kriterium."
             )
-        if len(normalized_criteria) > MAX_CRITERIA:
+        if len(normalized_criteria) > self.max_criteria:
             raise ValueError(
                 "Eine Feedback-Vorlage darf höchstens "
-                f"{MAX_CRITERIA} Kriterien enthalten."
+                f"{self.max_criteria} Kriterien enthalten."
             )
         if any(not criterion for criterion in normalized_criteria):
             raise ValueError(
@@ -948,12 +1036,43 @@ class TaskStore:
                 "leere Felder."
             )
         if any(
-            len(criterion) > MAX_CRITERION_CHARS
+            len(criterion) > self.max_criterion_chars
             for criterion in normalized_criteria
         ):
             raise ValueError(
                 "Ein Feedback-Kriterium darf höchstens "
-                f"{MAX_CRITERION_CHARS} Zeichen lang sein."
+                f"{self.max_criterion_chars} Zeichen lang sein."
+            )
+
+        normalized_criterion_titles = (
+            tuple(
+                title.strip()
+                for title in criterion_titles
+            )
+            if criterion_titles is not None
+            else tuple(
+                f"Kriterium {position}"
+                for position in range(1, len(normalized_criteria) + 1)
+            )
+        )
+
+        if len(normalized_criterion_titles) != len(normalized_criteria):
+            raise ValueError(
+                "Bitte gib zu jedem Feedback-Kriterium genau eine "
+                "Überschrift an."
+            )
+        if any(not title for title in normalized_criterion_titles):
+            raise ValueError(
+                "Bitte gib für jedes Feedback-Kriterium eine "
+                "Überschrift an."
+            )
+        if any(
+            len(title) > MAX_CRITERION_TITLE_CHARS
+            for title in normalized_criterion_titles
+        ):
+            raise ValueError(
+                "Eine Kriterienüberschrift darf höchstens "
+                f"{MAX_CRITERION_TITLE_CHARS} Zeichen lang sein."
             )
 
         return {
@@ -963,6 +1082,7 @@ class TaskStore:
             "instructions": normalized_instructions,
             "material": normalized_material,
             "rubric_title": normalized_rubric_title,
+            "criterion_titles": normalized_criterion_titles,
             "criteria": normalized_criteria,
         }
 

@@ -30,7 +30,11 @@
     }
 
     const maxCriteria = Number.parseInt(
-        criteriaList.dataset.maxCriteria || "30",
+        criteriaList.dataset.maxCriteria || "100",
+        10
+    );
+    const maxCriterionChars = Number.parseInt(
+        criteriaList.dataset.maxCriterionChars || "10000",
         10
     );
 
@@ -101,16 +105,33 @@
 
         labelRow.append(label, controls);
 
+        const titleLabel = document.createElement("label");
+        titleLabel.className = "criterion-editor-field";
+        const titleCaption = document.createElement("span");
+        titleCaption.textContent = "Überschrift in der Textanalyse";
+        const titleInput = document.createElement("input");
+        titleInput.name = "criterion_titles";
+        titleInput.type = "text";
+        titleInput.maxLength = 120;
+        titleInput.required = true;
+        titleInput.placeholder = "zum Beispiel: Einleitung: Thema";
+        titleLabel.append(titleCaption, titleInput);
+
+        const criterionLabel = document.createElement("label");
+        criterionLabel.className = "criterion-editor-field";
+        const criterionCaption = document.createElement("span");
+        criterionCaption.textContent = "Prüfkriterium";
         const textarea = document.createElement("textarea");
         textarea.name = "criteria";
         textarea.rows = 3;
-        textarea.maxLength = 1500;
+        textarea.maxLength = maxCriterionChars;
         textarea.required = true;
         textarea.placeholder =
             "zum Beispiel: Du hast einen Einleitungssatz mit Titel, " +
             "Autor, Textart und Thema verfasst.";
+        criterionLabel.append(criterionCaption, textarea);
 
-        wrapper.append(labelRow, textarea);
+        wrapper.append(labelRow, titleLabel, criterionLabel);
         return wrapper;
     }
 
@@ -122,7 +143,7 @@
         const item = createCriterionItem();
         criteriaList.append(item);
         updateControls();
-        item.querySelector("textarea")?.focus();
+        item.querySelector('input[name="criterion_titles"]')?.focus();
     });
 
     criteriaList.addEventListener("click", (event) => {

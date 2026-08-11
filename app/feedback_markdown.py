@@ -29,3 +29,8 @@ _FEEDBACK_MARKDOWN = MarkdownIt(
 def render_feedback_markdown(source: str) -> Markup:
     """Rendert nur die für Feedback erlaubten Markdown-Elemente."""
     return Markup(_FEEDBACK_MARKDOWN.render(source))
+
+
+def render_feedback_inline_markdown(source: str) -> Markup:
+    """Rendert sichere Hervorhebungen innerhalb eines Textabsatzes."""
+    return Markup(_FEEDBACK_MARKDOWN.renderInline(source))

@@ -33,12 +33,71 @@ class TaskStoreTests(unittest.TestCase):
                 instructions="Interpretiere das vorliegende Gedicht.",
                 material="Ein kurzes Beispielgedicht.",
                 rubric_title="Grundanforderungen Gedichtinterpretation",
+                criterion_titles=[
+                    "Einleitung: Grundangaben",
+                    "Form: Aufbau",
+                ],
                 criteria=[
                     "Einleitung mit Titel, Autor und Thema",
                     "Äußere Form des Gedichts beschreiben",
                 ],
             )
         )
+
+    def test_criterion_limits_are_configurable(self) -> None:
+        limited_store = TaskStore(
+            Path(self.temporary_directory.name) / "limited.sqlite3",
+            max_criteria=2,
+            max_criterion_chars=5,
+        )
+
+        common_values = {
+            "title": "Aufgabe",
+            "subject": "Deutsch",
+            "grade_level": "8",
+            "instructions": "Bearbeite die Aufgabe.",
+            "material": "",
+            "rubric_title": "Feedback",
+        }
+
+        created = asyncio.run(
+            limited_store.create_task(
+                **common_values,
+                criteria=["Eins", "Zwei"],
+            )
+        )
+
+        self.assertEqual(len(created.rubric.criteria), 2)
+
+        with self.assertRaisesRegex(ValueError, "höchstens 2 Kriterien"):
+            asyncio.run(
+                limited_store.create_task(
+                    **common_values,
+                    criteria=["Eins", "Zwei", "Drei"],
+                )
+            )
+
+        with self.assertRaisesRegex(ValueError, "höchstens 5 Zeichen"):
+            asyncio.run(
+                limited_store.create_task(
+                    **common_values,
+                    criteria=["Zu lang"],
+                )
+            )
+
+    def test_criterion_limits_must_be_positive_integers(self) -> None:
+        database_path = (
+            Path(self.temporary_directory.name) / "invalid.sqlite3"
+        )
+
+        for keyword, value in (
+            ("max_criteria", 0),
+            ("max_criteria", True),
+            ("max_criterion_chars", -1),
+        ):
+            with self.subTest(keyword=keyword, value=value):
+                with self.assertRaises(ValueError):
+                    TaskStore(database_path, **{keyword: value})
 
     def test_creates_lists_and_updates_complete_rubric(self) -> None:
         task = self._create_task()
@@ -48,6 +107,10 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(len(listed), 1)
         self.assertEqual(listed[0].task_id, task.task_id)
         self.assertEqual(len(listed[0].rubric.criteria), 2)
+        self.assertEqual(
+            listed[0].rubric.criteria[0].title,
+            "Einleitung: Grundangaben",
+        )
 
         updated = asyncio.run(
             self.store.update_task(
@@ -58,6 +121,11 @@ class TaskStoreTests(unittest.TestCase):
                 instructions="Analysiere das vorliegende Gedicht.",
                 material="Ein kurzes Beispielgedicht.",
                 rubric_title="Feedback Gedichtanalyse",
+                criterion_titles=[
+                    "Einleitung",
+                    "Inhalt",
+                    "Sprachliche Bilder",
+                ],
                 criteria=[
                     "Einleitung verfassen",
                     "Inhalt zusammenfassen",
@@ -75,6 +143,10 @@ class TaskStoreTests(unittest.TestCase):
             updated.rubric.criteria[2].text,
             "Sprachliche Bilder erläutern",
         )
+        self.assertEqual(
+            updated.rubric.criteria[2].title,
+            "Sprachliche Bilder",
+        )
 
     def test_duplicate_is_independent_copy(self) -> None:
         task = self._create_task()
@@ -91,6 +163,10 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(
             [item.text for item in duplicate.rubric.criteria],
             [item.text for item in task.rubric.criteria],
+        )
+        self.assertEqual(
+            [item.title for item in duplicate.rubric.criteria],
+            [item.title for item in task.rubric.criteria],
         )
         self.assertTrue(duplicate.title.endswith("(Kopie)"))
 
@@ -262,6 +338,124 @@ class TaskStoreTests(unittest.TestCase):
                     criteria=["Gültig", "   "],
                 )
             )
+
+    def test_rejects_missing_or_misaligned_criterion_titles(self) -> None:
+        common_values = {
+            "title": "Aufgabe",
+            "subject": "Deutsch",
+            "grade_level": "8",
+            "instructions": "Bearbeite die Aufgabe.",
+            "material": "",
+            "rubric_title": "Feedback",
+            "criteria": ["Erstes Kriterium", "Zweites Kriterium"],
+        }
+
+        for criterion_titles in (["Nur eine Überschrift"], ["", "Form"]):
+            with self.subTest(criterion_titles=criterion_titles):
+                with self.assertRaisesRegex(ValueError, "Überschrift"):
+                    asyncio.run(
+                        self.store.create_task(
+                            **common_values,
+                            criterion_titles=criterion_titles,
+                        )
+                    )
+
+    def test_migrates_existing_criteria_with_safe_fallback_titles(
+        self,
+    ) -> None:
+        timestamp = "2026-08-11T12:00:00+00:00"
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            connection.executescript(
+                """
+                CREATE TABLE feedback_tasks (
+                    task_id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    subject TEXT NOT NULL DEFAULT '',
+                    grade_level TEXT NOT NULL DEFAULT '',
+                    instructions TEXT NOT NULL,
+                    material TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT
+                );
+                CREATE TABLE rubrics (
+                    rubric_id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL UNIQUE,
+                    title TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    archived_at TEXT
+                );
+                CREATE TABLE rubric_criteria (
+                    criterion_id TEXT PRIMARY KEY,
+                    rubric_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    criterion_text TEXT NOT NULL
+                );
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO feedback_tasks
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    "task-old",
+                    "Bestehende Aufgabe",
+                    "Deutsch",
+                    "8",
+                    "Bearbeite die Aufgabe.",
+                    "",
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO rubrics
+                VALUES (?, ?, ?, ?, ?, NULL)
+                """,
+                (
+                    "rubric-old",
+                    "task-old",
+                    "Bestehendes Feedback",
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            connection.execute(
+                """
+                INSERT INTO rubric_criteria
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    "criterion-old",
+                    "rubric-old",
+                    0,
+                    "Ein bestehendes Kriterium",
+                ),
+            )
+
+        asyncio.run(self.store.initialize())
+        task = asyncio.run(self.store.get_task("task-old"))
+
+        self.assertIsNotNone(task)
+        assert task is not None
+        self.assertEqual(
+            task.rubric.criteria[0].title,
+            "Kriterium 1",
+        )
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(rubric_criteria)"
+                ).fetchall()
+            }
+
+        self.assertIn("criterion_title", columns)
 
     def test_bulk_create_validates_every_task_before_writing(self) -> None:
         drafts = (

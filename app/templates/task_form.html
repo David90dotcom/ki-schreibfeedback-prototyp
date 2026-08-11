@@ -128,7 +128,9 @@
                     <h3>Feedback-Kriterien</h3>
                     <p class="hint">
                         Zu jedem Kriterium wird später ein eigenes
-                        Feedback erzeugt.
+                        Feedback erzeugt. Aktuell sind bis zu
+                        {{ max_criteria }} Kriterien mit jeweils
+                        {{ max_criterion_chars }} Zeichen möglich.
                     </p>
                 </div>
 
@@ -144,7 +146,8 @@
             <div
                 class="criteria-editor"
                 data-criteria-list
-                data-max-criteria="30"
+                data-max-criteria="{{ max_criteria }}"
+                data-max-criterion-chars="{{ max_criterion_chars }}"
             >
                 {% for criterion in values.criteria %}
                     <div class="criterion-editor-item" data-criterion-item>
@@ -180,13 +183,28 @@
                             </div>
                         </div>
 
-                        <textarea
-                            name="criteria"
-                            rows="3"
-                            maxlength="1500"
-                            required
-                            placeholder="zum Beispiel: Du hast einen Einleitungssatz mit Titel, Autor, Textart und Thema verfasst."
-                        >{{ criterion }}</textarea>
+                        <label class="criterion-editor-field">
+                            <span>Überschrift in der Textanalyse</span>
+                            <input
+                                name="criterion_titles"
+                                type="text"
+                                value="{{ values.criterion_titles[loop.index0] }}"
+                                maxlength="120"
+                                required
+                                placeholder="zum Beispiel: Einleitung: Thema"
+                            >
+                        </label>
+
+                        <label class="criterion-editor-field">
+                            <span>Prüfkriterium</span>
+                            <textarea
+                                name="criteria"
+                                rows="3"
+                                maxlength="{{ max_criterion_chars }}"
+                                required
+                                placeholder="zum Beispiel: Du hast einen Einleitungssatz mit Titel, Autor, Textart und Thema verfasst."
+                            >{{ criterion }}</textarea>
+                        </label>
                     </div>
                 {% endfor %}
             </div>

@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 
-from app.feedback_markdown import render_feedback_markdown
+from app.feedback_markdown import (
+    render_feedback_inline_markdown,
+    render_feedback_markdown,
+)
 
 
 class FeedbackMarkdownTests(unittest.TestCase):
@@ -53,6 +56,22 @@ class FeedbackMarkdownTests(unittest.TestCase):
         self.assertNotIn("<a ", rendered)
         self.assertNotIn("<img", rendered)
         self.assertNotIn("<code", rendered)
+
+    def test_inline_feedback_renders_emphasis_without_activating_html(
+        self,
+    ) -> None:
+        rendered = str(
+            render_feedback_inline_markdown(
+                "**Wirkung** und *Aussagebezug* "
+                "<script>alert('xss')</script>"
+            )
+        )
+
+        self.assertIn("<strong>Wirkung</strong>", rendered)
+        self.assertIn("<em>Aussagebezug</em>", rendered)
+        self.assertNotIn("<script", rendered)
+        self.assertIn("&lt;script&gt;", rendered)
+        self.assertNotIn("<p>", rendered)
 
 
 if __name__ == "__main__":

@@ -710,7 +710,13 @@ class RubricExchangeService:
             "rubric": {
                 "title": task.rubric.title,
                 "criteria": [
-                    {"text": criterion.text}
+                    {
+                        "title": (
+                            criterion.title
+                            or f"Kriterium {criterion.position + 1}"
+                        ),
+                        "text": criterion.text,
+                    }
                     for criterion in task.rubric.criteria
                 ],
             },
@@ -742,6 +748,7 @@ class RubricExchangeService:
             )
 
         criterion_texts: list[str] = []
+        criterion_titles: list[str] = []
 
         for criterion_position, criterion in enumerate(
             criteria,
@@ -762,6 +769,20 @@ class RubricExchangeService:
                     f"{criterion_position} in Feedback {position}",
                 )
             )
+            criterion_title = criterion.get("title")
+
+            if criterion_title is None:
+                criterion_titles.append(
+                    f"Kriterium {criterion_position}"
+                )
+            elif isinstance(criterion_title, str):
+                criterion_titles.append(criterion_title)
+            else:
+                raise RubricExchangeError(
+                    "Kriterium "
+                    f"{criterion_position} in Feedback {position}: "
+                    "Das Feld 'title' muss ein Text sein."
+                )
 
         source_archived = value.get("source_archived", False)
 
@@ -803,6 +824,7 @@ class RubricExchangeService:
                 f"Feedback {position}",
             ),
             criteria=tuple(criterion_texts),
+            criterion_titles=tuple(criterion_titles),
         )
 
     @staticmethod

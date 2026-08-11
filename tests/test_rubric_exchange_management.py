@@ -87,6 +87,10 @@ class RubricExchangeManagementTests(unittest.TestCase):
                 instructions="Interpretiere das Gedicht.",
                 material="Ein anonymes Beispielgedicht.",
                 rubric_title=f"Grundanforderungen{suffix}",
+                criterion_titles=(
+                    "Einleitung: Grundangaben",
+                    "Sprache: Bildlichkeit",
+                ),
                 criteria=(
                     "Einleitung mit Titel und Autor",
                     "Sprachliche Bilder erläutern",
@@ -160,6 +164,10 @@ class RubricExchangeManagementTests(unittest.TestCase):
         self.assertNotEqual(
             tasks[0].rubric.rubric_id,
             source.rubric.rubric_id,
+        )
+        self.assertEqual(
+            [item.title for item in tasks[0].rubric.criteria],
+            [item.title for item in source.rubric.criteria],
         )
 
     def test_total_export_includes_archived_and_reimports_as_active(self) -> None:

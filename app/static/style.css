@@ -1123,8 +1123,20 @@ fieldset > label:first-of-type {
     cursor: not-allowed;
 }
 
-.criterion-editor-item textarea {
-    margin-top: 10px;
+.criterion-editor-field {
+    display: grid;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.criterion-editor-field > span {
+    font-size: 0.92rem;
+    font-weight: 600;
+}
+
+.criterion-editor-field input,
+.criterion-editor-field textarea {
+    margin-top: 0;
 }
 
 .task-selection {
@@ -1247,14 +1259,8 @@ fieldset > label:first-of-type {
 }
 
 .criterion-feedback-card h3 {
-    margin: 14px 0;
+    margin: 0;
     font-size: 1.08rem;
-}
-
-.criterion-number {
-    color: var(--muted);
-    font-size: 0.9rem;
-    font-weight: 600;
 }
 
 .criterion-status-badge {
@@ -1306,6 +1312,7 @@ fieldset > label:first-of-type {
     display: grid;
     grid-template-columns: 140px minmax(0, 1fr);
     gap: 8px 18px;
+    margin-top: 14px;
 }
 
 .criterion-feedback-body h4,

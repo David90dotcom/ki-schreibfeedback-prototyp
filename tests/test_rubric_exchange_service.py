@@ -31,11 +31,13 @@ class RubricExchangeServiceTests(unittest.TestCase):
                 criteria=(
                     RubricCriterion(
                         criterion_id="interne-kriterium-id-1",
+                        title="Einleitung: Grundangaben",
                         text="Einleitung mit Titel und Autor",
                         position=0,
                     ),
                     RubricCriterion(
                         criterion_id="interne-kriterium-id-2",
+                        title="Sprache: Bildlichkeit",
                         text="Sprachliche Bilder erläutern",
                         position=1,
                     ),
@@ -64,6 +66,10 @@ class RubricExchangeServiceTests(unittest.TestCase):
             source.rubric.criteria[0].criterion_id,
             decoded,
         )
+        self.assertEqual(
+            document["tasks"][0]["rubric"]["criteria"][0]["title"],
+            "Einleitung: Grundangaben",
+        )
 
         drafts = RubricExchangeService.parse_import(content)
 
@@ -74,6 +80,27 @@ class RubricExchangeServiceTests(unittest.TestCase):
         self.assertEqual(
             drafts[0].criteria,
             tuple(item.text for item in source.rubric.criteria),
+        )
+        self.assertEqual(
+            drafts[0].criterion_titles,
+            tuple(item.title for item in source.rubric.criteria),
+        )
+
+    def test_import_accepts_legacy_criteria_without_titles(self) -> None:
+        document = json.loads(
+            RubricExchangeService.export_task(self._task())
+        )
+
+        for criterion in document["tasks"][0]["rubric"]["criteria"]:
+            del criterion["title"]
+
+        drafts = RubricExchangeService.parse_import(
+            json.dumps(document).encode("utf-8")
+        )
+
+        self.assertEqual(
+            drafts[0].criterion_titles,
+            ("Kriterium 1", "Kriterium 2"),
         )
 
     def test_collection_marks_archived_sources_but_imports_content(self) -> None:

@@ -35,10 +35,12 @@ class CriterionFeedbackResult:
     status_label: str
     feedback: str
     next_step: str
+    criterion_title: str = ""
 
     def payload(self) -> dict[str, str]:
         return {
             "criterion_id": self.criterion_id,
+            "criterion_title": self.criterion_title,
             "criterion_text": self.criterion_text,
             "status": self.status,
             "feedback": self.feedback,
@@ -219,6 +221,9 @@ handlungsorientiert. Begrenze das Feedback je Kriterium auf höchstens drei kurz
 Sätze, den nächsten Schritt auf einen kurzen Satz und das Gesamtfeedback auf
 höchstens drei kurze Sätze.
 
+Verwende in den Textfeldern ausschließlich Klartext ohne Markdown-Markierungen.
+Setze insbesondere keine Sternchen für fette oder kursive Hervorhebungen ein.
+
 Antworte ausschließlich als gültiges JSON-Objekt ohne Markdown-Codeblock und
 ohne zusätzlichen Text. Das folgende Antwortgerüst enthält bereits genau ein
 Listenelement für jede zulässige kurze criterion_id. Behalte alle
@@ -314,6 +319,10 @@ Eingabe:
             ] = CriterionFeedbackResult(
                 criterion_id=criterion.criterion_id,
                 criterion_text=criterion.text,
+                criterion_title=(
+                    criterion.title
+                    or f"Kriterium {criterion.position + 1}"
+                ),
                 status=status,
                 status_label=STATUS_LABELS[status],
                 feedback=self._required_string(
