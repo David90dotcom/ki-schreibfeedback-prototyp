@@ -138,6 +138,18 @@ class TaskManagementTests(unittest.TestCase):
         management_page = self.client.get("/tasks")
         self.assertIn("Gedichtinterpretation Klasse 8", management_page.text)
         self.assertIn("3 Kriterien", management_page.text)
+        self.assertIn(
+            '<details class="card task-card" data-task-card>',
+            management_page.text,
+        )
+        self.assertIn(
+            'class="task-card-summary"',
+            management_page.text,
+        )
+        self.assertIn("Interpretiere das Gedicht.", management_page.text)
+        self.assertIn("Beispielgedicht", management_page.text)
+        self.assertIn("+ 2", management_page.text)
+        self.assertIn("weitere Kriterien", management_page.text)
         self.assertRegex(
             management_page.text,
             r'/static/rubrics\.js\?v=[0-9a-f]{12}',
@@ -195,6 +207,17 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn('id="task-id"', start_page.text)
         self.assertIn(f'value="{task.task_id}"', start_page.text)
         self.assertIn(task.rubric.title, start_page.text)
+        self.assertIn(
+            f'data-task-preview="{task.task_id}"',
+            start_page.text,
+        )
+        self.assertIn(
+            'class="task-preview-summary"',
+            start_page.text,
+        )
+        self.assertIn("Aufgabenstellung", start_page.text)
+        self.assertIn(task.instructions, start_page.text)
+        self.assertIn(task.material, start_page.text)
 
         result = RubricFeedbackResult(
             provider="openai",

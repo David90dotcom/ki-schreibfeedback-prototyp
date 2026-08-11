@@ -95,77 +95,138 @@
 {% if tasks %}
     <div class="task-card-list">
         {% for task in tasks %}
-            <article class="card task-card">
-                <div class="task-card-heading">
-                    <div>
-                        <h2>{{ task.title }}</h2>
-                        <p class="task-meta">
+            <details class="card task-card" data-task-card>
+                <summary class="task-card-summary">
+                    <span class="task-card-summary-heading">
+                        <span>
+                            <span class="task-card-title">
+                                {{ task.title }}
+                            </span>
+                            <span class="task-meta">
                             {% if task.subject %}{{ task.subject }}{% endif %}
                             {% if task.subject and task.grade_level %} · {% endif %}
                             {% if task.grade_level %}Stufe {{ task.grade_level }}{% endif %}
-                        </p>
-                    </div>
+                            </span>
+                        </span>
 
-                    <span class="criteria-count">
-                        {{ task.rubric.criteria | length }} Kriterien
+                        <span class="criteria-count">
+                            {{ task.rubric.criteria | length }} Kriterien
+                        </span>
                     </span>
-                </div>
 
-                <h3>{{ task.rubric.title }}</h3>
+                    <span class="task-rubric-title">
+                        {{ task.rubric.title }}
+                    </span>
 
-                <ol class="criteria-preview">
-                    {% for criterion in task.rubric.criteria %}
-                        <li>{{ criterion.text }}</li>
-                    {% endfor %}
-                </ol>
+                    {% if task.rubric.criteria %}
+                        <span class="criteria-preview-compact">
+                            <span class="criteria-preview-first">
+                                {{ task.rubric.criteria[0].text }}
+                            </span>
 
-                <div class="task-actions">
-                    <a
-                        class="button-link secondary-link"
-                        href="/tasks/{{ task.task_id }}/edit"
-                    >
-                        Bearbeiten
-                    </a>
+                            {% set remaining_criteria = (task.rubric.criteria | length) - 1 %}
+                            {% if remaining_criteria > 0 %}
+                                <span class="criteria-preview-more">
+                                    + {{ remaining_criteria }}
+                                    {% if remaining_criteria == 1 %}
+                                        weiteres Kriterium
+                                    {% else %}
+                                        weitere Kriterien
+                                    {% endif %}
+                                </span>
+                            {% endif %}
+                        </span>
+                    {% endif %}
 
-                    <a
-                        class="button-link secondary-link"
-                        href="/tasks/{{ task.task_id }}/export"
-                    >
-                        Exportieren
-                    </a>
+                    <span
+                        class="details-toggle-label"
+                        aria-hidden="true"
+                    ></span>
+                </summary>
 
-                    <form
-                        method="post"
-                        action="/tasks/{{ task.task_id }}/duplicate"
-                    >
-                        <input
-                            type="hidden"
-                            name="csrf_token"
-                            value="{{ csrf_token }}"
+                <div class="task-card-details">
+                    <dl class="task-detail-grid">
+                        <div>
+                            <dt>Fach</dt>
+                            <dd>{{ task.subject or "Nicht angegeben" }}</dd>
+                        </div>
+
+                        <div>
+                            <dt>Klassenstufe</dt>
+                            <dd>{{ task.grade_level or "Nicht angegeben" }}</dd>
+                        </div>
+
+                        <div class="task-detail-wide">
+                            <dt>Aufgabenstellung</dt>
+                            <dd class="preformatted-value">
+                                {{- task.instructions or "Keine Aufgabenstellung hinterlegt." -}}
+                            </dd>
+                        </div>
+
+                        <div class="task-detail-wide">
+                            <dt>Material</dt>
+                            <dd class="preformatted-value">
+                                {{- task.material or "Kein Material hinterlegt." -}}
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <h3>{{ task.rubric.title }}</h3>
+
+                    <ol class="criteria-preview">
+                        {% for criterion in task.rubric.criteria %}
+                            <li>{{ criterion.text }}</li>
+                        {% endfor %}
+                    </ol>
+
+                    <div class="task-actions">
+                        <a
+                            class="button-link secondary-link"
+                            href="/tasks/{{ task.task_id }}/edit"
                         >
+                            Bearbeiten
+                        </a>
 
-                        <button class="secondary-button" type="submit">
-                            Duplizieren
-                        </button>
-                    </form>
-
-                    <form
-                        method="post"
-                        action="/tasks/{{ task.task_id }}/delete"
-                        data-confirm-delete
-                    >
-                        <input
-                            type="hidden"
-                            name="csrf_token"
-                            value="{{ csrf_token }}"
+                        <a
+                            class="button-link secondary-link"
+                            href="/tasks/{{ task.task_id }}/export"
                         >
+                            Exportieren
+                        </a>
 
-                        <button class="danger-button" type="submit">
-                            Löschen
-                        </button>
-                    </form>
+                        <form
+                            method="post"
+                            action="/tasks/{{ task.task_id }}/duplicate"
+                        >
+                            <input
+                                type="hidden"
+                                name="csrf_token"
+                                value="{{ csrf_token }}"
+                            >
+
+                            <button class="secondary-button" type="submit">
+                                Duplizieren
+                            </button>
+                        </form>
+
+                        <form
+                            method="post"
+                            action="/tasks/{{ task.task_id }}/delete"
+                            data-confirm-delete
+                        >
+                            <input
+                                type="hidden"
+                                name="csrf_token"
+                                value="{{ csrf_token }}"
+                            >
+
+                            <button class="danger-button" type="submit">
+                                Löschen
+                            </button>
+                        </form>
+                    </div>
                 </div>
-            </article>
+            </details>
         {% endfor %}
     </div>
 {% elif not error %}

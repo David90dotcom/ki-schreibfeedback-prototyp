@@ -40,6 +40,97 @@
                 {% endfor %}
             </select>
 
+            <div
+                class="task-preview-region"
+                aria-live="polite"
+            >
+                {% for task in task_options %}
+                    <details
+                        class="task-selection-preview"
+                        data-task-preview="{{ task.task_id }}"
+                        {% if task.task_id != selected_task_id %}hidden{% endif %}
+                    >
+                        <summary class="task-preview-summary">
+                            <span class="task-preview-heading">
+                                <span class="task-preview-title">
+                                    {{ task.title }}
+                                </span>
+                                <span class="task-preview-meta">
+                                    {{ task.subject or "Fach nicht angegeben" }}
+                                    ·
+                                    {% if task.grade_level %}
+                                        Stufe {{ task.grade_level }}
+                                    {% else %}
+                                        Klassenstufe nicht angegeben
+                                    {% endif %}
+                                </span>
+                            </span>
+
+                            <span class="task-preview-snippet">
+                                <span class="task-preview-label">
+                                    Aufgabenstellung
+                                </span>
+                                <span class="task-preview-clamped">
+                                    {{- task.instructions or "Keine Aufgabenstellung hinterlegt." -}}
+                                </span>
+                            </span>
+
+                            <span class="task-preview-snippet">
+                                <span class="task-preview-label">
+                                    Material
+                                </span>
+                                <span class="task-preview-clamped">
+                                    {{- task.material or "Kein Material hinterlegt." -}}
+                                </span>
+                            </span>
+
+                            <span
+                                class="details-toggle-label"
+                                aria-hidden="true"
+                            ></span>
+                        </summary>
+
+                        <div class="task-preview-details">
+                            <dl class="task-detail-grid">
+                                <div>
+                                    <dt>Titel</dt>
+                                    <dd>{{ task.title }}</dd>
+                                </div>
+
+                                <div>
+                                    <dt>Fach</dt>
+                                    <dd>{{ task.subject or "Nicht angegeben" }}</dd>
+                                </div>
+
+                                <div>
+                                    <dt>Klassenstufe</dt>
+                                    <dd>{{ task.grade_level or "Nicht angegeben" }}</dd>
+                                </div>
+
+                                <div>
+                                    <dt>Bewertungsbogen</dt>
+                                    <dd>{{ task.rubric.title }}</dd>
+                                </div>
+
+                                <div class="task-detail-wide">
+                                    <dt>Aufgabenstellung</dt>
+                                    <dd class="preformatted-value">
+                                        {{- task.instructions or "Keine Aufgabenstellung hinterlegt." -}}
+                                    </dd>
+                                </div>
+
+                                <div class="task-detail-wide">
+                                    <dt>Material</dt>
+                                    <dd class="preformatted-value">
+                                        {{- task.material or "Kein Material hinterlegt." -}}
+                                    </dd>
+                                </div>
+                            </dl>
+                        </div>
+                    </details>
+                {% endfor %}
+            </div>
+
             {% if task_options %}
                 <p class="hint">
                     Mit einem Bewertungsbogen erhältst du eine eigene
