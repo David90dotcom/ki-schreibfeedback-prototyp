@@ -52,7 +52,7 @@ class RubricExchangeBundleTests(unittest.TestCase):
             material=("M" * 30000 if maximum_payload else ""),
             rubric=Rubric(
                 rubric_id=f"interne-bogen-id-{position}",
-                title=f"Bewertungsbogen {position}",
+                title=f"Feedback {position}",
                 criteria=tuple(
                     RubricCriterion(
                         criterion_id=(

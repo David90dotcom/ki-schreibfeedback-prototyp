@@ -14,9 +14,9 @@
         <div>
             <h2>
                 {% if task %}
-                    Aufgabe und Bewertungsbogen bearbeiten
+                    Aufgabe und Feedback bearbeiten
                 {% else %}
-                    Aufgabe und Bewertungsbogen erstellen
+                    Aufgabe und Feedback erstellen
                 {% endif %}
             </h2>
             <p class="hint">
@@ -108,10 +108,10 @@
         </fieldset>
 
         <fieldset>
-            <legend>Bewertungsbogen</legend>
+            <legend>Feedback</legend>
 
             <label for="rubric-title">
-                Name des Bewertungsbogens
+                Name des Feedbacks
             </label>
             <input
                 id="rubric-title"
@@ -125,10 +125,10 @@
 
             <div class="criteria-heading">
                 <div>
-                    <h3>Bewertungskriterien</h3>
+                    <h3>Feedback-Kriterien</h3>
                     <p class="hint">
-                        Jedes Kriterium erhält später eine eigene
-                        Rückmeldung.
+                        Zu jedem Kriterium wird später ein eigenes
+                        Feedback erzeugt.
                     </p>
                 </div>
 

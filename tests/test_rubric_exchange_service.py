@@ -145,7 +145,7 @@ class RubricExchangeServiceTests(unittest.TestCase):
                         "instructions": "Bearbeite die Aufgabe.",
                         "material": "",
                         "rubric": {
-                            "title": "Bewertungsbogen",
+                            "title": "Feedback",
                             "criteria": ["Kein Kriterienobjekt"],
                         },
                     }

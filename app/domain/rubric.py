@@ -19,7 +19,7 @@ class FeedbackTaskDraft:
 
 @dataclass(frozen=True)
 class RubricCriterion:
-    """Ein geordnetes Einzelkriterium eines Bewertungsbogens."""
+    """Ein geordnetes Kriterium für das spätere Feedback."""
 
     criterion_id: str
     text: str
@@ -28,7 +28,7 @@ class RubricCriterion:
 
 @dataclass(frozen=True)
 class Rubric:
-    """Ein Bewertungsbogen mit seinen Einzelkriterien."""
+    """Eine Feedback-Vorlage mit ihren Einzelkriterien."""
 
     rubric_id: str
     title: str
@@ -37,7 +37,7 @@ class Rubric:
 
 @dataclass(frozen=True)
 class FeedbackTask:
-    """Eine Aufgabe mit genau einem zugehörigen Bewertungsbogen."""
+    """Eine Aufgabe mit genau einer zugehörigen Feedback-Vorlage."""
 
     task_id: str
     title: str

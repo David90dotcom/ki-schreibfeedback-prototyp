@@ -12,6 +12,10 @@
         return;
     }
 
+    const taskSelect = form.querySelector("#task-id");
+    const taskPreviews = form.querySelectorAll(
+        "[data-task-preview]"
+    );
     const providerSelect = form.querySelector("#provider");
     const providerPanels = form.querySelectorAll(
         "[data-provider-panel]"
@@ -110,6 +114,23 @@
     let currentRunpodJobStatus = null;
     let runpodJobsRequestInFlight = false;
     const runpodStatusRequestsInFlight = new Set();
+
+    function updateTaskPreview() {
+        if (!taskSelect) {
+            return;
+        }
+
+        taskPreviews.forEach((preview) => {
+            const selected =
+                preview.dataset.taskPreview === taskSelect.value;
+
+            preview.hidden = !selected;
+
+            if (!selected) {
+                preview.open = false;
+            }
+        });
+    }
 
     function updateCustomModelField(modelSelect) {
         const panel = modelSelect.closest(
@@ -1623,6 +1644,10 @@
         }
     }
 
+    if (taskSelect) {
+        taskSelect.addEventListener("change", updateTaskPreview);
+    }
+
     providerSelect.addEventListener(
         "change",
         updateProviderPanels
@@ -1720,6 +1745,7 @@
         }
     });
 
+    updateTaskPreview();
     updateProviderPanels();
     localizeResultTimes();
 })();

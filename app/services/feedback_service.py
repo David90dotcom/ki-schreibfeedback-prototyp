@@ -90,8 +90,8 @@ Ziel:
 Gib lernförderliches Schreibfeedback. Das Feedback soll verständlich, konkret,
 wertschätzend und überarbeitungsorientiert sein.
 
-Bitte bewerte nicht nur pauschal, sondern gib konkrete Hinweise, wie der Text
-verbessert werden kann.
+Bleibe nicht bei pauschalen Aussagen, sondern gib konkrete Hinweise, wie der
+Text verbessert werden kann.
 
 Strukturiere deine Antwort mit folgenden Überschriften:
 
