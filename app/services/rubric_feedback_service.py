@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from time import perf_counter
 
-from app.domain.rubric import FeedbackTask
+from app.domain.rubric import FeedbackTask, RubricCriterion
 from app.llm.base import LLMProvider
 
 
@@ -13,6 +13,13 @@ STATUS_LABELS = {
     "partially_met": "Teilweise erfüllt",
     "not_met": "Nicht erfüllt",
     "not_assessable": "Nicht beurteilbar",
+}
+
+TRUNCATION_FINISH_REASONS = {
+    "length",
+    "limit",
+    "max_output_tokens",
+    "max_tokens",
 }
 
 
@@ -112,14 +119,20 @@ class RubricFeedbackService:
             student_text=cleaned_text,
             task=task,
         )
+        response_schema = self._build_response_schema(task)
         started_at = perf_counter()
-        response = await provider.generate(prompt)
+        response = await provider.generate(
+            prompt,
+            response_schema=response_schema,
+            response_schema_name="rubric_feedback",
+        )
         duration_ms = int(
             (perf_counter() - started_at) * 1000
         )
         criteria_feedback, overall_feedback = self._parse_response(
             response.text,
             task,
+            finish_reason=self._finish_reason(response.raw_metadata),
         )
 
         return RubricFeedbackResult(
@@ -143,12 +156,54 @@ class RubricFeedbackService:
         student_text: str,
         task: FeedbackTask,
     ) -> str:
+        criteria_by_reference = (
+            RubricFeedbackService._criteria_by_reference(task)
+        )
         analysis_input = {
-            "task": task.snapshot(),
+            "task": {
+                "title": task.title,
+                "subject": task.subject,
+                "grade_level": task.grade_level,
+                "instructions": task.instructions,
+                "material": task.material,
+                "feedback": {
+                    "title": task.rubric.title,
+                    "criteria": [
+                        {
+                            "criterion_id": reference,
+                            "text": criterion.text,
+                        }
+                        for reference, criterion
+                        in criteria_by_reference.items()
+                    ],
+                },
+            },
             "student_text": student_text,
         }
         serialized_input = json.dumps(
             analysis_input,
+            ensure_ascii=False,
+            indent=2,
+        )
+        response_template = {
+            "criteria": [
+                {
+                    "criterion_id": reference,
+                    "status": (
+                        "met | partially_met | not_met | "
+                        "not_assessable"
+                    ),
+                    "feedback": "konkretes Feedback zum Kriterium",
+                    "next_step": (
+                        "konkreter nächster Überarbeitungsschritt"
+                    ),
+                }
+                for reference in criteria_by_reference
+            ],
+            "overall_feedback": "kurzes zusammenfassendes Feedback",
+        }
+        serialized_response_template = json.dumps(
+            response_template,
             ensure_ascii=False,
             indent=2,
         )
@@ -160,25 +215,19 @@ Du analysierst einen anonymisierten Schülertext ausschließlich anhand der
 Erzeuge zu jedem Kriterium genau ein eigenes Feedback. Berücksichtige nur, was
 am Schülertext tatsächlich erkennbar ist. Erfinde keine Textbelege und schreibe
 keine fertige Musterlösung. Formuliere verständlich, wertschätzend, konkret und
-handlungsorientiert.
+handlungsorientiert. Begrenze das Feedback je Kriterium auf höchstens drei kurze
+Sätze, den nächsten Schritt auf einen kurzen Satz und das Gesamtfeedback auf
+höchstens drei kurze Sätze.
 
 Antworte ausschließlich als gültiges JSON-Objekt ohne Markdown-Codeblock und
-ohne zusätzlichen Text. Verwende exakt diese Struktur:
+ohne zusätzlichen Text. Das folgende Antwortgerüst enthält bereits genau ein
+Listenelement für jede zulässige kurze criterion_id. Behalte alle
+criterion_id-Werte unverändert und fülle die übrigen Felder aus:
 
-{{
-  "criteria": [
-    {{
-      "criterion_id": "ID aus der Eingabe",
-      "status": "met | partially_met | not_met | not_assessable",
-      "feedback": "konkretes Feedback zum Kriterium",
-      "next_step": "konkreter nächster Überarbeitungsschritt"
-    }}
-  ],
-  "overall_feedback": "kurzes zusammenfassendes Feedback"
-}}
+{serialized_response_template}
 
-Jede criterion_id aus der Eingabe muss genau einmal vorkommen. Füge keine
-eigenen Kriterien hinzu.
+Jede vorgegebene criterion_id muss genau einmal vorkommen. Füge keine eigenen
+Kriterien oder Listenelemente hinzu.
 
 Eingabe:
 {serialized_input}
@@ -188,6 +237,8 @@ Eingabe:
         self,
         response_text: str,
         task: FeedbackTask,
+        *,
+        finish_reason: str | None = None,
     ) -> tuple[tuple[CriterionFeedbackResult, ...], str]:
         cleaned_response = self._remove_optional_code_fence(
             response_text
@@ -196,6 +247,14 @@ Eingabe:
         try:
             payload = json.loads(cleaned_response)
         except json.JSONDecodeError as exc:
+            if finish_reason in TRUNCATION_FINISH_REASONS:
+                raise RubricFeedbackError(
+                    "Die KI-Antwort wurde am Ausgabelimit "
+                    "abgeschnitten und ist deshalb unvollständig. "
+                    "Bitte kürze sehr umfangreiche Eingaben oder "
+                    "wähle ein Modell mit größerem Ausgabebudget."
+                ) from exc
+
             raise RubricFeedbackError(
                 "Die KI hat kein gültiges strukturiertes "
                 "Kriterienfeedback zurückgegeben. Bitte versuche es "
@@ -215,11 +274,11 @@ Eingabe:
                 "In der KI-Antwort fehlt die Liste der Kriterien."
             )
 
-        expected_by_id = {
-            criterion.criterion_id: criterion
-            for criterion in task.rubric.criteria
-        }
-        parsed_by_id: dict[str, CriterionFeedbackResult] = {}
+        expected_by_reference = self._criteria_by_reference(task)
+        parsed_by_reference: dict[
+            str,
+            CriterionFeedbackResult,
+        ] = {}
 
         for raw_item in raw_criteria:
             if not isinstance(raw_item, dict):
@@ -227,16 +286,16 @@ Eingabe:
                     "Ein Kriterienergebnis besitzt ein ungültiges Format."
                 )
 
-            criterion_id = self._required_string(
+            criterion_reference = self._required_string(
                 raw_item,
                 "criterion_id",
             )
 
-            if criterion_id not in expected_by_id:
+            if criterion_reference not in expected_by_reference:
                 raise RubricFeedbackError(
                     "Die KI-Antwort enthält ein unbekanntes Kriterium."
                 )
-            if criterion_id in parsed_by_id:
+            if criterion_reference in parsed_by_reference:
                 raise RubricFeedbackError(
                     "Die KI-Antwort enthält ein Kriterium mehrfach."
                 )
@@ -249,9 +308,11 @@ Eingabe:
                     "Erfüllungsstatus."
                 )
 
-            criterion = expected_by_id[criterion_id]
-            parsed_by_id[criterion_id] = CriterionFeedbackResult(
-                criterion_id=criterion_id,
+            criterion = expected_by_reference[criterion_reference]
+            parsed_by_reference[
+                criterion_reference
+            ] = CriterionFeedbackResult(
+                criterion_id=criterion.criterion_id,
                 criterion_text=criterion.text,
                 status=status,
                 status_label=STATUS_LABELS[status],
@@ -265,7 +326,7 @@ Eingabe:
                 ),
             )
 
-        if set(parsed_by_id) != set(expected_by_id):
+        if set(parsed_by_reference) != set(expected_by_reference):
             raise RubricFeedbackError(
                 "Die KI hat nicht zu jedem Feedback-Kriterium ein "
                 "Feedback erzeugt."
@@ -276,11 +337,88 @@ Eingabe:
             "overall_feedback",
         )
         ordered_feedback = tuple(
-            parsed_by_id[criterion.criterion_id]
-            for criterion in task.rubric.criteria
+            parsed_by_reference[reference]
+            for reference in expected_by_reference
         )
 
         return ordered_feedback, overall_feedback
+
+    @staticmethod
+    def _build_response_schema(
+        task: FeedbackTask,
+    ) -> dict[str, object]:
+        references = list(
+            RubricFeedbackService._criteria_by_reference(task)
+        )
+        criterion_schema = {
+            "type": "object",
+            "properties": {
+                "criterion_id": {
+                    "type": "string",
+                    "enum": references,
+                },
+                "status": {
+                    "type": "string",
+                    "enum": list(STATUS_LABELS),
+                },
+                "feedback": {
+                    "type": "string",
+                },
+                "next_step": {
+                    "type": "string",
+                },
+            },
+            "required": [
+                "criterion_id",
+                "status",
+                "feedback",
+                "next_step",
+            ],
+            "additionalProperties": False,
+        }
+
+        return {
+            "type": "object",
+            "properties": {
+                "criteria": {
+                    "type": "array",
+                    "items": criterion_schema,
+                    "minItems": len(references),
+                    "maxItems": len(references),
+                },
+                "overall_feedback": {
+                    "type": "string",
+                },
+            },
+            "required": [
+                "criteria",
+                "overall_feedback",
+            ],
+            "additionalProperties": False,
+        }
+
+    @staticmethod
+    def _finish_reason(
+        raw_metadata: dict[str, object],
+    ) -> str | None:
+        value = raw_metadata.get("finish_reason")
+
+        if not isinstance(value, str) or not value.strip():
+            return None
+
+        return value.strip().lower()
+
+    @staticmethod
+    def _criteria_by_reference(
+        task: FeedbackTask,
+    ) -> dict[str, RubricCriterion]:
+        return {
+            f"K{index}": criterion
+            for index, criterion in enumerate(
+                task.rubric.criteria,
+                start=1,
+            )
+        }
 
     @staticmethod
     def _required_string(

@@ -89,7 +89,13 @@ class RunPodProvider:
                 "RUNPOD_POLL_INTERVAL_SECONDS muss größer als 0 sein."
             )
 
-    async def generate(self, prompt: str) -> LLMResponse:
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        response_schema: dict[str, Any] | None = None,
+        response_schema_name: str = "structured_response",
+    ) -> LLMResponse:
         """Unterstützt den derzeitigen Webapp-Datenfluss."""
 
         response = await self.complete(
@@ -100,6 +106,8 @@ class RunPodProvider:
                     temperature=0.15,
                     max_output_tokens=4000,
                 ),
+                response_schema=response_schema,
+                response_schema_name=response_schema_name,
             )
         )
 

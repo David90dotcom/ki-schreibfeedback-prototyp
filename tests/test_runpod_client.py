@@ -494,17 +494,33 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
             raw_metadata={"worker_id": "worker-789"},
         )
 
+        schema = {
+            "type": "object",
+            "properties": {},
+        }
+        complete = AsyncMock(return_value=model_response)
+
         with patch.object(
             provider,
             "complete",
-            new=AsyncMock(return_value=model_response),
+            new=complete,
         ):
-            response = await provider.generate("Testprompt")
+            response = await provider.generate(
+                "Testprompt",
+                response_schema=schema,
+                response_schema_name="rubric_feedback",
+            )
 
         self.assertEqual(response.queue_duration_ms, 1200)
         self.assertEqual(response.execution_duration_ms, 3400)
         self.assertEqual(response.provider_request_id, "job-789")
         self.assertEqual(response.worker_id, "worker-789")
+        request = complete.await_args.args[0]
+        self.assertEqual(request.response_schema, schema)
+        self.assertEqual(
+            request.response_schema_name,
+            "rubric_feedback",
+        )
 
     async def test_timed_out_job_becomes_timeout_error(
         self,

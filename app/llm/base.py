@@ -124,6 +124,12 @@ class LLMProvider(Protocol):
     provider_name: str
     model_name: str
 
-    async def generate(self, prompt: str) -> LLMResponse:
-        """Führt den bisherigen unstrukturierten Modellaufruf aus."""
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        response_schema: dict[str, Any] | None = None,
+        response_schema_name: str = "structured_response",
+    ) -> LLMResponse:
+        """Führt den bisherigen Modellaufruf optional mit JSON-Schema aus."""
         ...
