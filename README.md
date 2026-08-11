@@ -1,6 +1,6 @@
-# KI-Schreibfeedback-Prototyp 0.7 (Entwicklung)
+# KI-Schreibfeedback-Prototyp 0.8 (Entwicklung)
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.7 ergänzt Mistral rein additiv als weiteren Cloudprovider mit drei Modellstufen, einem direkten Ministral-14B-Vergleichsmodell und freier Modell-ID; die Grundfunktionen des stabilen Releases 0.6.0 bleiben unverändert.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.8 ergänzt den Entwicklungsstand 0.7 rein additiv um SQLite-basierte Aufgaben und Bewertungsbögen, eine eigene Rückmeldung zu jedem Kriterium sowie einen portablen Import und Export. Die bisherigen Provider- und Analysefunktionen bleiben unverändert verfügbar.
 
 > **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
 
@@ -13,6 +13,7 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der 
 | **0.5.0** | abgeschlossen | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
 | **0.6.0** | stabiler Release | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
 | **0.7** | in Entwicklung | Additive Mistral-API-Anbindung mit Ministral 14B, Small, Medium, Large und freier Modell-ID auf Basis des unveränderten Tags `v0.6.0` |
+| **0.8** | in Entwicklung | Aufgaben mit jeweils einem Bewertungsbogen, geordnete Einzelkriterien, SQLite-Verwaltung, portabler Austausch und strukturiertes Feedback pro Kriterium |
 
 Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Version 0.6.0 ist der neue stabile Standard; Modell-Payload und vLLM-Startkonfiguration bleiben gegenüber 0.5.0 unverändert.
 
@@ -27,6 +28,7 @@ flowchart TD
     D --> F["OpenAI API (optional)"]
     D --> G["Ollama (nur lokal)"]
     D --> H["Mistral API (optional)"]
+    C --> I["SQLite: Aufgaben, Bewertungsbögen und Feedbackläufe"]
 ```
 
 Startseite und Analysefunktion sind nur nach erfolgreicher Anmeldung erreichbar. Zugangsdaten werden serverseitig gegen einen Argon2-Passworthash geprüft. RunPod-API-Key, Endpoint-ID und weitere Secrets werden ausschließlich serverseitig aus der `.env` gelesen und nicht an den Browser übertragen.
@@ -42,6 +44,16 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 - Begrenzung wiederholter fehlgeschlagener Loginversuche pro erkanntem Client
 - CSRF-Schutz für Login, Logout und Analyseformular
 - Eingabe eines anonymisierten, abgetippten Beispieltexts
+- Erstellen, Bearbeiten, Duplizieren und Löschen von Aufgaben mit jeweils einem Bewertungsbogen
+- bis zu 30 geordnete Einzelkriterien pro Bewertungsbogen
+- Auswahl eines gespeicherten Bewertungsbogens im bestehenden Analyseformular
+- genau eine Modellanfrage für alle Kriterien eines Bewertungsbogens
+- getrennte Rückmeldung und konkreter Überarbeitungsschritt zu jedem Kriterium
+- vier validierte Erfüllungsstände: erfüllt, teilweise erfüllt, nicht erfüllt und nicht beurteilbar
+- unverändertes bisheriges Gesamtfeedback über die Auswahl „Ohne Bewertungsbogen“
+- echtes Löschen unbenutzter und sicheres Archivieren bereits verwendeter Bewertungsbögen
+- JSON-Einzelexport und rundreisefestes ZIP-Gesamtpaket mit versioniertem Austauschformat
+- persistente Snapshots des verwendeten Bewertungsbogens und des erzeugten Kriterienfeedbacks
 - Auswahl zwischen lokalem Ollama, OpenAI, Mistral und RunPod Serverless im Entwicklungsmodus
 - Deaktivierung lokaler Ollama-Aufrufe im Produktionsmodus
 - konfigurierbare Standardmodelle für alle vier Provider
@@ -74,7 +86,7 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 | `app/` | FastAPI-Web-App, Provider-Adapter, Services, Templates und statische Dateien |
 | `config/models.yaml` | Deklarativer Provider- und Modellkatalog |
 | `runpod_worker/` | Docker-Image, Serverless-Handler, Worker und Testeingabe für RunPod |
-| `tests/` | Automatisierte Tests für Browserauswahl, RunPod, Anmeldung, Sitzungen, Login-Begrenzung und CSRF-Schutz |
+| `tests/` | Automatisierte Tests für Browserauswahl, Aufgaben, Bewertungsbögen, SQLite, RunPod, Anmeldung, Sitzungen, Login-Begrenzung und CSRF-Schutz |
 | `scripts/` | Zusätzliche Architektur- und Verbindungsprüfungen |
 | `Dockerfile`, `compose.yaml`, `Caddyfile` | Reproduzierbares Produktionsdeployment mit Web-App und HTTPS-Reverse-Proxy |
 | `docs/` | Abnahmeprotokolle und bekannte, nicht blockierende Einschränkungen |
@@ -130,6 +142,18 @@ RUNPOD_ENDPOINT_ID=
 Danach kann die Anwendung im Browser geöffnet werden:
 
 <http://127.0.0.1:8000>
+
+## Aufgaben und Bewertungsbögen verwenden
+
+Unter „Bewertungsbögen“ wird eine Aufgabe gemeinsam mit genau einem Bewertungsbogen angelegt. Der Bewertungsbogen besteht aus mehreren einzeln sortierbaren Kriterien. Im Analyseformular kann anschließend die gespeicherte Aufgabe ausgewählt werden. Aufgabe, Material, Kriterien und Schülertext werden gemeinsam in genau einer Anfrage an den gewählten Provider übermittelt.
+
+Die strukturierte Modellantwort wird vollständig validiert: Jede gespeicherte Kriterien-ID muss genau einmal vorkommen; unbekannte, doppelte oder fehlende Kriterien werden abgelehnt. Unbenutzte Bewertungsbögen können vollständig gelöscht werden. Sobald ein Bewertungsbogen erfolgreich für eine Analyse verwendet wurde, wird er beim Löschen nur noch archiviert, damit vorhandene Ergebnisse nachvollziehbar bleiben.
+
+Aufgaben, Kriterien, Bewertungsbogen-Snapshots und Kriterienfeedback werden in der über `ANALYSIS_DATABASE_PATH` konfigurierten SQLite-Datei gespeichert. Das vorhandene Docker-Volume `/app/data` macht diese Daten auch über einen Container-Neustart oder ein Redeployment hinweg persistent.
+
+Ein einzelner Bewertungsbogen kann direkt an seiner Aufgabenkarte als JSON exportiert werden. Der Gesamtexport enthält alle aktiven und archivierten Aufgaben mit ihren Bewertungsbögen als ZIP-Paket. Größere Bestände werden darin automatisch in JSON-Teile mit jeweils höchstens 200 Bögen und 5 MiB aufgeteilt. JSON-Einzelexporte und ZIP-Gesamtpakete werden über dasselbe Importformular eingelesen. Der Import prüft zuerst die vollständige Datei und legt anschließend alle Aufgaben atomar mit neuen internen IDs an; vorhandene Bögen werden nicht überschrieben. Archivierte Quellen werden dabei als neue aktive Kopien importiert.
+
+Das versionierte Austauschformat enthält ausschließlich Aufgabentext, optionales Material, Fach, Jahrgangsstufe, Bewertungsbogentitel und die geordneten Kriterien. SQLite-IDs, Schülertext-Hashes, Analyse- und Feedbackverläufe, technische Messwerte sowie API-Daten werden nicht exportiert. JSON-Einzelexport und ZIP-Gesamtpaket sind damit die regulären Austausch- und Sicherungsformate für Bewertungsbögen; die SQLite-Datei bleibt der installationsgebundene Datenspeicher. Gesamtpakete sind auf 64 MiB, 5000 Bögen und 100 geprüfte Teile begrenzt; die Anwendung erzeugt kein Paket, das sie wegen dieser Grenzen anschließend selbst ablehnen würde.
 
 ## Provider verwenden
 
@@ -187,7 +211,7 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der aktuelle Entwicklungsstand umfasst 74 erfolgreiche Tests einschließlich der acht Subtests. Sie decken Browser- und Providerauswahl, Mistral-Endpunkt, Modellstufen und freie Modell-ID, Produktionsbeschränkungen, RunPod-Client und -Worker, Supply-/Health-Abbildung, individuelle Jobstatus, persistente Jobregistrierung, Einzelabbruch, manuellen Altjob-Abbruch, Zeitmetriken sowie Anmeldung, Sitzungen, Zugriffsschutz, Login-Begrenzung und CSRF-Prüfung ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der aktuelle Entwicklungsstand umfasst 92 erfolgreiche Tests. Sie decken zusätzlich zur bisherigen Browser- und Providerauswahl die SQLite-Verwaltung von Aufgaben und Bewertungsbögen, Kriterienreihenfolge, Duplizieren, Löschen und Archivieren, strukturierte Kriterienantworten, den unveränderten bisherigen Analyseweg, persistente Feedbackläufe sowie Anmeldung und CSRF-Schutz der neuen Routen ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 
@@ -204,6 +228,7 @@ Die Modellantwort wird in Version 0.6 mit einer engen, sicheren Markdown-Konfigu
 - Login, Logout und Analyseformular verwenden sitzungsgebundene CSRF-Tokens. Fehlende oder manipulierte Tokens werden mit HTTP 403 abgewiesen.
 - Standardmäßig sind nach fünf fehlgeschlagenen Anmeldungen pro erkanntem Client für fünf Minuten keine weiteren Versuche möglich. Der Zähler liegt im Arbeitsspeicher und wird bei einem Serverneustart zurückgesetzt; verteilte Angriffe werden dadurch allein nicht vollständig verhindert.
 - Für Tests dürfen ausschließlich erfundene oder vollständig anonymisierte Texte verwendet werden.
+- Der eingegebene Schülertext wird in den neuen Kriterienläufen nicht in SQLite gespeichert. Gespeichert werden nur ein SHA-256-Hash zur technischen Wiedererkennung, der verwendete Aufgaben- und Bewertungsbogen-Snapshot sowie das erzeugte Feedback.
 - Der RunPod-Key, die Endpoint-ID sowie die standardmäßig verwendeten OpenAI- und Mistral-Keys gehören ausschließlich in die lokale beziehungsweise serverseitige `.env`.
 - Die frei änderbare Ollama-Adresse und die optionalen OpenAI- und Mistral-Key-Felder sind nur für die lokale Entwicklung vorgesehen.
 - Das Produktionsdeployment veröffentlicht ausschließlich Caddy auf Port 80/443; der Webcontainer ist nur an `127.0.0.1:8000` gebunden.

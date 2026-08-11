@@ -19,6 +19,42 @@
             value="{{ runpod_tracking_id }}"
         >
 
+        <div class="task-selection">
+            <label for="task-id">
+                Aufgabe und Bewertungsbogen
+            </label>
+
+            <select id="task-id" name="task_id">
+                <option value="">
+                    Ohne Bewertungsbogen – bisheriges Gesamtfeedback
+                </option>
+
+                {% for task in task_options %}
+                    <option
+                        value="{{ task.task_id }}"
+                        {% if task.task_id == selected_task_id %}selected{% endif %}
+                    >
+                        {{ task.title }} – {{ task.rubric.title }}
+                        ({{ task.rubric.criteria | length }} Kriterien)
+                    </option>
+                {% endfor %}
+            </select>
+
+            {% if task_options %}
+                <p class="hint">
+                    Mit einem Bewertungsbogen erhältst du eine eigene
+                    Rückmeldung zu jedem Kriterium.
+                    <a href="/tasks">Bewertungsbögen verwalten</a>
+                </p>
+            {% else %}
+                <p class="hint">
+                    Es wurde noch kein Bewertungsbogen angelegt.
+                    <a href="/tasks/new">Ersten Bewertungsbogen erstellen</a>
+                    oder das bisherige Gesamtfeedback verwenden.
+                </p>
+            {% endif %}
+        </div>
+
         <label for="provider">Modellanbieter</label>
 
         <select id="provider" name="provider">

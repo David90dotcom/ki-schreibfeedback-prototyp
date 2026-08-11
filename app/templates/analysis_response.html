@@ -5,6 +5,13 @@
 </section>
 {% endif %}
 
+{% if storage_warning %}
+<section class="card persistence-warning">
+    <h2>Hinweis zur Speicherung</h2>
+    <p>{{ storage_warning }}</p>
+</section>
+{% endif %}
+
 {% if result %}
 <section class="card result" data-analysis-result>
     <h2>Ergebnis</h2>
@@ -32,6 +39,18 @@
             <dd>{{ result.duration_ms | duration_ms }}</dd>
         </div>
 
+        {% if result.criteria_feedback is defined %}
+            <div>
+                <dt>Aufgabe</dt>
+                <dd>{{ result.task_title }}</dd>
+            </div>
+
+            <div>
+                <dt>Bewertungsbogen</dt>
+                <dd>{{ result.rubric_title }}</dd>
+            </div>
+        {% endif %}
+
         {% if result.provider == "runpod" %}
             <div>
                 <dt>Warte-/Bereitstellungszeit</dt>
@@ -55,8 +74,43 @@
         {% endif %}
     </dl>
 
-    <div class="feedback">
-        {{ result.feedback | feedback_markdown }}
-    </div>
+    {% if result.criteria_feedback is defined %}
+        <div class="criterion-feedback-list">
+            {% for item in result.criteria_feedback %}
+                <article
+                    class="criterion-feedback-card criterion-status-{{ item.status }}"
+                >
+                    <div class="criterion-feedback-header">
+                        <span class="criterion-number">
+                            Kriterium {{ loop.index }}
+                        </span>
+
+                        <span class="criterion-status-badge">
+                            {{ item.status_label }}
+                        </span>
+                    </div>
+
+                    <h3>{{ item.criterion_text }}</h3>
+
+                    <div class="criterion-feedback-body">
+                        <h4>Rückmeldung</h4>
+                        <p>{{ item.feedback }}</p>
+
+                        <h4>Nächster Schritt</h4>
+                        <p>{{ item.next_step }}</p>
+                    </div>
+                </article>
+            {% endfor %}
+        </div>
+
+        <section class="overall-feedback">
+            <h3>Zusammenfassung</h3>
+            <p>{{ result.overall_feedback }}</p>
+        </section>
+    {% else %}
+        <div class="feedback">
+            {{ result.feedback | feedback_markdown }}
+        </div>
+    {% endif %}
 </section>
 {% endif %}
