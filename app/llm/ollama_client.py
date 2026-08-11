@@ -1,3 +1,5 @@
+from typing import Any
+
 import httpx
 
 from app.llm.base import LLMResponse
@@ -32,7 +34,13 @@ class OllamaProvider:
             }
         )
 
-    async def generate(self, prompt: str) -> LLMResponse:
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        response_schema: dict[str, Any] | None = None,
+        response_schema_name: str = "structured_response",
+    ) -> LLMResponse:
         url = f"{self.base_url}/api/generate"
 
         payload = {
@@ -43,6 +51,9 @@ class OllamaProvider:
                 "temperature": 0.2,
             },
         }
+
+        if response_schema is not None:
+            payload["format"] = response_schema
 
         async with httpx.AsyncClient(
             timeout=180.0,
@@ -58,4 +69,7 @@ class OllamaProvider:
             provider=self.provider_name,
             model=self.model_name,
             text=text,
+            raw_metadata={
+                "finish_reason": data.get("done_reason"),
+            },
         )

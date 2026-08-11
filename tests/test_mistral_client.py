@@ -16,6 +16,7 @@ class MistralProviderTests(unittest.IsolatedAsyncioTestCase):
             return_value=SimpleNamespace(
                 choices=[
                     SimpleNamespace(
+                        finish_reason="stop",
                         message=SimpleNamespace(
                             content="  Mistral-Testantwort  "
                         )
@@ -50,6 +51,59 @@ class MistralProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.provider, "mistral")
         self.assertEqual(response.model, "mistral-medium-latest")
         self.assertEqual(response.text, "Mistral-Testantwort")
+        self.assertEqual(
+            response.raw_metadata["finish_reason"],
+            "stop",
+        )
+
+    async def test_generate_sends_json_schema_to_mistral(self) -> None:
+        completion = AsyncMock(
+            return_value=SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        finish_reason="stop",
+                        message=SimpleNamespace(
+                            content='{"criteria": []}'
+                        ),
+                    )
+                ]
+            )
+        )
+        client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(create=completion)
+            )
+        )
+        schema = {
+            "type": "object",
+            "properties": {},
+        }
+
+        with patch(
+            "app.llm.mistral_client.AsyncOpenAI",
+            return_value=client,
+        ):
+            provider = MistralProvider(
+                api_key="test-mistral-key",
+                model_name="ministral-14b-2512",
+            )
+            await provider.generate(
+                "JSON-Testprompt",
+                response_schema=schema,
+                response_schema_name="rubric_feedback",
+            )
+
+        request = completion.await_args.kwargs
+        self.assertEqual(
+            request["response_format"],
+            {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "rubric_feedback",
+                    "schema": schema,
+                },
+            },
+        )
 
     async def test_generate_rejects_missing_api_key(self) -> None:
         provider = MistralProvider(
