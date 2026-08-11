@@ -166,6 +166,16 @@ class Settings:
         fallback="gpt-5.6-luna",
     )
 
+    mistral_api_key: str | None = (
+        os.getenv("MISTRAL_API_KEY", "").strip() or None
+    )
+
+    mistral_model: str = _first_configured_value(
+        "MISTRAL_DEFAULT_MODEL",
+        "MISTRAL_MODEL",
+        fallback="mistral-small-latest",
+    )
+
     runpod_api_key: str | None = (
         os.getenv("RUNPOD_API_KEY", "").strip() or None
     )

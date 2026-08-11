@@ -29,6 +29,7 @@ class FeedbackService:
         return [
             ("ollama", "Lokal: Ollama"),
             ("openai", "Cloud: OpenAI API"),
+            ("mistral", "Cloud: Mistral API"),
             ("runpod", "Cloud: RunPod Serverless"),
         ]
 

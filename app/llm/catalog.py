@@ -21,6 +21,7 @@ FORBIDDEN_SECRET_KEYS = {
     "auth_token",
     "bearer_token",
     "client_secret",
+    "mistral_api_key",
     "openai_api_key",
     "password",
     "secret",
