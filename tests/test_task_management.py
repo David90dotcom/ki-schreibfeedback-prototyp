@@ -81,6 +81,10 @@ class TaskManagementTests(unittest.TestCase):
                 instructions="Interpretiere das vorliegende Gedicht.",
                 material="Ein anonymes Beispielgedicht.",
                 rubric_title="Grundanforderungen Gedichtinterpretation",
+                criterion_titles=[
+                    "Einleitung: Grundangaben",
+                    "Sprachliche Bilder",
+                ],
                 criteria=[
                     "Einleitung mit Titel, Autor und Thema",
                     "Sprachliche Bilder benennen und erläutern",
@@ -107,6 +111,20 @@ class TaskManagementTests(unittest.TestCase):
             anonymous_client.close()
 
     def test_creates_task_with_multiple_criteria_in_browser(self) -> None:
+        new_task_page = self.client.get("/tasks/new")
+
+        self.assertIn('name="criterion_titles"', new_task_page.text)
+        self.assertIn(
+            "Überschrift in der Textanalyse",
+            new_task_page.text,
+        )
+        self.assertIn('data-max-criteria="100"', new_task_page.text)
+        self.assertIn(
+            'data-max-criterion-chars="10000"',
+            new_task_page.text,
+        )
+        self.assertIn('maxlength="10000"', new_task_page.text)
+
         response = self.client.post(
             "/tasks/new",
             data={
@@ -117,6 +135,11 @@ class TaskManagementTests(unittest.TestCase):
                 "instructions": "Interpretiere das Gedicht.",
                 "material": "Beispielgedicht",
                 "rubric_title": "Feedback Gedichtinterpretation",
+                "criterion_titles": [
+                    "Einleitung: Thema",
+                    "Form: Aufbau",
+                    "Sprache: Bildlichkeit",
+                ],
                 "criteria": [
                     "Einleitung verfassen",
                     "Äußere Form beschreiben",
@@ -134,6 +157,10 @@ class TaskManagementTests(unittest.TestCase):
         tasks = asyncio.run(self.store.list_tasks())
         self.assertEqual(len(tasks), 1)
         self.assertEqual(len(tasks[0].rubric.criteria), 3)
+        self.assertEqual(
+            tasks[0].rubric.criteria[0].title,
+            "Einleitung: Thema",
+        )
 
         management_page = self.client.get("/tasks")
         self.assertIn("Gedichtinterpretation Klasse 8", management_page.text)
@@ -155,8 +182,28 @@ class TaskManagementTests(unittest.TestCase):
             r'/static/rubrics\.js\?v=[0-9a-f]{12}',
         )
 
+    def test_task_form_uses_configured_criterion_limits(self) -> None:
+        configured_store = TaskStore(
+            Path(self.temporary_directory.name) / "configured.sqlite3",
+            max_criteria=17,
+            max_criterion_chars=2345,
+        )
+
+        with patch.object(main, "task_store", configured_store):
+            response = self.client.get("/tasks/new")
+
+        self.assertIn('data-max-criteria="17"', response.text)
+        self.assertIn(
+            'data-max-criterion-chars="2345"',
+            response.text,
+        )
+        self.assertIn('maxlength="2345"', response.text)
+
     def test_task_can_be_edited_duplicated_and_deleted(self) -> None:
         task = self._create_task()
+        edit_page = self.client.get(f"/tasks/{task.task_id}/edit")
+
+        self.assertIn("Einleitung: Grundangaben", edit_page.text)
 
         edit_response = self.client.post(
             f"/tasks/{task.task_id}/edit",
@@ -168,6 +215,11 @@ class TaskManagementTests(unittest.TestCase):
                 "instructions": "Analysiere das Gedicht.",
                 "material": "Beispielgedicht",
                 "rubric_title": "Überarbeitetes Feedback",
+                "criterion_titles": [
+                    "Einleitung",
+                    "Inhalt",
+                    "Form",
+                ],
                 "criteria": [
                     "Einleitung verfassen",
                     "Inhalt zusammenfassen",
@@ -228,6 +280,7 @@ class TaskManagementTests(unittest.TestCase):
             criteria_feedback=tuple(
                 CriterionFeedbackResult(
                     criterion_id=criterion.criterion_id,
+                    criterion_title=criterion.title,
                     criterion_text=criterion.text,
                     status=(
                         "partially_met"
@@ -239,12 +292,12 @@ class TaskManagementTests(unittest.TestCase):
                         if criterion.position == 0
                         else "Nicht erfüllt"
                     ),
-                    feedback="Konkretes Feedback.",
-                    next_step="Konkreter nächster Schritt.",
+                    feedback="Konkretes **Feedback**.",
+                    next_step="Konkreter *nächster Schritt*.",
                 )
                 for criterion in task.rubric.criteria
             ),
-            overall_feedback="Kurze Zusammenfassung.",
+            overall_feedback="Kurze **Zusammenfassung**.",
             duration_ms=350,
         )
 
@@ -276,11 +329,29 @@ class TaskManagementTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         rubric_analysis.assert_awaited_once()
         old_analysis.assert_not_awaited()
-        self.assertIn("Kriterium 1", response.text)
+        self.assertIn("Einleitung: Grundangaben", response.text)
         self.assertIn("Teilweise erfüllt", response.text)
         self.assertIn("<h4>Feedback</h4>", response.text)
-        self.assertIn("Konkreter nächster Schritt", response.text)
-        self.assertIn("Kurze Zusammenfassung", response.text)
+        self.assertIn("<h4>Überarbeitung</h4>", response.text)
+        self.assertNotIn("Nächster Schritt", response.text)
+        self.assertIn(
+            "Konkretes <strong>Feedback</strong>.",
+            response.text,
+        )
+        self.assertIn(
+            "Konkreter <em>nächster Schritt</em>.",
+            response.text,
+        )
+        self.assertIn(
+            "Kurze <strong>Zusammenfassung</strong>.",
+            response.text,
+        )
+        self.assertNotIn("**Feedback**", response.text)
+        self.assertNotIn("*nächster Schritt*", response.text)
+        self.assertNotIn(
+            "Einleitung mit Titel, Autor und Thema",
+            response.text,
+        )
         self.assertNotIn("bewertungsbogen", response.text.lower())
         self.assertEqual(
             asyncio.run(

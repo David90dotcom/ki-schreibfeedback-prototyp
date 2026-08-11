@@ -204,6 +204,7 @@ class RubricExchangeBundleTests(unittest.TestCase):
                 criteria=(
                     replace(
                         base.rubric.criteria[0],
+                        title="Schluss: Titelbezug",
                         text="Erkläre die Wirkung von ‚vorbei‘.",
                     ),
                 ),
@@ -221,6 +222,10 @@ class RubricExchangeBundleTests(unittest.TestCase):
         self.assertEqual(draft.material, source.material)
         self.assertEqual(draft.rubric_title, source.rubric.title)
         self.assertEqual(draft.criteria[0], source.rubric.criteria[0].text)
+        self.assertEqual(
+            draft.criterion_titles[0],
+            source.rubric.criteria[0].title,
+        )
         self.assertTrue(part["tasks"][0]["source_archived"])
 
     def test_changed_part_is_rejected_by_checksum(self) -> None:

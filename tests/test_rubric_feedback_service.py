@@ -77,11 +77,13 @@ def _task() -> FeedbackTask:
             criteria=(
                 RubricCriterion(
                     criterion_id=FIRST_CRITERION_ID,
+                    title="Einleitung: Grundangaben",
                     text="Einleitung mit Titel und Autor",
                     position=0,
                 ),
                 RubricCriterion(
                     criterion_id=SECOND_CRITERION_ID,
+                    title="Sprache: Bildlichkeit",
                     text="Sprachliche Bilder erläutern",
                     position=1,
                 ),
@@ -153,7 +155,19 @@ class RubricFeedbackServiceTests(unittest.TestCase):
         self.assertIn('"criterion_id": "K2"', provider.prompts[0])
         self.assertNotIn(FIRST_CRITERION_ID, provider.prompts[0])
         self.assertNotIn(SECOND_CRITERION_ID, provider.prompts[0])
+        self.assertNotIn(
+            "Einleitung: Grundangaben",
+            provider.prompts[0],
+        )
         self.assertIn("höchstens drei kurze", provider.prompts[0])
+        self.assertIn(
+            "Klartext ohne Markdown-Markierungen",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "keine Sternchen",
+            provider.prompts[0],
+        )
         self.assertEqual(
             provider.response_schema_names,
             ["rubric_feedback"],
@@ -185,11 +199,19 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             result.criteria_feedback[0].status_label,
             "Teilweise erfüllt",
         )
+        self.assertEqual(
+            result.criteria_feedback[0].criterion_title,
+            "Einleitung: Grundangaben",
+        )
         self.assertEqual(result.provider_request_id, "request-123")
         self.assertEqual(result.worker_id, "worker-456")
         self.assertEqual(
             result.payload()["overall_feedback"],
             "Die Grundidee ist erkennbar.",
+        )
+        self.assertEqual(
+            result.payload()["criteria"][0]["criterion_title"],
+            "Einleitung: Grundangaben",
         )
 
     def test_accepts_json_inside_optional_code_fence(self) -> None:

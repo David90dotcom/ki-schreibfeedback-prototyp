@@ -234,6 +234,16 @@ class Settings:
         os.getenv("MAX_INPUT_CHARS", "8000")
     )
 
+    max_criteria: int = _positive_int_from_env(
+        "MAX_CRITERIA",
+        100,
+    )
+
+    max_criterion_chars: int = _positive_int_from_env(
+        "MAX_CRITERION_CHARS",
+        10000,
+    )
+
     @property
     def session_cookie_secure(self) -> bool:
         """HTTPS-Modi dürfen Session-Cookies nur verschlüsselt senden."""

@@ -30,7 +30,10 @@ from app.config import (
     APP_MODE_PRODUCTION,
     settings,
 )
-from app.feedback_markdown import render_feedback_markdown
+from app.feedback_markdown import (
+    render_feedback_inline_markdown,
+    render_feedback_markdown,
+)
 from app.domain.rubric import FeedbackTask
 from app.llm.base import LLMProvider
 from app.llm.errors import (
@@ -228,6 +231,9 @@ templates = Jinja2Templates(
 templates.env.filters[
     "feedback_markdown"
 ] = render_feedback_markdown
+templates.env.filters[
+    "feedback_inline_markdown"
+] = render_feedback_inline_markdown
 templates.env.filters["duration_ms"] = _format_duration_ms
 templates.env.globals[
     "static_asset_version"
@@ -268,7 +274,11 @@ rubric_feedback_service = RubricFeedbackService(
     max_input_chars=settings.max_input_chars,
 )
 
-task_store = TaskStore(settings.analysis_database_path)
+task_store = TaskStore(
+    settings.analysis_database_path,
+    max_criteria=settings.max_criteria,
+    max_criterion_chars=settings.max_criterion_chars,
+)
 
 runpod_status_service = RunPodStatusService(
     api_key=settings.runpod_api_key,
@@ -623,6 +633,7 @@ def _task_form_values(
             "material": "",
             "rubric_title": "",
             "criteria": [""],
+            "criterion_titles": [""],
         }
 
     return {
@@ -634,6 +645,10 @@ def _task_form_values(
         "rubric_title": task.rubric.title,
         "criteria": [
             criterion.text
+            for criterion in task.rubric.criteria
+        ],
+        "criterion_titles": [
+            criterion.title
             for criterion in task.rubric.criteria
         ],
     }
@@ -648,7 +663,17 @@ def _submitted_task_form_values(
     material: str,
     rubric_title: str,
     criteria: list[str],
+    criterion_titles: list[str] | None,
 ) -> dict[str, object]:
+    criterion_values = criteria or [""]
+    title_values = list(criterion_titles or ())
+
+    if len(title_values) < len(criterion_values):
+        title_values.extend(
+            ""
+            for _ in range(len(criterion_values) - len(title_values))
+        )
+
     return {
         "title": title,
         "subject": subject,
@@ -656,7 +681,8 @@ def _submitted_task_form_values(
         "instructions": instructions,
         "material": material,
         "rubric_title": rubric_title,
-        "criteria": criteria or [""],
+        "criteria": criterion_values,
+        "criterion_titles": title_values,
     }
 
 
@@ -677,6 +703,8 @@ def _task_form_context(
         "task": task,
         "values": values,
         "error": error,
+        "max_criteria": task_store.max_criteria,
+        "max_criterion_chars": task_store.max_criterion_chars,
     }
 
 
@@ -1358,6 +1386,7 @@ async def create_task(
     material: str = Form(""),
     rubric_title: str = Form(""),
     criteria: list[str] = Form(...),
+    criterion_titles: list[str] | None = Form(None),
     csrf_token: str = Form("", max_length=256),
 ) -> Response:
     authenticated_user = _authenticated_user(request)
@@ -1374,6 +1403,7 @@ async def create_task(
         material=material,
         rubric_title=rubric_title,
         criteria=criteria,
+        criterion_titles=criterion_titles,
     )
 
     try:
@@ -1385,6 +1415,7 @@ async def create_task(
             material=material,
             rubric_title=rubric_title,
             criteria=criteria,
+            criterion_titles=criterion_titles,
         )
     except (ValueError, TaskStoreError) as exc:
         return templates.TemplateResponse(
@@ -1449,6 +1480,7 @@ async def update_task(
     material: str = Form(""),
     rubric_title: str = Form(""),
     criteria: list[str] = Form(...),
+    criterion_titles: list[str] | None = Form(None),
     csrf_token: str = Form("", max_length=256),
 ) -> Response:
     authenticated_user = _authenticated_user(request)
@@ -1473,6 +1505,7 @@ async def update_task(
         material=material,
         rubric_title=rubric_title,
         criteria=criteria,
+        criterion_titles=criterion_titles,
     )
 
     try:
@@ -1485,6 +1518,7 @@ async def update_task(
             material=material,
             rubric_title=rubric_title,
             criteria=criteria,
+            criterion_titles=criterion_titles,
         )
     except (ValueError, TaskStoreError) as exc:
         return templates.TemplateResponse(
