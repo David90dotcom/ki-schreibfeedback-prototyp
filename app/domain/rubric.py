@@ -5,6 +5,19 @@ from datetime import datetime
 
 
 @dataclass(frozen=True)
+class FeedbackTaskDraft:
+    """Validierbare Eingabedaten für eine neue Aufgabe."""
+
+    title: str
+    subject: str
+    grade_level: str
+    instructions: str
+    material: str
+    rubric_title: str
+    criteria: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RubricCriterion:
     """Ein geordnetes Einzelkriterium eines Bewertungsbogens."""
 

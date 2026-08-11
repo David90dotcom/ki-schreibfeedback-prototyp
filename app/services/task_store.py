@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -11,6 +12,7 @@ from uuid import uuid4
 
 from app.domain.rubric import (
     FeedbackTask,
+    FeedbackTaskDraft,
     Rubric,
     RubricCriterion,
     TaskDeleteResult,
@@ -87,6 +89,35 @@ class TaskStore:
         return await asyncio.to_thread(
             self._create_task_sync,
             normalized,
+        )
+
+    async def create_tasks(
+        self,
+        drafts: Sequence[FeedbackTaskDraft],
+    ) -> list[FeedbackTask]:
+        """Legt mehrere vollständig validierte Aufgaben atomar an."""
+
+        if not drafts:
+            raise ValueError(
+                "Die Importdatei enthält keine Bewertungsbögen."
+            )
+
+        normalized_tasks = tuple(
+            self._validate_input(
+                title=draft.title,
+                subject=draft.subject,
+                grade_level=draft.grade_level,
+                instructions=draft.instructions,
+                material=draft.material,
+                rubric_title=draft.rubric_title,
+                criteria=draft.criteria,
+            )
+            for draft in drafts
+        )
+
+        return await asyncio.to_thread(
+            self._create_tasks_sync,
+            normalized_tasks,
         )
 
     async def update_task(
@@ -264,10 +295,6 @@ class TaskStore:
         self,
         normalized: dict[str, object],
     ) -> FeedbackTask:
-        task_id = str(uuid4())
-        rubric_id = str(uuid4())
-        timestamp = datetime.now(timezone.utc).isoformat()
-
         with self._write_lock:
             try:
                 self.database_path.parent.mkdir(
@@ -277,69 +304,44 @@ class TaskStore:
 
                 with self._connect() as connection:
                     self._create_schema(connection)
-                    connection.execute(
-                        """
-                        INSERT INTO feedback_tasks (
-                            task_id,
-                            title,
-                            subject,
-                            grade_level,
-                            instructions,
-                            material,
-                            created_at,
-                            updated_at,
-                            archived_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                        """,
-                        (
-                            task_id,
-                            normalized["title"],
-                            normalized["subject"],
-                            normalized["grade_level"],
-                            normalized["instructions"],
-                            normalized["material"],
-                            timestamp,
-                            timestamp,
-                        ),
-                    )
-                    connection.execute(
-                        """
-                        INSERT INTO rubrics (
-                            rubric_id,
-                            task_id,
-                            title,
-                            created_at,
-                            updated_at,
-                            archived_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, NULL)
-                        """,
-                        (
-                            rubric_id,
-                            task_id,
-                            normalized["rubric_title"],
-                            timestamp,
-                            timestamp,
-                        ),
-                    )
-                    self._insert_criteria(
+                    return self._insert_normalized_task(
                         connection,
-                        rubric_id,
-                        normalized["criteria"],
+                        normalized,
+                        datetime.now(timezone.utc).isoformat(),
                     )
-
-                    created = self._load_task(
-                        connection,
-                        task_id,
-                        include_archived=True,
-                    )
-
-                return created
 
             except sqlite3.Error as exc:
                 raise TaskStoreError(
                     "Die Aufgabe konnte nicht gespeichert werden."
+                ) from exc
+
+    def _create_tasks_sync(
+        self,
+        normalized_tasks: tuple[dict[str, object], ...],
+    ) -> list[FeedbackTask]:
+        with self._write_lock:
+            try:
+                self.database_path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+
+                with self._connect() as connection:
+                    self._create_schema(connection)
+                    created_tasks = [
+                        self._insert_normalized_task(
+                            connection,
+                            normalized,
+                            datetime.now(timezone.utc).isoformat(),
+                        )
+                        for normalized in normalized_tasks
+                    ]
+
+                return created_tasks
+
+            except sqlite3.Error as exc:
+                raise TaskStoreError(
+                    "Die Bewertungsbögen konnten nicht importiert werden."
                 ) from exc
 
     def _update_task_sync(
@@ -701,6 +703,80 @@ class TaskStore:
             ON rubric_feedback_runs (task_id, created_at DESC);
             """
         )
+
+    @staticmethod
+    def _insert_normalized_task(
+        connection: sqlite3.Connection,
+        normalized: dict[str, object],
+        timestamp: str,
+    ) -> FeedbackTask:
+        task_id = str(uuid4())
+        rubric_id = str(uuid4())
+
+        connection.execute(
+            """
+            INSERT INTO feedback_tasks (
+                task_id,
+                title,
+                subject,
+                grade_level,
+                instructions,
+                material,
+                created_at,
+                updated_at,
+                archived_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                task_id,
+                normalized["title"],
+                normalized["subject"],
+                normalized["grade_level"],
+                normalized["instructions"],
+                normalized["material"],
+                timestamp,
+                timestamp,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO rubrics (
+                rubric_id,
+                task_id,
+                title,
+                created_at,
+                updated_at,
+                archived_at
+            )
+            VALUES (?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                rubric_id,
+                task_id,
+                normalized["rubric_title"],
+                timestamp,
+                timestamp,
+            ),
+        )
+        TaskStore._insert_criteria(
+            connection,
+            rubric_id,
+            normalized["criteria"],
+        )
+
+        created = TaskStore._load_task(
+            connection,
+            task_id,
+            include_archived=True,
+        )
+
+        if created is None:
+            raise sqlite3.IntegrityError(
+                "Die neu angelegte Aufgabe konnte nicht geladen werden."
+            )
+
+        return created
 
     @staticmethod
     def _insert_criteria(

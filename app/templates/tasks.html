@@ -18,9 +18,20 @@
         </p>
     </div>
 
-    <a class="button-link" href="/tasks/new">
-        Neue Aufgabe erstellen
-    </a>
+    <div class="management-actions">
+        <a class="button-link" href="/tasks/new">
+            Neue Aufgabe erstellen
+        </a>
+
+        {% if export_available %}
+            <a
+                class="button-link secondary-link"
+                href="/tasks/export-all"
+            >
+                Gesamtexport als ZIP
+            </a>
+        {% endif %}
+    </div>
 </section>
 
 {% if notice %}
@@ -35,6 +46,51 @@
     <p>{{ error }}</p>
 </section>
 {% endif %}
+
+<section class="card exchange-panel">
+    <div>
+        <h2>Bewertungsbögen übertragen</h2>
+        <p class="hint">
+            Importiere einen einzelnen Bewertungsbogen oder einen
+            Gesamtexport als ZIP-Paket. Vorhandene Bögen werden nicht
+            überschrieben; importierte Bögen erhalten neue interne IDs.
+        </p>
+    </div>
+
+    <form
+        class="import-form"
+        method="post"
+        action="/tasks/import"
+        enctype="multipart/form-data"
+    >
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="{{ csrf_token }}"
+        >
+
+        <label for="import-file">JSON- oder ZIP-Datei auswählen</label>
+        <input
+            id="import-file"
+            name="import_file"
+            type="file"
+            accept=".json,.zip,application/json,application/zip"
+            required
+        >
+
+        <button class="secondary-button" type="submit">
+            Bewertungsbogen importieren
+        </button>
+    </form>
+
+    <p class="hint exchange-note">
+        Ein Gesamtexport enthält auch archivierte Bögen und teilt größere
+        Bestände automatisch in einzeln geprüfte JSON-Dateien. Beim Import
+        werden alle enthaltenen Bögen als neue, aktive Kopien angelegt.
+        Analyse- und Feedbackverläufe sowie API-Daten sind nicht Bestandteil
+        des Pakets.
+    </p>
+</section>
 
 {% if tasks %}
     <div class="task-card-list">
@@ -69,6 +125,13 @@
                         href="/tasks/{{ task.task_id }}/edit"
                     >
                         Bearbeiten
+                    </a>
+
+                    <a
+                        class="button-link secondary-link"
+                        href="/tasks/{{ task.task_id }}/export"
+                    >
+                        Exportieren
                     </a>
 
                     <form

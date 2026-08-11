@@ -9,10 +9,12 @@ from uuid import UUID, uuid4
 import httpx
 from fastapi import (
     FastAPI,
+    File,
     Form,
     HTTPException,
     Query,
     Request,
+    UploadFile,
 )
 from fastapi.responses import (
     HTMLResponse,
@@ -59,6 +61,13 @@ from app.services.feedback_service import (
 from app.services.rubric_feedback_service import (
     RubricFeedbackResult,
     RubricFeedbackService,
+)
+from app.services.rubric_exchange_service import (
+    MAX_RUBRIC_BUNDLE_BYTES,
+    MAX_RUBRIC_BUNDLE_TASKS,
+    MAX_RUBRIC_IMPORT_BYTES,
+    RubricExchangeError,
+    RubricExchangeService,
 )
 from app.services.runpod_job_store import (
     ACTIVE_RUNPOD_JOB_STATUSES,
@@ -565,6 +574,41 @@ TASK_NOTICE_MESSAGES = {
         "Vorhandene Analyseergebnisse bleiben erhalten."
     ),
 }
+
+
+def _task_notice_message(
+    notice: str,
+    imported_count: int,
+) -> str | None:
+    if notice == "imported" and imported_count > 0:
+        if imported_count == 1:
+            return "Ein Bewertungsbogen wurde als neue Kopie importiert."
+
+        return (
+            f"{imported_count} Bewertungsbögen wurden als neue Kopien "
+            "importiert."
+        )
+
+    return TASK_NOTICE_MESSAGES.get(notice)
+
+
+def _rubric_download_response(
+    content: bytes,
+    filename: str,
+    *,
+    media_type: str = "application/json",
+) -> Response:
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{filename}"'
+            ),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 def _task_form_values(
@@ -1092,6 +1136,11 @@ async def logout(
 async def tasks_page(
     request: Request,
     notice: str = Query(default="", max_length=32),
+    imported_count: int = Query(
+        default=0,
+        ge=0,
+        le=MAX_RUBRIC_BUNDLE_TASKS,
+    ),
 ) -> Response:
     authenticated_user = _authenticated_user(request)
 
@@ -1101,9 +1150,18 @@ async def tasks_page(
     error: str | None = None
 
     try:
-        tasks = await task_store.list_tasks()
+        stored_tasks = await task_store.list_tasks(
+            include_archived=True
+        )
+        tasks = [
+            task
+            for task in stored_tasks
+            if task.archived_at is None
+        ]
+        export_available = bool(stored_tasks)
     except TaskStoreError as exc:
         tasks = []
+        export_available = False
         error = str(exc)
 
     return templates.TemplateResponse(
@@ -1116,9 +1174,156 @@ async def tasks_page(
                 request.session
             ),
             "tasks": tasks,
-            "notice": TASK_NOTICE_MESSAGES.get(notice),
+            "export_available": export_available,
+            "notice": _task_notice_message(
+                notice,
+                imported_count,
+            ),
             "error": error,
         },
+    )
+
+
+@app.get("/tasks/export-all")
+async def export_all_tasks(
+    request: Request,
+) -> Response:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    try:
+        tasks = await task_store.list_tasks(include_archived=True)
+    except TaskStoreError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+
+    if not tasks:
+        raise HTTPException(
+            status_code=404,
+            detail="Es sind keine Bewertungsbögen für den Export vorhanden.",
+        )
+
+    try:
+        content = RubricExchangeService.export_collection_bundle(tasks)
+    except RubricExchangeError as exc:
+        raise HTTPException(
+            status_code=413,
+            detail=str(exc),
+        ) from exc
+
+    return _rubric_download_response(
+        content,
+        "bewertungsboegen-gesamt.zip",
+        media_type="application/zip",
+    )
+
+
+@app.get("/tasks/{task_id}/export")
+async def export_task(
+    request: Request,
+    task_id: str,
+) -> Response:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    try:
+        task = await task_store.get_task(task_id)
+    except TaskStoreError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+
+    if task is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Die Aufgabe wurde nicht gefunden.",
+        )
+
+    return _rubric_download_response(
+        RubricExchangeService.export_task(task),
+        "bewertungsbogen-einzeln.json",
+    )
+
+
+@app.post("/tasks/import", response_class=HTMLResponse)
+async def import_tasks(
+    request: Request,
+    import_file: UploadFile = File(...),
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        prefix = await import_file.read(4)
+        maximum_bytes = (
+            MAX_RUBRIC_BUNDLE_BYTES
+            if RubricExchangeService.is_bundle_content(prefix)
+            else MAX_RUBRIC_IMPORT_BYTES
+        )
+        content = prefix + await import_file.read(
+            maximum_bytes - len(prefix) + 1
+        )
+    except OSError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="Die Importdatei konnte nicht gelesen werden.",
+        ) from exc
+    finally:
+        await import_file.close()
+
+    try:
+        drafts = RubricExchangeService.parse_import(content)
+        imported_tasks = await task_store.create_tasks(drafts)
+    except (RubricExchangeError, ValueError, TaskStoreError) as exc:
+        try:
+            stored_tasks = await task_store.list_tasks(
+                include_archived=True
+            )
+            tasks = [
+                task
+                for task in stored_tasks
+                if task.archived_at is None
+            ]
+            export_available = bool(stored_tasks)
+        except TaskStoreError:
+            tasks = []
+            export_available = False
+
+        return templates.TemplateResponse(
+            name="tasks.html",
+            request=request,
+            context={
+                "app_name": settings.app_name,
+                "authenticated_user": authenticated_user,
+                "csrf_token": get_or_create_csrf_token(
+                    request.session
+                ),
+                "tasks": tasks,
+                "export_available": export_available,
+                "notice": None,
+                "error": str(exc),
+            },
+            status_code=(
+                422
+                if isinstance(exc, (RubricExchangeError, ValueError))
+                else 500
+            ),
+        )
+
+    return RedirectResponse(
+        url=(
+            "/tasks?notice=imported&imported_count="
+            f"{len(imported_tasks)}"
+        ),
+        status_code=303,
     )
 
 

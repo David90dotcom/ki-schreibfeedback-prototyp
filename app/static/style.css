@@ -856,6 +856,44 @@ button:disabled {
     margin: 5px 0 0;
 }
 
+.management-actions {
+    display: flex;
+    flex: 0 0 auto;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.exchange-panel h2 {
+    margin-bottom: 5px;
+}
+
+.exchange-panel .hint {
+    margin-top: 0;
+}
+
+.import-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.import-form label {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+
+.import-form button {
+    margin: 0;
+}
+
+.exchange-note {
+    margin: 12px 0 0;
+    color: var(--muted);
+    font-size: 0.92rem;
+}
+
 .task-card-list {
     display: grid;
     gap: 18px;
@@ -1151,8 +1189,13 @@ fieldset > label:first-of-type {
     }
 
     .two-column-fields,
-    .criterion-feedback-body {
+    .criterion-feedback-body,
+    .import-form {
         grid-template-columns: 1fr;
+    }
+
+    .management-actions {
+        width: 100%;
     }
 
     .management-header .button-link,

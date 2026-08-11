@@ -1,6 +1,6 @@
 # KI-Schreibfeedback-Prototyp 0.8 (Entwicklung)
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.8 ergänzt den Entwicklungsstand 0.7 rein additiv um SQLite-basierte Aufgaben und Bewertungsbögen sowie eine eigene Rückmeldung zu jedem Kriterium. Die bisherigen Provider- und Analysefunktionen bleiben unverändert verfügbar.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.8 ergänzt den Entwicklungsstand 0.7 rein additiv um SQLite-basierte Aufgaben und Bewertungsbögen, eine eigene Rückmeldung zu jedem Kriterium sowie einen portablen Import und Export. Die bisherigen Provider- und Analysefunktionen bleiben unverändert verfügbar.
 
 > **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
 
@@ -13,7 +13,7 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der 
 | **0.5.0** | abgeschlossen | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
 | **0.6.0** | stabiler Release | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
 | **0.7** | in Entwicklung | Additive Mistral-API-Anbindung mit Ministral 14B, Small, Medium, Large und freier Modell-ID auf Basis des unveränderten Tags `v0.6.0` |
-| **0.8** | in Entwicklung | Aufgaben mit jeweils einem Bewertungsbogen, geordnete Einzelkriterien, SQLite-Verwaltung und strukturiertes Feedback pro Kriterium |
+| **0.8** | in Entwicklung | Aufgaben mit jeweils einem Bewertungsbogen, geordnete Einzelkriterien, SQLite-Verwaltung, portabler Austausch und strukturiertes Feedback pro Kriterium |
 
 Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Version 0.6.0 ist der neue stabile Standard; Modell-Payload und vLLM-Startkonfiguration bleiben gegenüber 0.5.0 unverändert.
 
@@ -52,6 +52,7 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 - vier validierte Erfüllungsstände: erfüllt, teilweise erfüllt, nicht erfüllt und nicht beurteilbar
 - unverändertes bisheriges Gesamtfeedback über die Auswahl „Ohne Bewertungsbogen“
 - echtes Löschen unbenutzter und sicheres Archivieren bereits verwendeter Bewertungsbögen
+- JSON-Einzelexport und rundreisefestes ZIP-Gesamtpaket mit versioniertem Austauschformat
 - persistente Snapshots des verwendeten Bewertungsbogens und des erzeugten Kriterienfeedbacks
 - Auswahl zwischen lokalem Ollama, OpenAI, Mistral und RunPod Serverless im Entwicklungsmodus
 - Deaktivierung lokaler Ollama-Aufrufe im Produktionsmodus
@@ -149,6 +150,10 @@ Unter „Bewertungsbögen“ wird eine Aufgabe gemeinsam mit genau einem Bewertu
 Die strukturierte Modellantwort wird vollständig validiert: Jede gespeicherte Kriterien-ID muss genau einmal vorkommen; unbekannte, doppelte oder fehlende Kriterien werden abgelehnt. Unbenutzte Bewertungsbögen können vollständig gelöscht werden. Sobald ein Bewertungsbogen erfolgreich für eine Analyse verwendet wurde, wird er beim Löschen nur noch archiviert, damit vorhandene Ergebnisse nachvollziehbar bleiben.
 
 Aufgaben, Kriterien, Bewertungsbogen-Snapshots und Kriterienfeedback werden in der über `ANALYSIS_DATABASE_PATH` konfigurierten SQLite-Datei gespeichert. Das vorhandene Docker-Volume `/app/data` macht diese Daten auch über einen Container-Neustart oder ein Redeployment hinweg persistent.
+
+Ein einzelner Bewertungsbogen kann direkt an seiner Aufgabenkarte als JSON exportiert werden. Der Gesamtexport enthält alle aktiven und archivierten Aufgaben mit ihren Bewertungsbögen als ZIP-Paket. Größere Bestände werden darin automatisch in JSON-Teile mit jeweils höchstens 200 Bögen und 5 MiB aufgeteilt. JSON-Einzelexporte und ZIP-Gesamtpakete werden über dasselbe Importformular eingelesen. Der Import prüft zuerst die vollständige Datei und legt anschließend alle Aufgaben atomar mit neuen internen IDs an; vorhandene Bögen werden nicht überschrieben. Archivierte Quellen werden dabei als neue aktive Kopien importiert.
+
+Das versionierte Austauschformat enthält ausschließlich Aufgabentext, optionales Material, Fach, Jahrgangsstufe, Bewertungsbogentitel und die geordneten Kriterien. SQLite-IDs, Schülertext-Hashes, Analyse- und Feedbackverläufe, technische Messwerte sowie API-Daten werden nicht exportiert. JSON-Einzelexport und ZIP-Gesamtpaket sind damit die regulären Austausch- und Sicherungsformate für Bewertungsbögen; die SQLite-Datei bleibt der installationsgebundene Datenspeicher. Gesamtpakete sind auf 64 MiB, 5000 Bögen und 100 geprüfte Teile begrenzt; die Anwendung erzeugt kein Paket, das sie wegen dieser Grenzen anschließend selbst ablehnen würde.
 
 ## Provider verwenden
 

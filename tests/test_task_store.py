@@ -6,10 +6,12 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from app.domain.rubric import FeedbackTaskDraft
 from app.services.analysis_run_store import AnalysisRunStore
 from app.services.runpod_job_store import RunPodJobStore
-from app.services.task_store import TaskStore
+from app.services.task_store import TaskStore, TaskStoreError
 
 
 class TaskStoreTests(unittest.TestCase):
@@ -260,3 +262,72 @@ class TaskStoreTests(unittest.TestCase):
                     criteria=["Gültig", "   "],
                 )
             )
+
+    def test_bulk_create_validates_every_task_before_writing(self) -> None:
+        drafts = (
+            FeedbackTaskDraft(
+                title="Gültige Aufgabe",
+                subject="Deutsch",
+                grade_level="8",
+                instructions="Bearbeite die Aufgabe.",
+                material="",
+                rubric_title="Gültiger Bewertungsbogen",
+                criteria=("Gültiges Kriterium",),
+            ),
+            FeedbackTaskDraft(
+                title="Ungültige Aufgabe",
+                subject="Deutsch",
+                grade_level="8",
+                instructions="Bearbeite die Aufgabe.",
+                material="",
+                rubric_title="Ungültiger Bewertungsbogen",
+                criteria=(),
+            ),
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "mindestens ein Kriterium",
+        ):
+            asyncio.run(self.store.create_tasks(drafts))
+
+        self.assertEqual(asyncio.run(self.store.list_tasks()), [])
+
+    def test_bulk_create_rolls_back_database_error_midway(self) -> None:
+        drafts = tuple(
+            FeedbackTaskDraft(
+                title=f"Aufgabe {position}",
+                subject="Deutsch",
+                grade_level="8",
+                instructions="Bearbeite die Aufgabe.",
+                material="",
+                rubric_title=f"Bewertungsbogen {position}",
+                criteria=("Gültiges Kriterium",),
+            )
+            for position in range(2)
+        )
+        original_insert = TaskStore._insert_normalized_task
+        insertion_count = 0
+
+        def insert_or_fail(
+            connection: sqlite3.Connection,
+            normalized: dict[str, object],
+            timestamp: str,
+        ):
+            nonlocal insertion_count
+            insertion_count += 1
+
+            if insertion_count == 2:
+                raise sqlite3.IntegrityError("Erzwungener Testfehler")
+
+            return original_insert(connection, normalized, timestamp)
+
+        with patch.object(
+            TaskStore,
+            "_insert_normalized_task",
+            new=staticmethod(insert_or_fail),
+        ):
+            with self.assertRaises(TaskStoreError):
+                asyncio.run(self.store.create_tasks(drafts))
+
+        self.assertEqual(asyncio.run(self.store.list_tasks()), [])
