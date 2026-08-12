@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<section class="card meta-overview-header">
+    <div class="management-header">
+        <div>
+            <span class="meta-level-badge">Optional · Meta-Ebene</span>
+            <h2>Feedback-Bewertung</h2>
+            <p class="hint">
+                Hier erscheinen ausschließlich Feedbackläufe, die nach
+                einer Textanalyse bewusst für die spätere Bewertung
+                gespeichert wurden.
+            </p>
+        </div>
+    </div>
+</section>
+
+{% if notice_message %}
+    <section
+        class="card {% if notice_tone == 'error' %}error{% else %}notice-success{% endif %}"
+        role="status"
+    >
+        <p>{{ notice_message }}</p>
+    </section>
+{% endif %}
+
+{% if error %}
+    <section class="card error">
+        <h2>Fehler</h2>
+        <p>{{ error }}</p>
+    </section>
+{% endif %}
+
+{% if feedback_runs %}
+    <section class="meta-run-list" aria-label="Gespeicherte Feedbackläufe">
+        {% for feedback_run in feedback_runs %}
+            <article class="card meta-run-card">
+                <div class="meta-run-heading">
+                    <div>
+                        <h2>{{ feedback_run.task_title }}</h2>
+                        <p>{{ feedback_run.rubric_title }}</p>
+                    </div>
+
+                    <span class="meta-rating-status">
+                        Noch nicht bewertet
+                    </span>
+                </div>
+
+                <dl class="metadata meta-run-metadata">
+                    <div>
+                        <dt>Anbieter</dt>
+                        <dd>{{ feedback_run.provider }}</dd>
+                    </div>
+                    <div>
+                        <dt>Modell</dt>
+                        <dd>{{ feedback_run.model }}</dd>
+                    </div>
+                    <div>
+                        <dt>Feedbackdauer</dt>
+                        <dd>{{ feedback_run.duration_ms | duration_ms }}</dd>
+                    </div>
+                    <div>
+                        <dt>Einzelkriterien</dt>
+                        <dd>{{ feedback_run.criterion_count }}</dd>
+                    </div>
+                    <div>
+                        <dt>Erzeugt</dt>
+                        <dd>{{ feedback_run.created_at | datetime_utc }}</dd>
+                    </div>
+                    <div>
+                        <dt>Für Bewertung gespeichert</dt>
+                        <dd>
+                            {{ feedback_run.selected_for_evaluation_at | datetime_utc }}
+                        </dd>
+                    </div>
+                </dl>
+
+                <details class="meta-feedback-details">
+                    <summary>Feedbackdetails anzeigen</summary>
+
+                    <div class="meta-feedback-details-content">
+                        <section class="meta-feedback-overall">
+                            <h3>Zusammenfassung</h3>
+                            <p>
+                                {{ feedback_run.feedback_payload.overall_feedback | feedback_inline_markdown }}
+                            </p>
+                        </section>
+
+                        <section class="meta-feedback-criteria">
+                            <h3>Einzelfeedbacks</h3>
+
+                            <div class="meta-feedback-text">
+                                {% for item in feedback_run.feedback_payload.criteria %}
+                                    <section class="meta-feedback-item">
+                                        <h4>
+                                            {{ item.criterion_title or ("Kriterium " ~ loop.index) }}
+                                        </h4>
+                                        <p>
+                                            {{ item.feedback | feedback_inline_markdown }}
+                                        </p>
+                                        <p class="meta-feedback-next-step">
+                                            <strong>Überarbeitung:</strong>
+                                            {{ item.next_step | feedback_inline_markdown }}
+                                        </p>
+                                    </section>
+                                {% endfor %}
+                            </div>
+                        </section>
+                    </div>
+                </details>
+
+                <p class="meta-run-note">
+                    Die manuelle und die automatische Bewertung werden
+                    in den nächsten 0.9-Teilschritten ergänzt.
+                </p>
+            </article>
+        {% endfor %}
+    </section>
+{% elif not error %}
+    <section class="card empty-state meta-empty-state">
+        <span class="meta-level-badge">Meta-Ebene</span>
+        <h2>Noch keine Feedbackläufe ausgewählt</h2>
+        <p>
+            Erzeuge unter „Textanalyse“ ein Kriterienfeedback. Unter dem
+            Ergebnis kannst du es anschließend ausdrücklich für die
+            Feedback-Bewertung speichern.
+        </p>
+        <a class="button-link meta-action-link" href="/">
+            Zur Textanalyse
+        </a>
+    </section>
+{% endif %}
+
+{% endblock %}

@@ -11,7 +11,11 @@ from unittest.mock import patch
 from app.domain.rubric import FeedbackTaskDraft
 from app.services.analysis_run_store import AnalysisRunStore
 from app.services.runpod_job_store import RunPodJobStore
-from app.services.task_store import TaskStore, TaskStoreError
+from app.services.task_store import (
+    FeedbackRunSelectionError,
+    TaskStore,
+    TaskStoreError,
+)
 
 
 class TaskStoreTests(unittest.TestCase):
@@ -256,7 +260,9 @@ class TaskStoreTests(unittest.TestCase):
                 SELECT
                     student_text_hash,
                     task_snapshot_json,
-                    feedback_json
+                    feedback_json,
+                    student_text,
+                    selected_for_evaluation_at
                 FROM rubric_feedback_runs
                 """
             ).fetchone()
@@ -268,6 +274,173 @@ class TaskStoreTests(unittest.TestCase):
         )
         self.assertNotIn(student_text, row[1])
         self.assertNotIn(student_text, row[2])
+        self.assertIsNone(row[3])
+        self.assertIsNone(row[4])
+        self.assertEqual(
+            asyncio.run(
+                self.store.list_feedback_runs_for_evaluation()
+            ),
+            [],
+        )
+
+    def test_feedback_run_is_selected_explicitly_for_evaluation(self) -> None:
+        task = self._create_task()
+        student_text = (
+            "Anonymisierter Schülertext für die Meta-Ebene.\r\n"
+            "Zweite Zeile mit \"Zitat\"."
+        )
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="openai",
+                model="gpt-test",
+                duration_ms=842,
+                queue_duration_ms=12.5,
+                execution_duration_ms=700.0,
+                provider_request_id="request-1",
+                feedback_payload={
+                    "criteria": [
+                        {
+                            "criterion_id": "criterion-1",
+                            "status": "met",
+                            "feedback": "Treffendes Feedback.",
+                            "next_step": "Weiter so.",
+                        }
+                    ],
+                    "overall_feedback": "Zusammenfassung.",
+                },
+            )
+        )
+
+        selected = asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=(
+                    "  Anonymisierter Schülertext für die Meta-Ebene.\n"
+                    "Zweite Zeile mit \"Zitat\".\n"
+                ),
+            )
+        )
+        selected_again = asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+        listed = asyncio.run(
+            self.store.list_feedback_runs_for_evaluation()
+        )
+
+        self.assertEqual(selected.feedback_run_id, feedback_run_id)
+        self.assertEqual(
+            selected.student_text,
+            student_text.replace("\r\n", "\n"),
+        )
+        self.assertEqual(selected.task_title, task.title)
+        self.assertEqual(selected.rubric_title, task.rubric.title)
+        self.assertEqual(selected.criterion_count, 1)
+        self.assertEqual(selected.provider, "openai")
+        self.assertEqual(selected.model, "gpt-test")
+        self.assertEqual(selected.duration_ms, 842)
+        self.assertEqual(
+            selected_again.selected_for_evaluation_at,
+            selected.selected_for_evaluation_at,
+        )
+        self.assertEqual(listed, [selected])
+
+    def test_feedback_run_selection_rejects_mismatched_text(self) -> None:
+        task = self._create_task()
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text="Ursprünglicher Schülertext",
+                provider="ollama",
+                model="lokales-modell",
+                duration_ms=100,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Feedback",
+                },
+            )
+        )
+
+        with self.assertRaises(FeedbackRunSelectionError):
+            asyncio.run(
+                self.store.select_feedback_run_for_evaluation(
+                    feedback_run_id=feedback_run_id,
+                    student_text="Ein anderer Schülertext",
+                )
+            )
+
+        self.assertEqual(
+            asyncio.run(
+                self.store.list_feedback_runs_for_evaluation()
+            ),
+            [],
+        )
+
+    def test_migrates_existing_feedback_runs_additively(self) -> None:
+        task = self._create_task()
+        student_text = "Bestehender anonymisierter Schülertext"
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="mistral",
+                model="test-model",
+                duration_ms=500,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Bestehendes Feedback",
+                },
+            )
+        )
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            connection.execute(
+                "DROP INDEX idx_rubric_feedback_runs_evaluation"
+            )
+            connection.execute(
+                """
+                ALTER TABLE rubric_feedback_runs
+                DROP COLUMN selected_for_evaluation_at
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE rubric_feedback_runs
+                DROP COLUMN student_text
+                """
+            )
+
+        asyncio.run(self.store.initialize())
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(rubric_feedback_runs)"
+                ).fetchall()
+            }
+            stored_ids = {
+                row[0]
+                for row in connection.execute(
+                    "SELECT feedback_run_id FROM rubric_feedback_runs"
+                ).fetchall()
+            }
+
+        self.assertIn("student_text", columns)
+        self.assertIn("selected_for_evaluation_at", columns)
+        self.assertIn(feedback_run_id, stored_ids)
+
+        selected = asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+        self.assertEqual(selected.feedback_run_id, feedback_run_id)
 
     def test_shares_database_with_existing_sqlite_stores(self) -> None:
         analysis_store = AnalysisRunStore(self.store.database_path)

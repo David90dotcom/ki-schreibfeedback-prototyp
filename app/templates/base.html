@@ -40,8 +40,19 @@
                         class="app-navigation"
                         aria-label="Hauptnavigation"
                     >
-                        <a href="/">Textanalyse</a>
-                        <a href="/tasks">Feedback</a>
+                        <a
+                            href="/"
+                            {% if request.url.path == "/" %}aria-current="page"{% endif %}
+                        >Textanalyse</a>
+                        <a
+                            href="/tasks"
+                            {% if request.url.path.startswith("/tasks") %}aria-current="page"{% endif %}
+                        >Feedback</a>
+                        <a
+                            href="/feedback-evaluations"
+                            class="meta-navigation-link"
+                            {% if request.url.path.startswith("/feedback-evaluations") %}aria-current="page"{% endif %}
+                        >Feedback-Bewertung</a>
                     </nav>
 
                     <div class="session-controls">

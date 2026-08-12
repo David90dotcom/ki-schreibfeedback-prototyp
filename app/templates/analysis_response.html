@@ -105,6 +105,52 @@
             <h3>Zusammenfassung</h3>
             <p>{{ result.overall_feedback | feedback_inline_markdown }}</p>
         </section>
+
+        {% if feedback_run_id %}
+            <section class="meta-evaluation-entry">
+                <div class="meta-evaluation-heading">
+                    <div>
+                        <span class="meta-level-badge">
+                            Optional · Meta-Ebene
+                        </span>
+                        <h3>Erzeugtes Feedback bewerten</h3>
+                    </div>
+                </div>
+
+                <p>
+                    Wähle diesen Feedbacklauf nur aus, wenn du seine
+                    Qualität später manuell oder mit einer Cloud-KI
+                    bewerten möchtest.
+                </p>
+
+                <form
+                    method="post"
+                    action="/feedback-runs/{{ feedback_run_id }}/save"
+                >
+                    <input
+                        type="hidden"
+                        name="csrf_token"
+                        value="{{ csrf_token }}"
+                    >
+                    <textarea
+                        hidden
+                        name="student_text"
+                    >{{ student_text }}</textarea>
+
+                    <button class="meta-action-button" type="submit">
+                        Für Feedback-Bewertung speichern
+                    </button>
+                </form>
+
+                <p class="meta-evaluation-privacy-note">
+                    Erst mit diesem Klick wird der anonymisierte
+                    Schülertext zusätzlich in der lokalen Datenbank
+                    gespeichert. Es wird noch keine Bewertung gestartet
+                    und dieser Speicherschritt löst keine zusätzliche
+                    Cloudübertragung aus.
+                </p>
+            </section>
+        {% endif %}
     {% else %}
         <div class="feedback">
             {{ result.feedback | feedback_markdown }}

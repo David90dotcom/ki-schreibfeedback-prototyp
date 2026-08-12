@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import sqlite3
 from collections.abc import Sequence
@@ -10,6 +11,7 @@ from pathlib import Path
 from threading import Lock
 from uuid import uuid4
 
+from app.domain.feedback_evaluation import StoredFeedbackRun
 from app.domain.rubric import (
     FeedbackTask,
     FeedbackTaskDraft,
@@ -26,12 +28,26 @@ MAX_MATERIAL_CHARS = 30000
 MAX_TASK_INSTRUCTIONS_CHARS = 12000
 
 
+def _normalize_student_text(value: str) -> str:
+    """Vereinheitlicht Browser-Zeilenumbrüche für Hash und Speicherung."""
+
+    return value.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
 class TaskStoreError(RuntimeError):
     """Fehler beim Speichern oder Lesen von Aufgaben."""
 
 
 class TaskNotFoundError(TaskStoreError):
     """Die angeforderte Aufgabe ist nicht vorhanden oder archiviert."""
+
+
+class FeedbackRunNotFoundError(TaskStoreError):
+    """Der angeforderte Feedbacklauf ist nicht vorhanden."""
+
+
+class FeedbackRunSelectionError(TaskStoreError):
+    """Der Feedbacklauf kann nicht zur Bewertung ausgewählt werden."""
 
 
 class TaskStore:
@@ -254,6 +270,40 @@ class TaskStore:
         return await asyncio.to_thread(
             self._count_feedback_runs_sync,
             task_id,
+        )
+
+    async def select_feedback_run_for_evaluation(
+        self,
+        *,
+        feedback_run_id: str,
+        student_text: str,
+    ) -> StoredFeedbackRun:
+        """Speichert den anonymisierten Text erst nach bewusstem Klick."""
+
+        normalized_student_text = _normalize_student_text(student_text)
+
+        if not normalized_student_text:
+            raise FeedbackRunSelectionError(
+                "Der Schülertext des Feedbacklaufs fehlt."
+            )
+
+        return await asyncio.to_thread(
+            self._select_feedback_run_for_evaluation_sync,
+            feedback_run_id,
+            normalized_student_text,
+        )
+
+    async def list_feedback_runs_for_evaluation(
+        self,
+        *,
+        limit: int = 200,
+    ) -> list[StoredFeedbackRun]:
+        if limit < 1 or limit > 1000:
+            raise ValueError("limit muss zwischen 1 und 1000 liegen.")
+
+        return await asyncio.to_thread(
+            self._list_feedback_runs_for_evaluation_sync,
+            limit,
         )
 
     def _initialize_sync(self) -> None:
@@ -597,7 +647,9 @@ class TaskStore:
                             execution_duration_ms,
                             provider_request_id,
                             hashlib.sha256(
-                                student_text.strip().encode("utf-8")
+                                _normalize_student_text(student_text).encode(
+                                    "utf-8"
+                                )
                             ).hexdigest(),
                             json.dumps(
                                 task.snapshot(),
@@ -647,6 +699,123 @@ class TaskStore:
         except sqlite3.Error as exc:
             raise TaskStoreError(
                 "Die gespeicherten Feedbackläufe konnten nicht gezählt werden."
+            ) from exc
+
+    def _select_feedback_run_for_evaluation_sync(
+        self,
+        feedback_run_id: str,
+        student_text: str,
+    ) -> StoredFeedbackRun:
+        student_text_hash = hashlib.sha256(
+            student_text.encode("utf-8")
+        ).hexdigest()
+
+        with self._write_lock:
+            try:
+                with self._connect() as connection:
+                    self._create_schema(connection)
+                    row = connection.execute(
+                        """
+                        SELECT student_text_hash,
+                               selected_for_evaluation_at
+                        FROM rubric_feedback_runs
+                        WHERE feedback_run_id = ?
+                        """,
+                        (feedback_run_id,),
+                    ).fetchone()
+
+                    if row is None:
+                        raise FeedbackRunNotFoundError(
+                            "Der Feedbacklauf wurde nicht gefunden."
+                        )
+
+                    if not hmac.compare_digest(
+                        row["student_text_hash"],
+                        student_text_hash,
+                    ):
+                        raise FeedbackRunSelectionError(
+                            "Der Schülertext passt nicht zum Feedbacklauf."
+                        )
+
+                    selected_at = (
+                        row["selected_for_evaluation_at"]
+                        or datetime.now(timezone.utc).isoformat()
+                    )
+                    connection.execute(
+                        """
+                        UPDATE rubric_feedback_runs
+                        SET student_text = ?,
+                            selected_for_evaluation_at = ?
+                        WHERE feedback_run_id = ?
+                        """,
+                        (
+                            student_text,
+                            selected_at,
+                            feedback_run_id,
+                        ),
+                    )
+                    selected = self._load_stored_feedback_run(
+                        connection,
+                        feedback_run_id,
+                    )
+
+                if selected is None:
+                    raise FeedbackRunNotFoundError(
+                        "Der Feedbacklauf wurde nicht gefunden."
+                    )
+
+                return selected
+
+            except (
+                FeedbackRunNotFoundError,
+                FeedbackRunSelectionError,
+            ):
+                raise
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise TaskStoreError(
+                    "Der Feedbacklauf besitzt ein ungültiges Datenformat."
+                ) from exc
+            except sqlite3.Error as exc:
+                raise TaskStoreError(
+                    "Der Feedbacklauf konnte nicht ausgewählt werden."
+                ) from exc
+
+    def _list_feedback_runs_for_evaluation_sync(
+        self,
+        limit: int,
+    ) -> list[StoredFeedbackRun]:
+        try:
+            with self._connect() as connection:
+                self._create_schema(connection)
+                rows = connection.execute(
+                    """
+                    SELECT feedback_run_id
+                    FROM rubric_feedback_runs
+                    WHERE selected_for_evaluation_at IS NOT NULL
+                    ORDER BY selected_for_evaluation_at DESC,
+                             created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+
+                runs = [
+                    self._load_stored_feedback_run(
+                        connection,
+                        row["feedback_run_id"],
+                    )
+                    for row in rows
+                ]
+
+            return [run for run in runs if run is not None]
+
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise TaskStoreError(
+                "Ein Feedbacklauf besitzt ein ungültiges Datenformat."
+            ) from exc
+        except sqlite3.Error as exc:
+            raise TaskStoreError(
+                "Die ausgewählten Feedbackläufe konnten nicht geladen werden."
             ) from exc
 
     def _connect(self) -> sqlite3.Connection:
@@ -718,6 +887,8 @@ class TaskStore:
                 student_text_hash TEXT NOT NULL,
                 task_snapshot_json TEXT NOT NULL,
                 feedback_json TEXT NOT NULL,
+                student_text TEXT,
+                selected_for_evaluation_at TEXT,
                 FOREIGN KEY (task_id)
                     REFERENCES feedback_tasks (task_id)
                     ON DELETE RESTRICT,
@@ -740,6 +911,17 @@ class TaskStore:
             """
         )
         TaskStore._migrate_criterion_titles(connection)
+        TaskStore._migrate_feedback_evaluation_columns(connection)
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS
+                idx_rubric_feedback_runs_evaluation
+            ON rubric_feedback_runs (
+                selected_for_evaluation_at DESC,
+                created_at DESC
+            )
+            """
+        )
 
     @staticmethod
     def _migrate_criterion_titles(
@@ -769,6 +951,94 @@ class TaskStore:
             SET criterion_title = 'Kriterium ' || (position + 1)
             WHERE criterion_title = ''
             """
+        )
+
+    @staticmethod
+    def _migrate_feedback_evaluation_columns(
+        connection: sqlite3.Connection,
+    ) -> None:
+        """Erweitert vorhandene 0.8-Datenbanken additiv für 0.9."""
+
+        columns = {
+            row["name"]
+            for row in connection.execute(
+                "PRAGMA table_info(rubric_feedback_runs)"
+            ).fetchall()
+        }
+
+        if "student_text" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE rubric_feedback_runs
+                ADD COLUMN student_text TEXT
+                """
+            )
+
+        if "selected_for_evaluation_at" not in columns:
+            connection.execute(
+                """
+                ALTER TABLE rubric_feedback_runs
+                ADD COLUMN selected_for_evaluation_at TEXT
+                """
+            )
+
+    @staticmethod
+    def _load_stored_feedback_run(
+        connection: sqlite3.Connection,
+        feedback_run_id: str,
+    ) -> StoredFeedbackRun | None:
+        row = connection.execute(
+            """
+            SELECT feedback_run_id,
+                   task_id,
+                   rubric_id,
+                   created_at,
+                   selected_for_evaluation_at,
+                   provider,
+                   model,
+                   duration_ms,
+                   queue_duration_ms,
+                   execution_duration_ms,
+                   provider_request_id,
+                   student_text,
+                   task_snapshot_json,
+                   feedback_json
+            FROM rubric_feedback_runs
+            WHERE feedback_run_id = ?
+              AND selected_for_evaluation_at IS NOT NULL
+              AND student_text IS NOT NULL
+            """,
+            (feedback_run_id,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        task_snapshot = json.loads(row["task_snapshot_json"])
+        feedback_payload = json.loads(row["feedback_json"])
+
+        if not isinstance(task_snapshot, dict):
+            raise TypeError("task_snapshot_json ist kein Objekt.")
+        if not isinstance(feedback_payload, dict):
+            raise TypeError("feedback_json ist kein Objekt.")
+
+        return StoredFeedbackRun(
+            feedback_run_id=row["feedback_run_id"],
+            task_id=row["task_id"],
+            rubric_id=row["rubric_id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            selected_for_evaluation_at=datetime.fromisoformat(
+                row["selected_for_evaluation_at"]
+            ),
+            provider=row["provider"],
+            model=row["model"],
+            duration_ms=row["duration_ms"],
+            queue_duration_ms=row["queue_duration_ms"],
+            execution_duration_ms=row["execution_duration_ms"],
+            provider_request_id=row["provider_request_id"],
+            student_text=row["student_text"],
+            task_snapshot=task_snapshot,
+            feedback_payload=feedback_payload,
         )
 
     @staticmethod

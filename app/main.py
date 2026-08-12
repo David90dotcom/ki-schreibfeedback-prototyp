@@ -185,6 +185,18 @@ def _format_duration_ms(value: float | int | None) -> str:
     return f"{minutes} min {formatted_seconds} s"
 
 
+def _format_datetime_utc(value: datetime | None) -> str:
+    if value is None:
+        return "Nicht verfügbar"
+
+    normalized = (
+        value.replace(tzinfo=timezone.utc)
+        if value.tzinfo is None
+        else value.astimezone(timezone.utc)
+    )
+    return normalized.strftime("%d.%m.%Y, %H:%M UTC")
+
+
 def _runtime_session_secret() -> str:
     """Verlangt außerhalb der lokalen Entwicklung ein festes Secret."""
     if settings.session_secret:
@@ -235,6 +247,7 @@ templates.env.filters[
     "feedback_inline_markdown"
 ] = render_feedback_inline_markdown
 templates.env.filters["duration_ms"] = _format_duration_ms
+templates.env.filters["datetime_utc"] = _format_datetime_utc
 templates.env.globals[
     "static_asset_version"
 ] = STATIC_ASSET_VERSION
@@ -457,6 +470,7 @@ def _template_context(
     task_options: list[FeedbackTask] | None = None,
     selected_task_id: str = "",
     result: FeedbackResult | RubricFeedbackResult | None = None,
+    feedback_run_id: str | None = None,
     runpod_warm_window: dict[str, object] | None = None,
     storage_warning: str | None = None,
     error: str | None = None,
@@ -512,6 +526,7 @@ def _template_context(
         "task_options": task_options or [],
         "selected_task_id": selected_task_id,
         "result": result,
+        "feedback_run_id": feedback_run_id,
         "error": error,
         "storage_warning": storage_warning,
         "custom_model_value": CUSTOM_MODEL_VALUE,
@@ -582,6 +597,17 @@ TASK_NOTICE_MESSAGES = {
     "archived": (
         "Die bereits verwendete Feedback-Vorlage wurde archiviert. "
         "Vorhandene Analyseergebnisse bleiben erhalten."
+    ),
+}
+
+FEEDBACK_EVALUATION_NOTICES = {
+    "saved": (
+        "Der Feedbacklauf wurde für die spätere Bewertung gespeichert.",
+        "success",
+    ),
+    "save-failed": (
+        "Der Feedbacklauf konnte nicht für die Bewertung gespeichert werden.",
+        "error",
     ),
 }
 
@@ -1158,6 +1184,81 @@ async def logout(
     end_authenticated_session(request.session)
 
     return _redirect_to_login()
+
+
+@app.get("/feedback-evaluations", response_class=HTMLResponse)
+async def feedback_evaluations_page(
+    request: Request,
+    notice: str = Query(default="", max_length=32),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    error: str | None = None
+
+    try:
+        feedback_runs = (
+            await task_store.list_feedback_runs_for_evaluation()
+        )
+    except TaskStoreError:
+        feedback_runs = []
+        error = (
+            "Die gespeicherten Feedbackläufe konnten momentan nicht "
+            "geladen werden."
+        )
+
+    notice_message, notice_tone = FEEDBACK_EVALUATION_NOTICES.get(
+        notice,
+        (None, None),
+    )
+
+    return templates.TemplateResponse(
+        name="feedback_evaluations.html",
+        request=request,
+        context={
+            "app_name": settings.app_name,
+            "authenticated_user": authenticated_user,
+            "csrf_token": get_or_create_csrf_token(
+                request.session
+            ),
+            "feedback_runs": feedback_runs,
+            "notice_message": notice_message,
+            "notice_tone": notice_tone,
+            "error": error,
+        },
+    )
+
+
+@app.post("/feedback-runs/{feedback_run_id}/save")
+async def save_feedback_run_for_evaluation(
+    request: Request,
+    feedback_run_id: UUID,
+    student_text: str = Form(
+        ...,
+        max_length=settings.max_input_chars,
+    ),
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        await task_store.select_feedback_run_for_evaluation(
+            feedback_run_id=str(feedback_run_id),
+            student_text=student_text,
+        )
+        notice = "saved"
+    except TaskStoreError:
+        notice = "save-failed"
+
+    return RedirectResponse(
+        url=f"/feedback-evaluations?notice={notice}",
+        status_code=303,
+    )
 
 
 @app.get("/tasks", response_class=HTMLResponse)
@@ -1996,6 +2097,7 @@ async def analyze(
     _require_valid_csrf_token(request, csrf_token)
 
     result: FeedbackResult | RubricFeedbackResult | None = None
+    feedback_run_id: str | None = None
     error: str | None = None
     storage_warning: str | None = None
     runpod_warm_window: dict[str, object] | None = None
@@ -2051,7 +2153,7 @@ async def analyze(
             )
 
             try:
-                await task_store.save_feedback_run(
+                feedback_run_id = await task_store.save_feedback_run(
                     task=selected_task,
                     student_text=student_text,
                     provider=result.provider,
@@ -2131,6 +2233,7 @@ async def analyze(
             mistral_override_used=mistral_override_used,
             selected_runpod_endpoint=runpod_endpoint,
             result=result,
+            feedback_run_id=feedback_run_id,
             runpod_warm_window=runpod_warm_window,
             storage_warning=storage_warning,
             error=error,

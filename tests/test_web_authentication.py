@@ -108,6 +108,24 @@ class WebAuthenticationTests(unittest.TestCase):
         self.assertEqual(response.status_code, 303)
         self.assertEqual(response.headers["location"], "/login")
 
+    def test_feedback_evaluation_routes_redirect_to_login(self) -> None:
+        overview_response = self.client.get(
+            "/feedback-evaluations",
+            follow_redirects=False,
+        )
+        save_response = self.client.post(
+            "/feedback-runs/00000000-0000-0000-0000-000000000001/save",
+            data={
+                "student_text": "Anonymisierter Text",
+                "csrf_token": "nicht-relevant-ohne-anmeldung",
+            },
+            follow_redirects=False,
+        )
+
+        for response in (overview_response, save_response):
+            self.assertEqual(response.status_code, 303)
+            self.assertEqual(response.headers["location"], "/login")
+
     def test_api_rejects_unauthenticated_request(self) -> None:
         for path in (
             "/api/ollama/models",

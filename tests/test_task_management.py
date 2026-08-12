@@ -96,7 +96,11 @@ class TaskManagementTests(unittest.TestCase):
         anonymous_client = TestClient(main.app)
 
         try:
-            for path in ("/tasks", "/tasks/new"):
+            for path in (
+                "/tasks",
+                "/tasks/new",
+                "/feedback-evaluations",
+            ):
                 with self.subTest(path=path):
                     response = anonymous_client.get(
                         path,
@@ -359,6 +363,90 @@ class TaskManagementTests(unittest.TestCase):
             ),
             1,
         )
+        self.assertIn("Optional · Meta-Ebene", response.text)
+        self.assertIn(
+            "Für Feedback-Bewertung speichern",
+            response.text,
+        )
+        self.assertIn(
+            "Es wird noch keine Bewertung gestartet",
+            response.text,
+        )
+        self.assertEqual(
+            asyncio.run(
+                self.store.list_feedback_runs_for_evaluation()
+            ),
+            [],
+        )
+
+        run_match = re.search(
+            r'action="/feedback-runs/([^/]+)/save"',
+            response.text,
+        )
+        self.assertIsNotNone(run_match)
+        feedback_run_id = (
+            run_match.group(1) if run_match is not None else ""
+        )
+        save_response = self.client.post(
+            f"/feedback-runs/{feedback_run_id}/save",
+            data={
+                "csrf_token": self.csrf_token,
+                "student_text": "Anonymisierter Schülertext",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(save_response.status_code, 303)
+        self.assertEqual(
+            save_response.headers["location"],
+            "/feedback-evaluations?notice=saved",
+        )
+        selected_runs = asyncio.run(
+            self.store.list_feedback_runs_for_evaluation()
+        )
+        self.assertEqual(len(selected_runs), 1)
+        self.assertEqual(
+            selected_runs[0].feedback_run_id,
+            feedback_run_id,
+        )
+
+        overview = self.client.get(
+            "/feedback-evaluations?notice=saved"
+        )
+        self.assertEqual(overview.status_code, 200)
+        self.assertIn("Feedback-Bewertung", overview.text)
+        self.assertIn("Optional · Meta-Ebene", overview.text)
+        self.assertIn(task.title, overview.text)
+        self.assertIn(main.settings.openai_model, overview.text)
+        self.assertIn("350 ms", overview.text)
+        self.assertIn("Noch nicht bewertet", overview.text)
+        self.assertIn(
+            '<details class="meta-feedback-details">',
+            overview.text,
+        )
+        self.assertIn("Feedbackdetails anzeigen", overview.text)
+        self.assertIn("Einzelfeedbacks", overview.text)
+        self.assertIn("Einleitung: Grundangaben", overview.text)
+        self.assertIn(
+            "Konkretes <strong>Feedback</strong>.",
+            overview.text,
+        )
+        self.assertIn(
+            "Konkreter <em>nächster Schritt</em>.",
+            overview.text,
+        )
+        self.assertIn(
+            "Kurze <strong>Zusammenfassung</strong>.",
+            overview.text,
+        )
+        self.assertIn(
+            "Der Feedbacklauf wurde für die spätere Bewertung gespeichert.",
+            overview.text,
+        )
+        self.assertNotIn(
+            "Anonymisierter Schülertext",
+            overview.text,
+        )
 
     def test_empty_task_selection_keeps_previous_analysis_path(self) -> None:
         old_result = FeedbackResult(
@@ -398,6 +486,42 @@ class TaskManagementTests(unittest.TestCase):
         rubric_analysis.assert_not_awaited()
         self.assertIn("Bisheriges Gesamtfeedback", response.text)
         self.assertNotIn("Kriterium 1", response.text)
+        self.assertNotIn(
+            "Für Feedback-Bewertung speichern",
+            response.text,
+        )
+
+    def test_feedback_run_selection_requires_valid_csrf_token(self) -> None:
+        task = self._create_task()
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text="Anonymisierter Schülertext",
+                provider="openai",
+                model="test-model",
+                duration_ms=100,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Testfeedback",
+                },
+            )
+        )
+
+        response = self.client.post(
+            f"/feedback-runs/{feedback_run_id}/save",
+            data={
+                "csrf_token": "ungueltig",
+                "student_text": "Anonymisierter Schülertext",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            asyncio.run(
+                self.store.list_feedback_runs_for_evaluation()
+            ),
+            [],
+        )
 
     def test_writing_task_requires_valid_csrf_token(self) -> None:
         response = self.client.post(
