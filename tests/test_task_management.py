@@ -5,12 +5,18 @@ import re
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from httpx import Response
 
 from app import main
+from app.domain.feedback_evaluation import MANUAL_META_EVALUATION_RUBRIC
+from app.services.automatic_feedback_evaluation_service import (
+    AUTOMATIC_EVALUATION_PROMPT_VERSION,
+    AutomaticFeedbackEvaluationResult,
+)
 from app.services.feedback_service import FeedbackResult
 from app.services.rubric_feedback_service import (
     CriterionFeedbackResult,
@@ -274,6 +280,15 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn("Aufgabenstellung", start_page.text)
         self.assertIn(task.instructions, start_page.text)
         self.assertIn(task.material, start_page.text)
+        self.assertIn(
+            "Originaltext für diesen Lauf (optional)",
+            start_page.text,
+        )
+        self.assertIn('name="original_text"', start_page.text)
+
+        run_specific_original_text = (
+            "Vollständiger Originaltext nur für diesen Analyselauf."
+        )
 
         result = RubricFeedbackResult(
             provider="openai",
@@ -287,12 +302,12 @@ class TaskManagementTests(unittest.TestCase):
                     criterion_title=criterion.title,
                     criterion_text=criterion.text,
                     status=(
-                        "partially_met"
+                        "mostly_met"
                         if criterion.position == 0
                         else "not_met"
                     ),
                     status_label=(
-                        "Teilweise erfüllt"
+                        "Überwiegend erfüllt"
                         if criterion.position == 0
                         else "Nicht erfüllt"
                     ),
@@ -303,6 +318,7 @@ class TaskManagementTests(unittest.TestCase):
             ),
             overall_feedback="Kurze **Zusammenfassung**.",
             duration_ms=350,
+            reasoning_effort="max",
         )
 
         with (
@@ -322,6 +338,7 @@ class TaskManagementTests(unittest.TestCase):
                 data={
                     "csrf_token": self.csrf_token,
                     "task_id": task.task_id,
+                    "original_text": run_specific_original_text,
                     "student_text": "Anonymisierter Schülertext",
                     "provider": "openai",
                     "openai_model": main.settings.openai_model,
@@ -333,8 +350,26 @@ class TaskManagementTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         rubric_analysis.assert_awaited_once()
         old_analysis.assert_not_awaited()
+        analyzed_task = rubric_analysis.await_args.kwargs["task"]
+        analyzed_original_text = (
+            rubric_analysis.await_args.kwargs["original_text"]
+        )
+        self.assertEqual(
+            analyzed_task.material,
+            task.material,
+        )
+        self.assertEqual(
+            analyzed_original_text,
+            run_specific_original_text,
+        )
+        unchanged_task = asyncio.run(
+            self.store.get_task(task.task_id)
+        )
+        self.assertIsNotNone(unchanged_task)
+        self.assertEqual(unchanged_task.material, task.material)
         self.assertIn("Einleitung: Grundangaben", response.text)
-        self.assertIn("Teilweise erfüllt", response.text)
+        self.assertIn("Überwiegend erfüllt", response.text)
+        self.assertIn("criterion-status-mostly_met", response.text)
         self.assertIn("<h4>Feedback</h4>", response.text)
         self.assertIn("<h4>Überarbeitung</h4>", response.text)
         self.assertNotIn("Nächster Schritt", response.text)
@@ -409,6 +444,18 @@ class TaskManagementTests(unittest.TestCase):
             selected_runs[0].feedback_run_id,
             feedback_run_id,
         )
+        self.assertEqual(
+            selected_runs[0].task_snapshot["material"],
+            task.material,
+        )
+        self.assertEqual(
+            selected_runs[0].original_text,
+            run_specific_original_text,
+        )
+        self.assertEqual(
+            selected_runs[0].feedback_payload["criteria"][0]["status"],
+            "mostly_met",
+        )
 
         overview = self.client.get(
             "/feedback-evaluations?notice=saved"
@@ -419,6 +466,8 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn(task.title, overview.text)
         self.assertIn(main.settings.openai_model, overview.text)
         self.assertIn("350 ms", overview.text)
+        self.assertIn("Denktiefe", overview.text)
+        self.assertIn("max", overview.text)
         self.assertIn("Noch nicht bewertet", overview.text)
         self.assertIn(
             '<details class="meta-feedback-details">',
@@ -447,6 +496,11 @@ class TaskManagementTests(unittest.TestCase):
             "Anonymisierter Schülertext",
             overview.text,
         )
+        self.assertIn(
+            "Originaltext dieses Feedbacklaufs",
+            overview.text,
+        )
+        self.assertIn(run_specific_original_text, overview.text)
         self.assertIn("Bewertungsgrundlage anzeigen", overview.text)
         self.assertIn("Manuell bewerten", overview.text)
         self.assertIn("Fachliche Korrektheit", overview.text)
@@ -492,6 +546,7 @@ class TaskManagementTests(unittest.TestCase):
             manual_response.headers["location"],
             (
                 "/feedback-evaluations?notice=evaluation-saved"
+                f"&feedback_run_notice_id={feedback_run_id}"
                 f"#feedback-run-{feedback_run_id}"
             ),
         )
@@ -500,13 +555,31 @@ class TaskManagementTests(unittest.TestCase):
         )
         self.assertEqual(evaluated_runs[0].manual_evaluation_count, 1)
         self.assertEqual(len(evaluated_runs[0].evaluations), 1)
+        evaluation_id = evaluated_runs[0].evaluations[0].evaluation_id
 
         evaluated_overview = self.client.get(
             "/feedback-evaluations?notice=evaluation-saved"
         )
         self.assertEqual(evaluated_overview.status_code, 200)
-        self.assertIn("1 manuelle Bewertung", evaluated_overview.text)
-        self.assertIn("Gespeicherte Bewertungen", evaluated_overview.text)
+        self.assertRegex(
+            evaluated_overview.text,
+            r"1\s+Bewertung",
+        )
+        self.assertIn(
+            "Gespeicherte Meta-Bewertungen",
+            evaluated_overview.text,
+        )
+        self.assertIn("Ø 2,5 / 3", evaluated_overview.text)
+        self.assertIn("aus 1 Meta-Bewertung", evaluated_overview.text)
+        self.assertRegex(
+            evaluated_overview.text,
+            r'<details\s+class="meta-evaluation-history"\s+'
+            r'aria-label="Gespeicherte Bewertungen"\s*>',
+        )
+        self.assertRegex(
+            evaluated_overview.text,
+            r'<details\s+class="meta-evaluation-record"\s*>',
+        )
         self.assertIn("Manuelle Bewertung", evaluated_overview.text)
         self.assertIn("3/3", evaluated_overview.text)
         self.assertIn("erfüllt", evaluated_overview.text)
@@ -522,6 +595,40 @@ class TaskManagementTests(unittest.TestCase):
             "Weitere manuelle Bewertung anlegen",
             evaluated_overview.text,
         )
+        self.assertIn("PDF exportieren", evaluated_overview.text)
+        self.assertIn(
+            (
+                f'href="/feedback-runs/{feedback_run_id}/evaluations/'
+                f'{evaluation_id}/pdf"'
+            ),
+            evaluated_overview.text,
+        )
+
+        pdf_response = self.client.get(
+            f"/feedback-runs/{feedback_run_id}/evaluations/"
+            f"{evaluation_id}/pdf"
+        )
+        self.assertEqual(pdf_response.status_code, 200)
+        self.assertEqual(
+            pdf_response.headers["content-type"],
+            "application/pdf",
+        )
+        self.assertRegex(
+            pdf_response.headers["content-disposition"],
+            r'^attachment; filename="meta-bewertung-[^"]+\.pdf"$',
+        )
+        self.assertEqual(pdf_response.headers["cache-control"], "no-store")
+        self.assertEqual(
+            pdf_response.headers["x-content-type-options"],
+            "nosniff",
+        )
+        self.assertTrue(pdf_response.content.startswith(b"%PDF-"))
+
+        missing_pdf_response = self.client.get(
+            f"/feedback-runs/{feedback_run_id}/evaluations/"
+            "00000000-0000-0000-0000-000000000001/pdf"
+        )
+        self.assertEqual(missing_pdf_response.status_code, 404)
 
     def test_empty_task_selection_keeps_previous_analysis_path(self) -> None:
         old_result = FeedbackResult(
@@ -566,6 +673,285 @@ class TaskManagementTests(unittest.TestCase):
             response.text,
         )
 
+    def test_automatic_prerating_can_be_manually_adjusted_and_saved(
+        self,
+    ) -> None:
+        task = self._create_task()
+        student_text = "Anonymisierter Schülertext für die Vorbewertung."
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="mistral",
+                model="feedback-model",
+                duration_ms=321,
+                feedback_payload={
+                    "criteria": [
+                        {
+                            "criterion_id": "criterion-1",
+                            "criterion_title": "Einleitung",
+                            "status": "partially_met",
+                            "feedback": "Der Titel ist vorhanden.",
+                            "next_step": "Ergänze Autor und Thema.",
+                        }
+                    ],
+                    "overall_feedback": "Ein brauchbarer Anfang.",
+                },
+            )
+        )
+        asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+        scores = {
+            "factual_correctness": 2,
+            "transparency_reasoning": 3,
+            "audience_context_fit": 2,
+            "action_learning_activation": 1,
+        }
+        justifications = {
+            key: (
+                f"Detaillierte automatische Prüfung für {key}: Das "
+                "Feedback enthält einen konkreten Befund und einen "
+                "Überarbeitungsschritt. Die Aussage wurde gegen Aufgabe, "
+                "Kriterien und Schülertext abgeglichen; eine klar "
+                "bezeichnete Verbesserung bleibt erforderlich."
+            )
+            for key in scores
+        }
+        ratings = MANUAL_META_EVALUATION_RUBRIC.build_ratings(
+            scores=scores,
+            justifications=justifications,
+        )
+        result = AutomaticFeedbackEvaluationResult(
+            provider="openai",
+            model="gpt-5.6-sol",
+            prompt_version=AUTOMATIC_EVALUATION_PROMPT_VERSION,
+            duration_ms=2345,
+            provider_request_id="resp-auto-web",
+            ratings=ratings,
+        )
+        configured_provider = SimpleNamespace(
+            configured=True,
+            provider_name="openai",
+            model_name="gpt-5.6-sol",
+        )
+
+        with (
+            patch.object(
+                main,
+                "automatic_evaluation_provider",
+                configured_provider,
+            ),
+            patch.object(
+                main.automatic_feedback_evaluation_service,
+                "evaluate",
+                new=AsyncMock(return_value=result),
+            ) as evaluate,
+        ):
+            overview = self.client.get("/feedback-evaluations")
+            self.assertIn("Automatische Vorbewertung", overview.text)
+            self.assertIn("Jetzt automatisch vorbewerten", overview.text)
+            self.assertRegex(
+                overview.text,
+                r'/static/feedback_evaluations\.js\?v=[0-9a-f]{12}',
+            )
+            self.assertIn(
+                "data-automatic-evaluation-form",
+                overview.text,
+            )
+            self.assertIn(
+                "data-automatic-evaluation-loading",
+                overview.text,
+            )
+            self.assertIn(
+                f'data-feedback-run-id="{feedback_run_id}"',
+                overview.text,
+            )
+            self.assertIn(
+                "data-automatic-evaluation-client-error",
+                overview.text,
+            )
+            self.assertIn(
+                "Name der Vorbewertung (optional)",
+                overview.text,
+            )
+            self.assertIn(
+                "an die OpenAI API übertragen",
+                overview.text,
+            )
+
+            automatic_response = self.client.post(
+                (
+                    f"/feedback-runs/{feedback_run_id}/"
+                    "automatic-evaluations"
+                ),
+                data={
+                    "csrf_token": self.csrf_token,
+                    "evaluation_name": "Sol max – Vorprüfung",
+                },
+                follow_redirects=False,
+            )
+
+            self.assertEqual(automatic_response.status_code, 303)
+            self.assertEqual(
+                automatic_response.headers["location"],
+                (
+                    "/feedback-evaluations?notice="
+                    "automatic-evaluation-saved"
+                    f"&automatic_feedback_run_id={feedback_run_id}"
+                    f"#feedback-run-{feedback_run_id}"
+                ),
+            )
+            evaluate.assert_awaited_once()
+
+            prerated_overview = self.client.get(
+                (
+                    "/feedback-evaluations?notice="
+                    "automatic-evaluation-saved"
+                    f"&automatic_feedback_run_id={feedback_run_id}"
+                )
+            )
+
+        self.assertIn("KI-Vorbewertung manuell prüfen", prerated_overview.text)
+        self.assertIn(
+            "data-open-after-automatic-evaluation",
+            prerated_overview.text,
+        )
+        self.assertIn(
+            "Vorbewertung abgeschlossen",
+            prerated_overview.text,
+        )
+        self.assertIn(
+            "meta-automatic-result-success",
+            prerated_overview.text,
+        )
+        self.assertIn("gpt-5.6-sol", prerated_overview.text)
+        self.assertIn(
+            AUTOMATIC_EVALUATION_PROMPT_VERSION,
+            prerated_overview.text,
+        )
+        self.assertIn("Sol max – Vorprüfung", prerated_overview.text)
+        self.assertIn("Bewertung löschen", prerated_overview.text)
+        self.assertIn(
+            "data-confirm-evaluation-delete",
+            prerated_overview.text,
+        )
+        self.assertIn("resp-auto-web", prerated_overview.text)
+        self.assertIn(justifications["factual_correctness"], prerated_overview.text)
+        self.assertRegex(
+            prerated_overview.text,
+            r'name="score_factual_correctness"\s+value="2"\s+checked',
+        )
+        automatic_evaluation = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        ).latest_automatic_evaluation
+        self.assertIsNotNone(automatic_evaluation)
+        automatic_evaluation_id = (
+            automatic_evaluation.evaluation_id
+            if automatic_evaluation is not None
+            else ""
+        )
+        self.assertIn(
+            f'value="{automatic_evaluation_id}"',
+            prerated_overview.text,
+        )
+
+        manual_response = self.client.post(
+            f"/feedback-runs/{feedback_run_id}/manual-evaluations",
+            data={
+                "csrf_token": self.csrf_token,
+                "source_evaluation_id": automatic_evaluation_id,
+                "evaluation_name": "Manuelle Schlussprüfung",
+                "score_factual_correctness": "3",
+                "justification_factual_correctness": (
+                    "Manuell auf drei Punkte angehoben und geprüft."
+                ),
+                "score_transparency_reasoning": "3",
+                "justification_transparency_reasoning": (
+                    justifications["transparency_reasoning"]
+                ),
+                "score_audience_context_fit": "2",
+                "justification_audience_context_fit": (
+                    justifications["audience_context_fit"]
+                ),
+                "score_action_learning_activation": "1",
+                "justification_action_learning_activation": (
+                    justifications["action_learning_activation"]
+                ),
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(manual_response.status_code, 303)
+        stored_run = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertEqual(stored_run.automatic_evaluation_count, 1)
+        self.assertEqual(stored_run.manual_evaluation_count, 1)
+        self.assertEqual(len(stored_run.evaluations), 2)
+        self.assertEqual(stored_run.evaluations[0].evaluation_type, "manual")
+        self.assertEqual(
+            stored_run.evaluations[0].evaluation_name,
+            "Manuelle Schlussprüfung",
+        )
+        self.assertEqual(stored_run.evaluations[0].ratings[0].score, 3)
+        self.assertEqual(
+            stored_run.evaluations[0].source_evaluation_id,
+            automatic_evaluation_id,
+        )
+        self.assertEqual(stored_run.evaluations[1].evaluation_type, "automatic")
+        self.assertEqual(
+            stored_run.evaluations[1].evaluation_name,
+            "Sol max – Vorprüfung",
+        )
+        self.assertEqual(stored_run.evaluations[1].ratings[0].score, 2)
+
+        linked_delete_response = self.client.post(
+            (
+                f"/feedback-runs/{feedback_run_id}/evaluations/"
+                f"{automatic_evaluation_id}/delete"
+            ),
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(linked_delete_response.status_code, 303)
+        self.assertIn(
+            "notice=evaluation-delete-linked",
+            linked_delete_response.headers["location"],
+        )
+
+        manual_evaluation_id = stored_run.evaluations[0].evaluation_id
+        manual_delete_response = self.client.post(
+            (
+                f"/feedback-runs/{feedback_run_id}/evaluations/"
+                f"{manual_evaluation_id}/delete"
+            ),
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(manual_delete_response.status_code, 303)
+        self.assertIn(
+            "notice=evaluation-deleted",
+            manual_delete_response.headers["location"],
+        )
+
+        automatic_delete_response = self.client.post(
+            (
+                f"/feedback-runs/{feedback_run_id}/evaluations/"
+                f"{automatic_evaluation_id}/delete"
+            ),
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+        self.assertEqual(automatic_delete_response.status_code, 303)
+        after_deletion = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertEqual(after_deletion.evaluations, ())
+
     def test_feedback_run_selection_requires_valid_csrf_token(self) -> None:
         task = self._create_task()
         feedback_run_id = asyncio.run(
@@ -597,6 +983,199 @@ class TaskManagementTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_feedback_run_can_be_removed_from_evaluation_overview(
+        self,
+    ) -> None:
+        task = self._create_task()
+        student_text = "Anonymisierter Schülertext zum Aufräumen."
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="openai",
+                model="test-model",
+                duration_ms=100,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Testfeedback",
+                },
+            )
+        )
+        asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+        criterion_keys = [
+            criterion.key
+            for criterion in MANUAL_META_EVALUATION_RUBRIC.criteria
+        ]
+        asyncio.run(
+            self.store.create_manual_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                scores={key: 2 for key in criterion_keys},
+                justifications={
+                    key: "Ausreichend konkrete Testbegründung."
+                    for key in criterion_keys
+                },
+            )
+        )
+
+        overview = self.client.get("/feedback-evaluations")
+        self.assertIn("Feedbackbogen entfernen", overview.text)
+        self.assertIn(
+            "data-confirm-feedback-run-remove",
+            overview.text,
+        )
+        self.assertIn(
+            (
+                f'action="/feedback-runs/{feedback_run_id}/'
+                'remove-from-evaluation"'
+            ),
+            overview.text,
+        )
+
+        response = self.client.post(
+            (
+                f"/feedback-runs/{feedback_run_id}/"
+                "remove-from-evaluation"
+            ),
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(
+            response.headers["location"],
+            (
+                "/feedback-evaluations?notice="
+                "feedback-run-removed"
+            ),
+        )
+        self.assertEqual(
+            asyncio.run(
+                self.store.list_feedback_runs_for_evaluation()
+            ),
+            [],
+        )
+        self.assertEqual(
+            asyncio.run(self.store.count_feedback_runs()),
+            1,
+        )
+
+        removed_overview = self.client.get(
+            response.headers["location"]
+        )
+        self.assertIn(
+            "Der Feedbackbogen und alle zugehörigen Bewertungen wurden",
+            removed_overview.text,
+        )
+        self.assertIn(
+            "Noch keine Feedbackläufe ausgewählt",
+            removed_overview.text,
+        )
+
+    def test_failed_automatic_prerating_stores_no_partial_record(
+        self,
+    ) -> None:
+        task = self._create_task()
+        student_text = "Anonymisierter Schülertext"
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="openai",
+                model="feedback-model",
+                duration_ms=100,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Testfeedback",
+                },
+            )
+        )
+        asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+
+        with patch.object(
+            main.automatic_feedback_evaluation_service,
+            "evaluate",
+            new=AsyncMock(
+                side_effect=RuntimeError("Simulierter Providerfehler")
+            ),
+        ):
+            response = self.client.post(
+                (
+                    f"/feedback-runs/{feedback_run_id}/"
+                    "automatic-evaluations"
+                ),
+                data={"csrf_token": self.csrf_token},
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(
+            response.headers["location"],
+            (
+                "/feedback-evaluations?notice="
+                "automatic-evaluation-failed"
+                f"&automatic_feedback_run_id={feedback_run_id}"
+                f"#feedback-run-{feedback_run_id}"
+            ),
+        )
+        failed_overview = self.client.get(
+            (
+                "/feedback-evaluations?notice="
+                "automatic-evaluation-failed"
+                f"&automatic_feedback_run_id={feedback_run_id}"
+            )
+        )
+        self.assertIn(
+            "Vorbewertung fehlgeschlagen",
+            failed_overview.text,
+        )
+        self.assertIn(
+            "meta-automatic-result-error",
+            failed_overview.text,
+        )
+        stored_run = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertEqual(stored_run.evaluations, ())
+
+    def test_automatic_evaluation_script_keeps_request_visible(
+        self,
+    ) -> None:
+        script = (
+            Path(__file__).parents[1]
+            / "app"
+            / "static"
+            / "feedback_evaluations.js"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("Vorbewertung läuft …", script)
+        self.assertIn("updateElapsed", script)
+        self.assertIn("setInterval", script)
+        self.assertIn("SLOW_EVALUATION_DELAY_MS", script)
+        self.assertIn("await fetch(form.action", script)
+        self.assertIn('"X-Requested-With": "XMLHttpRequest"', script)
+        self.assertIn(
+            "HTMLFormElement.prototype.submit.call(form)",
+            script,
+        )
+        self.assertIn(
+            "data-open-after-automatic-evaluation",
+            script,
+        )
+        self.assertIn("data-confirm-evaluation-delete", script)
+        self.assertIn("data-confirm-feedback-run-remove", script)
+        self.assertIn("Der gespeicherte Schülertext wird entfernt", script)
+        self.assertIn("window.confirm", script)
 
     def test_manual_evaluation_requires_valid_csrf_token(self) -> None:
         task = self._create_task()
@@ -637,10 +1216,90 @@ class TaskManagementTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 403)
+        with patch.object(
+            main.automatic_feedback_evaluation_service,
+            "evaluate",
+            new=AsyncMock(),
+        ) as automatic_evaluate:
+            automatic_response = self.client.post(
+                (
+                    f"/feedback-runs/{feedback_run_id}/"
+                    "automatic-evaluations"
+                ),
+                data={"csrf_token": "ungueltig"},
+            )
+
+        self.assertEqual(automatic_response.status_code, 403)
+        automatic_evaluate.assert_not_awaited()
         selected_run = asyncio.run(
             self.store.list_feedback_runs_for_evaluation()
         )[0]
         self.assertEqual(selected_run.evaluations, ())
+
+    def test_evaluation_deletion_requires_valid_csrf_token(self) -> None:
+        task = self._create_task()
+        student_text = "Anonymisierter Schülertext"
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="openai",
+                model="test-model",
+                duration_ms=100,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Testfeedback",
+                },
+            )
+        )
+        asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+        criterion_keys = [
+            criterion.key
+            for criterion in MANUAL_META_EVALUATION_RUBRIC.criteria
+        ]
+        evaluation = asyncio.run(
+            self.store.create_manual_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                scores={key: 2 for key in criterion_keys},
+                justifications={
+                    key: "Ausreichend konkrete Testbegründung."
+                    for key in criterion_keys
+                },
+            )
+        )
+
+        response = self.client.post(
+            (
+                f"/feedback-runs/{feedback_run_id}/evaluations/"
+                f"{evaluation.evaluation_id}/delete"
+            ),
+            data={"csrf_token": "ungueltig"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        stored = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertEqual(len(stored.evaluations), 1)
+
+        remove_response = self.client.post(
+            (
+                f"/feedback-runs/{feedback_run_id}/"
+                "remove-from-evaluation"
+            ),
+            data={"csrf_token": "ungueltig"},
+        )
+
+        self.assertEqual(remove_response.status_code, 403)
+        still_selected = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertEqual(len(still_selected.evaluations), 1)
 
     def test_writing_task_requires_valid_csrf_token(self) -> None:
         response = self.client.post(

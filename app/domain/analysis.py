@@ -6,20 +6,12 @@ from uuid import UUID, uuid4
 
 from pydantic import Field, model_validator
 
+from app.domain.criterion_status import CriterionStatus
 from app.domain.metrics import AnalysisRunRecord
 from app.domain.model_catalog import (
     DomainModel,
     ModelParameters,
 )
-
-
-class CriterionStatus(str, Enum):
-    """Mögliche Erfüllungsstände eines Feedbackkriteriums."""
-
-    MET = "met"
-    PARTIALLY_MET = "partially_met"
-    NOT_MET = "not_met"
-    NOT_ASSESSABLE = "not_assessable"
 
 
 class EvidenceType(str, Enum):

@@ -38,6 +38,7 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
             provider = OpenAIProvider(
                 api_key="test-openai-key",
                 model_name="gpt-5.6-luna",
+                reasoning_effort="max",
             )
             response = await provider.generate(
                 "JSON-Testprompt",
@@ -46,6 +47,7 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
             )
 
         request = completion.await_args.kwargs
+        self.assertEqual(request["reasoning_effort"], "max")
         self.assertEqual(
             request["response_format"],
             {
@@ -61,6 +63,18 @@ class OpenAIProviderTests(unittest.IsolatedAsyncioTestCase):
             response.raw_metadata["finish_reason"],
             "stop",
         )
+        self.assertEqual(
+            response.raw_metadata["reasoning_effort"],
+            "max",
+        )
+
+    async def test_invalid_reasoning_effort_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "Denktiefe"):
+            OpenAIProvider(
+                api_key="test-openai-key",
+                model_name="gpt-5.6-sol",
+                reasoning_effort="unbegrenzt",
+            )
 
     async def test_generate_rejects_missing_api_key(self) -> None:
         provider = OpenAIProvider(

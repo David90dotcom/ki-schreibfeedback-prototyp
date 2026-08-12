@@ -1,6 +1,6 @@
-# KI-Schreibfeedback-Prototyp 0.9b (Entwicklung)
+# KI-Schreibfeedback-Prototyp 0.9c (Entwicklung)
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.9b ergänzt den abgeschlossenen Stand 0.9a um einen versionierten manuellen Meta-Bewertungsbogen mit vier Qualitätskriterien und getrennt gespeicherten Mehrfachbewertungen. Die bisherigen Provider-, Aufgaben- und Analysefunktionen bleiben unverändert verfügbar.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.9c ergänzt den abgeschlossenen Stand 0.9b um eine ausdrücklich ausgelöste automatische Cloud-Vorbewertung mit einem getrennten starken OpenAI-Modell. Die unveränderte KI-Bewertung bleibt erhalten und kann anschließend als vorausgefüllte, getrennt gespeicherte manuelle Bewertung geprüft und angepasst werden. Die bisherigen Provider-, Aufgaben- und Analysefunktionen bleiben unverändert verfügbar.
 
 > **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
 
@@ -15,7 +15,8 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der 
 | **0.7** | abgeschlossen | Additive Mistral-API-Anbindung mit Ministral 14B, Small, Medium, Large und freier Modell-ID auf Basis des unveränderten Tags `v0.6.0` |
 | **0.8** | abgeschlossen | Aufgaben mit jeweils einer Feedback-Vorlage, geordnete Einzelkriterien, SQLite-Verwaltung, portabler Austausch und strukturiertes Feedback pro Kriterium |
 | **0.9a** | abgeschlossen | Bewusste Auswahl von Feedbackläufen, Speicherung des anonymisierten Texts und getrennte Übersicht auf der Meta-Ebene |
-| **0.9b** | in Entwicklung | Manuelle Qualitätsbewertung mit vier Kriterien, Begründungen, versioniertem Bogen und eigenständiger Bewertungshistorie |
+| **0.9b** | abgeschlossen | Manuelle Qualitätsbewertung mit vier Kriterien, Begründungen, versioniertem Bogen und eigenständiger Bewertungshistorie |
+| **0.9c** | in Entwicklung | Optionale automatische Cloud-Vorbewertung mit festem Referenzmodell, detaillierter Evidenzprüfung und anschließender manueller Korrektur als eigener Datensatz |
 
 Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Version 0.6.0 ist der neue stabile Standard; Modell-Payload und vLLM-Startkonfiguration bleiben gegenüber 0.5.0 unverändert.
 
@@ -31,7 +32,8 @@ flowchart TD
     D --> G["Ollama (nur lokal)"]
     D --> H["Mistral API (optional)"]
     C --> I["SQLite: Aufgaben, Feedback-Vorlagen und Feedbackläufe"]
-    I --> J["Optionale Meta-Ebene: Feedbackläufe und manuelle Bewertungen"]
+    I --> J["Optionale Meta-Ebene: manuelle und automatische Bewertungen"]
+    J --> K["OpenAI: getrenntes Bewertungsmodell (optional)"]
 ```
 
 Startseite und Analysefunktion sind nur nach erfolgreicher Anmeldung erreichbar. Zugangsdaten werden serverseitig gegen einen Argon2-Passworthash geprüft. RunPod-API-Key, Endpoint-ID und weitere Secrets werden ausschließlich serverseitig aus der `.env` gelesen und nicht an den Browser übertragen.
@@ -50,22 +52,34 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 - Erstellen, Bearbeiten, Duplizieren und Löschen von Aufgaben mit jeweils einer Feedback-Vorlage
 - bis zu 100 geordnete Feedback-Kriterien pro Vorlage
 - Auswahl einer gespeicherten Feedback-Vorlage im bestehenden Analyseformular
+- optionaler Originaltext je Analyselauf, unabhängig vom dauerhaft in der Aufgabe gespeicherten Material
 - genau eine Modellanfrage für alle Kriterien einer Feedback-Vorlage
 - getrenntes Feedback und konkreter Überarbeitungsschritt zu jedem Kriterium
-- vier validierte Erfüllungsstände: erfüllt, teilweise erfüllt, nicht erfüllt und nicht beurteilbar
+- vier validierte Erfüllungsstufen: erfüllt, überwiegend erfüllt, teilweise erfüllt und nicht erfüllt; zusätzlich der Sonderstatus nicht beurteilbar
 - unverändertes bisheriges Gesamtfeedback über die Auswahl „Ohne Feedback-Vorlage“
 - echtes Löschen unbenutzter und sicheres Archivieren bereits verwendeter Feedback-Vorlagen
 - JSON-Einzelexport und rundreisefestes ZIP-Gesamtpaket mit versioniertem Austauschformat
 - persistente Snapshots der verwendeten Feedback-Vorlage und des erzeugten Kriterienfeedbacks
 - ausdrücklich auswählbare Feedbackläufe für eine spätere Meta-Bewertung
 - getrennte dritte Registerkarte „Feedback-Bewertung“ mit Modell, Aufgabe und Feedbackdauer
+- vollständiges Entfernen eines Feedbackbogens aus der Bewertungsansicht einschließlich seiner Meta-Bewertungen und des gespeicherten Schülertexts
 - aufklappbare Detailansicht mit Zusammenfassung und allen Einzelfeedbacks
 - Speicherung des anonymisierten Schülertexts erst nach dem bewussten Auswahlklick
 - getrennt aufklappbare Bewertungsgrundlage mit Aufgabe, Material, Schülertext und Feedback-Kriterien
 - versionierter manueller Meta-Bewertungsbogen mit vier Qualitätskriterien
 - vier Bewertungsstufen von 0 bis 3 und verpflichtende Begründung je Qualitätskriterium
-- getrennte, unveränderlich erhaltene Mehrfachbewertungen ohne künstliche Gesamtnote
+- getrennte Mehrfachbewertungen ohne gespeicherte Gesamtnote; ein farbcodierter arithmetischer Mittelwert von 0 bis 3 dient als kompakte Orientierung
+- zweistufig aufklappbare Bewertungshistorie mit Kurzansicht für jede einzelne Meta-Bewertung
+- lokaler PDF-Einzelexport jeder Meta-Bewertung mit Kriterienwerten, Begründungen und Laufmetadaten
+- jede Bewertung kann optional benannt und nach ausdrücklicher Bestätigung einzeln gelöscht werden
 - persistente Snapshots von Version, Prüffragen und Skalenbezeichnungen jeder Bewertung
+- ausdrücklich ausgelöste automatische Cloud-Vorbewertung über die OpenAI Responses API
+- festes starkes Referenzmodell `gpt-5.6-sol` mit `pro`-Modus und hohem Reasoning-Aufwand
+- detaillierte, gegen Aufgabe, Aufgabenmaterial, laufbezogenen Originaltext, Kriterien und Schülertext abgeglichene Evidenzprüfung
+- striktes strukturiertes Ausgabeformat mit genau einer Bewertung und Begründung pro Qualitätskriterium
+- unveränderliche Speicherung der KI-Vorbewertung einschließlich Modell, Prompt-Version, Dauer und Request-ID
+- vorausgefülltes manuelles Formular zum Prüfen und Anpassen der KI-Werte ohne Überschreiben des Originals; die manuelle Prüfung bleibt mit ihrer KI-Ausgangsbewertung verknüpft
+- vordefinierte OpenAI-Auswahl von GPT-5.6 Luna über Terra bis Sol sowie getrennte Denktiefen von `none` bis `max`
 - Auswahl zwischen lokalem Ollama, OpenAI, Mistral und RunPod Serverless im Entwicklungsmodus
 - Deaktivierung lokaler Ollama-Aufrufe im Produktionsmodus
 - konfigurierbare Standardmodelle für alle vier Provider
@@ -136,6 +150,7 @@ LOGIN_RATE_LIMIT_ATTEMPTS=5
 LOGIN_RATE_LIMIT_WINDOW_SECONDS=300
 
 OPENAI_API_KEY=
+OPENAI_EVALUATION_MODEL=gpt-5.6-sol
 MISTRAL_API_KEY=
 RUNPOD_API_KEY=
 RUNPOD_ENDPOINT_ID=
@@ -159,15 +174,27 @@ Danach kann die Anwendung im Browser geöffnet werden:
 
 Unter „Feedback“ wird eine Aufgabe gemeinsam mit genau einer Feedback-Vorlage angelegt. Die Vorlage besteht aus mehreren einzeln sortierbaren Feedback-Kriterien. Im Analyseformular kann anschließend die gespeicherte Aufgabe ausgewählt werden. Aufgabe, Material, Kriterien und Schülertext werden gemeinsam in genau einer Anfrage an den gewählten Provider übermittelt.
 
+Für allgemeine JSON-Aufgaben erscheint nach der Auswahl in der Textanalyse zusätzlich das aufklappbare Feld „Originaltext für diesen Lauf“. Dort lässt sich optional das konkrete Gedicht, die Quelle oder ein anderer Ausgangstext einfügen. Dieser Originaltext ist ein eigener Bestandteil des Feedbacklaufs und verändert weder die gespeicherte Aufgabe noch deren Material. Aufgabenmaterial und laufbezogener Originaltext werden getrennt an das Feedbackmodell übermittelt, im technischen Feedbacklauf gespeichert und später auch der automatischen Meta-Bewertung bereitgestellt. So kann dieselbe allgemeine Aufgabe nacheinander mit unterschiedlichen Ausgangstexten verwendet werden.
+
 Für Versuche sind standardmäßig bis zu 100 Einzelkriterien mit jeweils 10.000 Zeichen möglich. Beide Schutzgrenzen lassen sich in der lokalen `.env` über `MAX_CRITERIA` und `MAX_CRITERION_CHARS` anpassen. Sehr umfangreiche Vorlagen können unabhängig davon die Kontextgrenze des ausgewählten Sprachmodells überschreiten.
 
-Die strukturierte Modellantwort wird vollständig validiert: Jede gespeicherte Kriterien-ID muss genau einmal vorkommen; unbekannte, doppelte oder fehlende Kriterien werden abgelehnt. Unbenutzte Feedback-Vorlagen können vollständig gelöscht werden. Sobald eine Feedback-Vorlage erfolgreich für eine Analyse verwendet wurde, wird sie beim Löschen nur noch archiviert, damit vorhandene Ergebnisse nachvollziehbar bleiben.
+Die strukturierte Modellantwort wird vollständig validiert: Jede gespeicherte Kriterien-ID muss genau einmal vorkommen; unbekannte, doppelte oder fehlende Kriterien werden abgelehnt. Für jedes Kriterium stehen die vier echten Erfüllungsstufen „Erfüllt“, „Überwiegend erfüllt“, „Teilweise erfüllt“ und „Nicht erfüllt“ sowie getrennt davon „Nicht beurteilbar“ zur Verfügung. Dadurch lassen sich differenzierte Bewertungsvorgaben aus einer Feedback-Vorlage ohne Zusammenlegung abbilden. Unbenutzte Feedback-Vorlagen können vollständig gelöscht werden. Sobald eine Feedback-Vorlage erfolgreich für eine Analyse verwendet wurde, wird sie beim Löschen nur noch archiviert, damit vorhandene Ergebnisse nachvollziehbar bleiben.
 
 Aufgaben, Kriterien, Snapshots der Feedback-Vorlagen und Kriterienfeedback werden in der über `ANALYSIS_DATABASE_PATH` konfigurierten SQLite-Datei gespeichert. Das vorhandene Docker-Volume `/app/data` macht diese Daten auch über einen Container-Neustart oder ein Redeployment hinweg persistent.
 
 Nach einem erfolgreichen Kriterienfeedback erscheint ein optisch abgesetzter Bereich „Optional · Meta-Ebene“. Erst der dortige Klick auf „Für Feedback-Bewertung speichern“ ergänzt den anonymisierten Schülertext im vorhandenen Feedbacklauf und nimmt diesen in die dritte Registerkarte „Feedback-Bewertung“ auf. Nicht ausgewählte technische Feedbackläufe bleiben in der neuen Übersicht unsichtbar und enthalten weiterhin nur den Hash des Schülertexts.
 
-In der dritten Registerkarte lassen sich Bewertungsgrundlage, Gesamtzusammenfassung sowie alle Einzelfeedbacks und Überarbeitungshinweise getrennt aufklappen. Der manuelle Meta-Bewertungsbogen `meta-feedback-v1` erfasst „Fachliche Korrektheit“, „Transparenz und Begründung“, „Adressaten- und Kontextpassung“ sowie „Handlungsorientierung und Lernaktivierung“. Jedes Kriterium wird mit 0 bis 3 Punkten und einer verpflichtenden kurzen Begründung gespeichert. Es wird keine Gesamtnote berechnet. Jeder Speichervorgang erzeugt eine neue eigenständige Bewertung; ältere Bewertungen werden nicht überschrieben. Version, Kriterientexte, Skalenbezeichnungen und Begründungen bleiben als Snapshot erhalten. Die manuelle Bewertung löst keine Modell- oder Cloudanfrage aus. Eine automatische Meta-Bewertung wird erst in einem folgenden 0.9-Teilschritt ergänzt.
+In der dritten Registerkarte lassen sich Bewertungsgrundlage, Gesamtzusammenfassung sowie alle Einzelfeedbacks und Überarbeitungshinweise getrennt aufklappen. Auch die gesamte Historie der gespeicherten Meta-Bewertungen und jede einzelne Bewertung darin sind zunächst eingeklappt. Ihre Kurzzeilen zeigen Anzahl und Gesamtmittelwert beziehungsweise Name, Art, Datum und Einzelmittelwert, sodass auch viele lange Begründungen die Übersicht nicht überladen. Der Meta-Bewertungsbogen `meta-feedback-v1` erfasst „Fachliche Korrektheit“, „Transparenz und Begründung“, „Adressaten- und Kontextpassung“ sowie „Handlungsorientierung und Lernaktivierung“. Jedes Kriterium wird mit 0 bis 3 Punkten und einer verpflichtenden Begründung gespeichert. Eine gesonderte Gesamtnote wird nicht gespeichert; die Oberfläche berechnet lediglich den arithmetischen Mittelwert aller vorhandenen Kriterienwerte als Orientierung und färbt ihn kontinuierlich von Rot bei 0 bis Grün bei 3.
+
+Die manuelle Bewertung bleibt vollständig ohne Modell- oder Cloudanfrage möglich. Optional startet erst der Klick auf „Jetzt automatisch vorbewerten“ eine getrennte OpenAI-Anfrage. Dabei werden der anonymisierte Schülertext, Aufgabe, Aufgabenmaterial, der optionale Originaltext des Laufs, Feedback-Kriterien und das erzeugte Feedback an die OpenAI API übertragen. Interne IDs sowie Anbieter und Modell des ursprünglich erzeugten Feedbacks werden nicht mitgesendet, damit die Inhaltsbewertung möglichst blind und datensparsam bleibt. Technische Erfüllungsstatus des ursprünglichen Feedbacks werden vor der Übertragung in ihre deutschen Bezeichnungen übersetzt, damit keine internen Schlüssel in die Begründungen gelangen. Das standardmäßig feste Referenzmodell `gpt-5.6-sol` prüft mit der Prompt-Version `meta-evaluator-v2` jede Feedbackaussage gegen die Bewertungsgrundlage, sucht ausdrücklich nach falsch-positiven und falsch-negativen Befunden und bewertet alle vier Kriterien unabhängig. Die Responses-API-Anfrage verwendet den `pro`-Modus mit hohem Reasoning-Aufwand, ein striktes JSON-Schema und `store=false`. `store=false` deaktiviert die Speicherung als abrufbares Response-Objekt, ersetzt aber keine vertragliche Datenschutz- oder Aufbewahrungsprüfung für den verwendeten OpenAI-Account.
+
+Während der Cloud-Anfrage zeigt die Oberfläche eine animierte Fortschrittsleiste, die bisherige Laufzeit und abgestufte Statushinweise. Dadurch bleibt auch eine längere Prüfung im `pro`-Modus sichtbar und ein versehentlicher Doppelklick wird verhindert. Erfolg oder Fehlschlag erscheint anschließend direkt am betroffenen Feedbacklauf und nicht nur am Seitenanfang.
+
+Jede erfolgreiche Cloud-Anfrage wird lokal als neuer, nicht überschreibbarer automatischer Datensatz gespeichert. Automatische und manuelle Bewertungen können beim Anlegen optional benannt und später nach einer Sicherheitsabfrage einzeln gelöscht werden. Eine KI-Vorbewertung, auf die eine manuelle Prüfung verweist, ist vor versehentlichem Löschen geschützt; zuerst muss die verknüpfte manuelle Bewertung entfernt werden. Bewertungsmodell, Prompt-Version, Dauer und Provider-Request-ID bleiben nachvollziehbar. Die neueste KI-Vorbewertung füllt anschließend das manuelle Formular vor; nach erfolgreichem Abschluss wird diese Prüfmaske automatisch geöffnet. Änderungen werden als neue manuelle Bewertung gespeichert und mit der konkreten KI-Ausgangsbewertung verknüpft; die automatische Bewertung selbst wird dabei nicht überschrieben. Es gibt keinen automatischen Provider-Wechsel und eine fehlgeschlagene oder unvollständige Modellantwort erzeugt keinen Bewertungsdatensatz.
+
+Jede gespeicherte Meta-Bewertung lässt sich einzeln als PDF herunterladen. Der Server erzeugt den Export lokal mit ReportLab; dafür wird keine weitere Modell- oder Cloudanfrage ausgelöst. Das PDF enthält den Einzelmittelwert, alle vier Kriterienwerte und Begründungen sowie die gespeicherten Lauf- und Modellmetadaten. Schülertext und laufbezogener Originaltext werden bewusst nicht in den Export übernommen.
+
+Über „Feedbackbogen entfernen“ lässt sich außerdem eine vollständige Karte aus der Registerkarte „Feedback-Bewertung“ aufräumen. Nach einer ausdrücklichen Sicherheitsabfrage werden alle automatischen und manuellen Bewertungen dieses Laufs, der dort zusätzlich gespeicherte Klartext des Schülertexts und die Auswahlmarkierung atomar entfernt. Der technische Feedbacklauf mit Schülertext-Hash, laufbezogenem Originaltext, erzeugtem Feedback, Aufgaben-Snapshot und Laufmetadaten bleibt für die Nachvollziehbarkeit erhalten.
 
 Eine einzelne Feedback-Vorlage kann direkt an ihrer Aufgabenkarte als JSON exportiert werden. Der Gesamtexport enthält alle aktiven und archivierten Aufgaben mit ihren Feedback-Vorlagen als ZIP-Paket. Größere Bestände werden darin automatisch in JSON-Teile mit jeweils höchstens 200 Vorlagen und 5 MiB aufgeteilt. JSON-Einzelexporte und ZIP-Gesamtpakete werden über dasselbe Importformular eingelesen. Der Import prüft zuerst die vollständige Datei und legt anschließend alle Aufgaben atomar mit neuen internen IDs an; vorhandene Vorlagen werden nicht überschrieben. Archivierte Quellen werden dabei als neue aktive Kopien importiert.
 
@@ -187,9 +214,11 @@ Die Standardadresse lautet `http://localhost:11434`. Die frei änderbare Adresse
 
 ### OpenAI
 
-Das in der `.env` konfigurierte Modell ist vorausgewählt. Bekannte Modelle können direkt gewählt werden. Über „Andere Modell-ID …“ lässt sich eine zukünftige Modell-ID eintragen.
+Das in der `.env` konfigurierte Modell ist vorausgewählt. Für vergleichende Analysen stehen `gpt-5.6-luna` (günstig), `gpt-5.6-terra` (ausgewogen) und `gpt-5.6-sol` (höchste Modellleistung) direkt zur Auswahl. Davon getrennt lässt sich der Reasoning-Aufwand von `none`, `low`, `medium`, `high` und `xhigh` bis `max` einstellen. Die Kombination GPT-5.6 Sol mit `max` ist der stärkste angebotene Qualitätslauf, kann aber deutlich länger dauern und höhere Kosten erzeugen. Über „Andere Modell-ID …“ lässt sich weiterhin eine zukünftige Modell-ID eintragen; „Modellstandard“ überlässt die Denktiefe dem ausgewählten Modell.
 
 Standardmäßig wird der serverseitig konfigurierte OpenAI-Key verwendet. Für lokale Entwicklungstests kann alternativ ein Key für einen einzelnen Aufruf eingegeben werden. Dieser alternative Key wird nicht gespeichert und nach dem Absenden nicht erneut angezeigt.
+
+Die automatische Meta-Vorbewertung verwendet ausschließlich den serverseitigen `OPENAI_API_KEY`; ein im Analyseformular eingegebener temporärer Key wird dafür nicht wiederverwendet. Das getrennte Bewertungsmodell wird über `OPENAI_EVALUATION_MODEL` konfiguriert und ist standardmäßig `gpt-5.6-sol`. Für vergleichbare Versuchsreihen sollte diese Modell-ID innerhalb einer Erhebungsphase unverändert bleiben. Jeder Aufruf ist optional, wird erst durch den beschrifteten Cloud-Button gestartet und kann abhängig vom Umfang der Bewertungsgrundlage API-Kosten verursachen.
 
 ### Mistral
 
@@ -229,7 +258,7 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der aktuelle Entwicklungsstand umfasst 144 erfolgreiche Tests. Sie decken zusätzlich zur bisherigen Browser- und Providerauswahl die SQLite-Verwaltung von Aufgaben und Feedback-Vorlagen, Kriterienreihenfolge, Duplizieren, Löschen und Archivieren, strukturierte Kriterienantworten, den unveränderten bisherigen Analyseweg, die explizite Auswahl von Feedbackläufen, additive Datenbankmigrationen, versionierte manuelle Mehrfachbewertungen, Eingabevalidierung sowie Anmeldung und CSRF-Schutz der neuen Routen ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der aktuelle Entwicklungsstand umfasst 155 erfolgreiche Tests. Sie decken zusätzlich zur bisherigen Browser- und Providerauswahl die SQLite-Verwaltung von Aufgaben und Feedback-Vorlagen, Kriterienreihenfolge, Duplizieren, Löschen und Archivieren, strukturierte Kriterienantworten, den unveränderten bisherigen Analyseweg, die explizite Auswahl von Feedbackläufen, additive Datenbankmigrationen, versionierte und optional benannte Mehrfachbewertungen, das geschützte Einzellöschen, den getrennten OpenAI-Responses-Aufruf ohne API-Speicherung, die detaillierte Prompt- und Schema-Validierung, automatische Vorbewertungen, deren Verknüpfung mit manuellen Korrekturen, die GPT-5.6-Modell- und Reasoning-Auswahl, fehlerfreie Abbrüche ohne Teil-Datensatz sowie Anmeldung und CSRF-Schutz der neuen Routen ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 
@@ -246,7 +275,7 @@ Die Modellantwort wird in Version 0.6 mit einer engen, sicheren Markdown-Konfigu
 - Login, Logout und Analyseformular verwenden sitzungsgebundene CSRF-Tokens. Fehlende oder manipulierte Tokens werden mit HTTP 403 abgewiesen.
 - Standardmäßig sind nach fünf fehlgeschlagenen Anmeldungen pro erkanntem Client für fünf Minuten keine weiteren Versuche möglich. Der Zähler liegt im Arbeitsspeicher und wird bei einem Serverneustart zurückgesetzt; verteilte Angriffe werden dadurch allein nicht vollständig verhindert.
 - Für Tests dürfen ausschließlich erfundene oder vollständig anonymisierte Texte verwendet werden.
-- Der eingegebene Schülertext wird bei der normalen Kriterienanalyse nicht im Klartext in SQLite gespeichert. Gespeichert werden zunächst nur ein SHA-256-Hash zur technischen Wiedererkennung, der verwendete Aufgaben- und Feedback-Snapshot sowie das erzeugte Feedback. Erst die ausdrückliche Auswahl für die Meta-Bewertung speichert den bereits anonymisierten Text lokal; dieser Speicherschritt löst keine zusätzliche Cloudübertragung aus.
+- Der eingegebene Schülertext wird bei der normalen Kriterienanalyse nicht im Klartext in SQLite gespeichert. Gespeichert werden zunächst nur ein SHA-256-Hash zur technischen Wiedererkennung, der verwendete Aufgaben- und Feedback-Snapshot sowie das erzeugte Feedback. Erst die ausdrückliche Auswahl für die Meta-Bewertung speichert den bereits anonymisierten Text lokal; dieser Speicherschritt löst keine zusätzliche Cloudübertragung aus. Eine weitere Übertragung an OpenAI erfolgt nur nach einem separaten Klick auf den Button zur automatischen Vorbewertung und wird direkt daneben angekündigt.
 - Der RunPod-Key, die Endpoint-ID sowie die standardmäßig verwendeten OpenAI- und Mistral-Keys gehören ausschließlich in die lokale beziehungsweise serverseitige `.env`.
 - Die frei änderbare Ollama-Adresse und die optionalen OpenAI- und Mistral-Key-Felder sind nur für die lokale Entwicklung vorgesehen.
 - Das Produktionsdeployment veröffentlicht ausschließlich Caddy auf Port 80/443; der Webcontainer ist nur an `127.0.0.1:8000` gebunden.

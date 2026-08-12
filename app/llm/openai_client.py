@@ -5,6 +5,16 @@ from openai import AsyncOpenAI
 from app.llm.base import LLMResponse
 
 
+OPENAI_REASONING_EFFORTS = (
+    "none",
+    "low",
+    "medium",
+    "high",
+    "xhigh",
+    "max",
+)
+
+
 class OpenAIProvider:
     provider_name = "openai"
 
@@ -12,9 +22,28 @@ class OpenAIProvider:
         self,
         api_key: str | None,
         model_name: str,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.api_key = api_key
         self.model_name = model_name
+        normalized_reasoning_effort = (
+            reasoning_effort.strip().lower()
+            if isinstance(reasoning_effort, str)
+            else ""
+        )
+
+        if (
+            normalized_reasoning_effort
+            and normalized_reasoning_effort
+            not in OPENAI_REASONING_EFFORTS
+        ):
+            raise ValueError(
+                "Die ausgewählte OpenAI-Denktiefe ist ungültig."
+            )
+
+        self.reasoning_effort = (
+            normalized_reasoning_effort or None
+        )
 
     async def generate(
         self,
@@ -60,6 +89,9 @@ class OpenAIProvider:
                 },
             }
 
+        if self.reasoning_effort is not None:
+            request["reasoning_effort"] = self.reasoning_effort
+
         response = await client.chat.completions.create(**request)
 
         choice = response.choices[0]
@@ -71,5 +103,6 @@ class OpenAIProvider:
             text=text.strip(),
             raw_metadata={
                 "finish_reason": choice.finish_reason,
+                "reasoning_effort": self.reasoning_effort,
             },
         )

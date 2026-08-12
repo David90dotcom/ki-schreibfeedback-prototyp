@@ -15,7 +15,9 @@ from app.domain.rubric import FeedbackTaskDraft
 from app.services.analysis_run_store import AnalysisRunStore
 from app.services.runpod_job_store import RunPodJobStore
 from app.services.task_store import (
+    FeedbackEvaluationDeleteConflictError,
     FeedbackEvaluationValidationError,
+    FeedbackRunNotFoundError,
     FeedbackRunSelectionError,
     TaskStore,
     TaskStoreError,
@@ -52,15 +54,21 @@ class TaskStoreTests(unittest.TestCase):
             )
         )
 
-    def _create_selected_feedback_run(self) -> str:
+    def _create_selected_feedback_run(
+        self,
+        *,
+        original_text: str = "",
+    ) -> str:
         task = self._create_task()
         student_text = "Anonymisierter Text für die Qualitätsbewertung."
         feedback_run_id = asyncio.run(
             self.store.save_feedback_run(
                 task=task,
                 student_text=student_text,
+                original_text=original_text,
                 provider="openai",
                 model="erzeuger-modell",
+                reasoning_effort="max",
                 duration_ms=640,
                 feedback_payload={
                     "criteria": [
@@ -325,10 +333,15 @@ class TaskStoreTests(unittest.TestCase):
             "Anonymisierter Schülertext für die Meta-Ebene.\r\n"
             "Zweite Zeile mit \"Zitat\"."
         )
+        original_text = (
+            "Ein Originaltext, der unabhängig von der Aufgabe nur zu "
+            "diesem Lauf gehört."
+        )
         feedback_run_id = asyncio.run(
             self.store.save_feedback_run(
                 task=task,
                 student_text=student_text,
+                original_text=original_text,
                 provider="openai",
                 model="gpt-test",
                 duration_ms=842,
@@ -379,6 +392,11 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(selected.provider, "openai")
         self.assertEqual(selected.model, "gpt-test")
         self.assertEqual(selected.duration_ms, 842)
+        self.assertEqual(selected.original_text, original_text)
+        self.assertEqual(
+            selected.task_snapshot["material"],
+            task.material,
+        )
         self.assertEqual(
             selected_again.selected_for_evaluation_at,
             selected.selected_for_evaluation_at,
@@ -416,6 +434,7 @@ class TaskStoreTests(unittest.TestCase):
                 feedback_run_id=feedback_run_id,
                 scores=second_scores,
                 justifications=second_justifications,
+                evaluation_name="  Zweite Prüfung  ",
             )
         )
         selected_run = asyncio.run(
@@ -442,7 +461,13 @@ class TaskStoreTests(unittest.TestCase):
         self.assertIsNone(first.evaluator_provider)
         self.assertIsNone(first.evaluator_model)
         self.assertIsNone(first.duration_ms)
+        self.assertIsNone(first.evaluation_name)
+        self.assertEqual(second.evaluation_name, "Zweite Prüfung")
+        self.assertEqual(first.average_score, 2.0)
+        self.assertEqual(second.average_score, 2.5)
         self.assertEqual(selected_run.manual_evaluation_count, 2)
+        self.assertEqual(selected_run.aggregate_score, 2.25)
+        self.assertEqual(selected_run.reasoning_effort, "max")
         self.assertEqual(
             {item.evaluation_id for item in selected_run.evaluations},
             {first.evaluation_id, second.evaluation_id},
@@ -494,6 +519,225 @@ class TaskStoreTests(unittest.TestCase):
         )[0]
         self.assertEqual(selected_run.evaluations, ())
 
+    def test_automatic_evaluation_is_stored_with_model_metadata(
+        self,
+    ) -> None:
+        feedback_run_id = self._create_selected_feedback_run()
+        criterion_keys = [
+            criterion.key
+            for criterion in MANUAL_META_EVALUATION_RUBRIC.criteria
+        ]
+        scores = dict(zip(criterion_keys, (3, 2, 2, 1)))
+        justifications = {
+            key: f"Detaillierte automatische Begründung für {key}."
+            for key in criterion_keys
+        }
+
+        automatic = asyncio.run(
+            self.store.create_automatic_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                scores=scores,
+                justifications=justifications,
+                evaluator_provider="openai",
+                evaluator_model="gpt-5.6-sol",
+                evaluator_prompt_version="meta-evaluator-v1",
+                duration_ms=1234,
+                provider_request_id="resp-auto-1",
+                evaluation_name="  Sol max – automatischer Lauf  ",
+            )
+        )
+        selected_run = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+
+        self.assertEqual(automatic.evaluation_type, "automatic")
+        self.assertEqual(automatic.type_label, "Automatische Vorbewertung")
+        self.assertEqual(automatic.evaluator_provider, "openai")
+        self.assertEqual(automatic.evaluator_model, "gpt-5.6-sol")
+        self.assertEqual(
+            automatic.evaluator_prompt_version,
+            "meta-evaluator-v1",
+        )
+        self.assertEqual(automatic.duration_ms, 1234)
+        self.assertEqual(automatic.provider_request_id, "resp-auto-1")
+        self.assertEqual(
+            automatic.evaluation_name,
+            "Sol max – automatischer Lauf",
+        )
+        self.assertIsNone(automatic.source_evaluation_id)
+        self.assertEqual(selected_run.automatic_evaluation_count, 1)
+        self.assertEqual(selected_run.manual_evaluation_count, 0)
+        self.assertEqual(
+            selected_run.latest_automatic_evaluation,
+            automatic,
+        )
+
+        manual = asyncio.run(
+            self.store.create_manual_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                scores={key: 2 for key in criterion_keys},
+                justifications={
+                    key: f"Manuell geprüfte Begründung für {key}."
+                    for key in criterion_keys
+                },
+                source_evaluation_id=automatic.evaluation_id,
+                evaluation_name="Manuelle Kontrollprüfung",
+            )
+        )
+        reloaded = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+
+        self.assertNotEqual(manual.evaluation_id, automatic.evaluation_id)
+        self.assertEqual(
+            manual.source_evaluation_id,
+            automatic.evaluation_id,
+        )
+        self.assertEqual(reloaded.automatic_evaluation_count, 1)
+        self.assertEqual(reloaded.manual_evaluation_count, 1)
+        self.assertEqual(len(reloaded.evaluations), 2)
+
+        with self.assertRaises(
+            FeedbackEvaluationDeleteConflictError
+        ):
+            asyncio.run(
+                self.store.delete_feedback_evaluation(
+                    feedback_run_id=feedback_run_id,
+                    evaluation_id=automatic.evaluation_id,
+                )
+            )
+
+        asyncio.run(
+            self.store.delete_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                evaluation_id=manual.evaluation_id,
+            )
+        )
+        asyncio.run(
+            self.store.delete_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                evaluation_id=automatic.evaluation_id,
+            )
+        )
+        after_deletion = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertEqual(after_deletion.evaluations, ())
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            rating_count = connection.execute(
+                "SELECT COUNT(*) FROM feedback_evaluation_ratings"
+            ).fetchone()[0]
+
+        self.assertEqual(rating_count, 0)
+
+    def test_removing_feedback_run_from_evaluation_cleans_meta_data(
+        self,
+    ) -> None:
+        original_text = "Originaltext bleibt Teil des technischen Laufs."
+        feedback_run_id = self._create_selected_feedback_run(
+            original_text=original_text
+        )
+        criterion_keys = [
+            criterion.key
+            for criterion in MANUAL_META_EVALUATION_RUBRIC.criteria
+        ]
+        automatic = asyncio.run(
+            self.store.create_automatic_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                scores={key: 2 for key in criterion_keys},
+                justifications={
+                    key: f"Automatische Begründung für {key}."
+                    for key in criterion_keys
+                },
+                evaluator_provider="openai",
+                evaluator_model="gpt-5.6-sol",
+                evaluator_prompt_version="meta-evaluator-v1",
+                duration_ms=500,
+            )
+        )
+        asyncio.run(
+            self.store.create_manual_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                scores={key: 3 for key in criterion_keys},
+                justifications={
+                    key: f"Manuelle Begründung für {key}."
+                    for key in criterion_keys
+                },
+                source_evaluation_id=automatic.evaluation_id,
+            )
+        )
+
+        asyncio.run(
+            self.store.remove_feedback_run_from_evaluation(
+                feedback_run_id=feedback_run_id,
+            )
+        )
+
+        self.assertEqual(
+            asyncio.run(
+                self.store.list_feedback_runs_for_evaluation()
+            ),
+            [],
+        )
+        self.assertEqual(
+            asyncio.run(self.store.count_feedback_runs()),
+            1,
+        )
+        with self.assertRaises(FeedbackRunNotFoundError):
+            asyncio.run(
+                self.store.get_feedback_run_for_evaluation(
+                    feedback_run_id
+                )
+            )
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            connection.row_factory = sqlite3.Row
+            stored_run = connection.execute(
+                """
+                SELECT student_text_hash,
+                       student_text,
+                       selected_for_evaluation_at,
+                       original_text,
+                       feedback_json
+                FROM rubric_feedback_runs
+                WHERE feedback_run_id = ?
+                """,
+                (feedback_run_id,),
+            ).fetchone()
+            evaluation_count = connection.execute(
+                "SELECT COUNT(*) FROM feedback_evaluations"
+            ).fetchone()[0]
+            rating_count = connection.execute(
+                "SELECT COUNT(*) FROM feedback_evaluation_ratings"
+            ).fetchone()[0]
+
+        self.assertIsNotNone(stored_run)
+        self.assertEqual(
+            stored_run["student_text_hash"],
+            hashlib.sha256(
+                "Anonymisierter Text für die Qualitätsbewertung.".encode(
+                    "utf-8"
+                )
+            ).hexdigest(),
+        )
+        self.assertIsNone(stored_run["student_text"])
+        self.assertIsNone(stored_run["selected_for_evaluation_at"])
+        self.assertEqual(stored_run["original_text"], original_text)
+        self.assertIn("Ein sinnvoller Anfang.", stored_run["feedback_json"])
+        self.assertEqual(evaluation_count, 0)
+        self.assertEqual(rating_count, 0)
+
+        selected_again = asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=(
+                    "Anonymisierter Text für die Qualitätsbewertung."
+                ),
+            )
+        )
+        self.assertEqual(selected_again.evaluations, ())
+
     def test_manual_feedback_evaluation_requires_selected_run(self) -> None:
         task = self._create_task()
         feedback_run_id = asyncio.run(
@@ -522,6 +766,59 @@ class TaskStoreTests(unittest.TestCase):
                     justifications={key: "Begründung" for key in criterion_keys},
                 )
             )
+
+    def test_migrates_evaluator_metadata_columns_additively(self) -> None:
+        self._create_selected_feedback_run()
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            connection.execute(
+                """
+                ALTER TABLE feedback_evaluations
+                DROP COLUMN evaluator_prompt_version
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE feedback_evaluations
+                DROP COLUMN source_evaluation_id
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE feedback_evaluations
+                DROP COLUMN evaluation_name
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE rubric_feedback_runs
+                DROP COLUMN reasoning_effort
+                """
+            )
+
+        asyncio.run(self.store.initialize())
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(feedback_evaluations)"
+                ).fetchall()
+            }
+
+        self.assertIn("evaluator_prompt_version", columns)
+        self.assertIn("source_evaluation_id", columns)
+        self.assertIn("evaluation_name", columns)
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            run_columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(rubric_feedback_runs)"
+                ).fetchall()
+            }
+
+        self.assertIn("reasoning_effort", run_columns)
 
     def test_feedback_run_selection_rejects_mismatched_text(self) -> None:
         task = self._create_task()
@@ -620,6 +917,7 @@ class TaskStoreTests(unittest.TestCase):
 
         self.assertIn("student_text", columns)
         self.assertIn("selected_for_evaluation_at", columns)
+        self.assertIn("original_text", columns)
         self.assertIn(feedback_run_id, stored_ids)
         self.assertIn("feedback_evaluations", tables)
         self.assertIn("feedback_evaluation_ratings", tables)

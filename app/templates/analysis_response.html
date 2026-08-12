@@ -27,6 +27,13 @@
             <dd>{{ result.model }}</dd>
         </div>
 
+        {% if result.reasoning_effort %}
+            <div>
+                <dt>Denktiefe</dt>
+                <dd>{{ result.reasoning_effort }}</dd>
+            </div>
+        {% endif %}
+
         {% if result_endpoint_label %}
             <div>
                 <dt>Gewählter GPU-Endpunkt</dt>

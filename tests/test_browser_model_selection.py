@@ -69,6 +69,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('id="ollama-base-url"', response.text)
         self.assertIn('id="ollama-model"', response.text)
         self.assertIn('id="openai-model"', response.text)
+        self.assertIn(
+            'id="openai-reasoning-effort"',
+            response.text,
+        )
         self.assertIn('id="mistral-model"', response.text)
         self.assertIn('id="runpod-endpoint"', response.text)
         self.assertIn('id="runpod-readiness"', response.text)
@@ -119,6 +123,12 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('value="rtx6000ada_48gb"', response.text)
         self.assertIn(main.settings.ollama_base_url, response.text)
         self.assertIn(main.settings.openai_model, response.text)
+        self.assertIn('value="gpt-5.6-luna"', response.text)
+        self.assertIn('value="gpt-5.6-terra"', response.text)
+        self.assertIn('value="gpt-5.6-sol"', response.text)
+        self.assertIn('value="xhigh"', response.text)
+        self.assertIn('value="max"', response.text)
+        self.assertIn("Max – maximale Denktiefe", response.text)
         self.assertIn(main.settings.mistral_model, response.text)
         self.assertIn('value="mistral"', response.text)
         self.assertIn('value="ministral-14b-2512"', response.text)
@@ -328,6 +338,9 @@ class BrowserModelSelectionTests(unittest.TestCase):
             captured["provider_key"] = str(kwargs["provider_key"])
             captured["provider_name"] = provider.provider_name
             captured["model"] = provider.model_name
+            captured["reasoning_effort"] = str(
+                provider.reasoning_effort
+            )
 
             return FeedbackResult(
                 provider="openai",
@@ -348,6 +361,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
                     "provider": "openai",
                     "csrf_token": self.csrf_token,
                     "openai_model": "gpt-5.6-terra",
+                    "openai_reasoning_effort": "max",
                     "openai_api_key": "test-api-key",
                 },
             )
@@ -356,8 +370,13 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertEqual(captured["provider_key"], "openai")
         self.assertEqual(captured["provider_name"], "openai")
         self.assertEqual(captured["model"], "gpt-5.6-terra")
+        self.assertEqual(captured["reasoning_effort"], "max")
         self.assertIn("Cloud-Testfeedback", response.text)
         self.assertIn("gpt-5.6-terra", response.text)
+        self.assertRegex(
+            response.text,
+            r'value="max"\s+selected',
+        )
 
     def test_production_ignores_browser_openai_api_key(self) -> None:
         production_settings = replace(

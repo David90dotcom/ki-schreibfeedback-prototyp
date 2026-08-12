@@ -16,6 +16,12 @@
     const taskPreviews = form.querySelectorAll(
         "[data-task-preview]"
     );
+    const analysisOriginalTextPanel = form.querySelector(
+        "[data-analysis-original-text-panel]"
+    );
+    const originalTextInput = form.querySelector(
+        "#original-text"
+    );
     const providerSelect = form.querySelector("#provider");
     const providerPanels = form.querySelectorAll(
         "[data-provider-panel]"
@@ -120,6 +126,8 @@
             return;
         }
 
+        const taskSelected = Boolean(taskSelect.value);
+
         taskPreviews.forEach((preview) => {
             const selected =
                 preview.dataset.taskPreview === taskSelect.value;
@@ -130,6 +138,18 @@
                 preview.open = false;
             }
         });
+
+        if (analysisOriginalTextPanel) {
+            analysisOriginalTextPanel.hidden = !taskSelected;
+
+            if (!taskSelected) {
+                analysisOriginalTextPanel.open = false;
+            }
+        }
+
+        if (originalTextInput) {
+            originalTextInput.disabled = !taskSelected;
+        }
     }
 
     function updateCustomModelField(modelSelect) {

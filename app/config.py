@@ -166,6 +166,11 @@ class Settings:
         fallback="gpt-5.6-luna",
     )
 
+    openai_evaluation_model: str = _first_configured_value(
+        "OPENAI_EVALUATION_MODEL",
+        fallback="gpt-5.6-sol",
+    )
+
     mistral_api_key: str | None = (
         os.getenv("MISTRAL_API_KEY", "").strip() or None
     )

@@ -1,5 +1,12 @@
 {% extends "base.html" %}
 
+{% block scripts %}
+<script
+    src="{{ url_for('static', path='/feedback_evaluations.js') }}?v={{ static_asset_version }}"
+    defer
+></script>
+{% endblock %}
+
 {% block content %}
 
 <section class="card meta-overview-header">
@@ -11,13 +18,14 @@
                 Hier erscheinen ausschließlich Feedbackläufe, die nach
                 einer Textanalyse bewusst für die Meta-Ebene gespeichert
                 wurden. Du kannst jeden Lauf anhand desselben versionierten
-                Qualitätsrasters mehrfach und getrennt bewerten.
+                Qualitätsrasters automatisch vorbewerten, manuell prüfen und
+                mehrfach getrennt speichern.
             </p>
         </div>
     </div>
 </section>
 
-{% if notice_message %}
+{% if notice_message and not automatic_feedback_run_id and not feedback_run_notice_id %}
     <section
         class="card {% if notice_tone == 'error' %}error{% else %}notice-success{% endif %}"
         role="status"
@@ -36,6 +44,7 @@
 {% if feedback_runs %}
     <section class="meta-run-list" aria-label="Gespeicherte Feedbackläufe">
         {% for feedback_run in feedback_runs %}
+            {% set automatic_prefill = feedback_run.latest_automatic_evaluation %}
             <article
                 class="card meta-run-card"
                 id="feedback-run-{{ feedback_run.feedback_run_id }}"
@@ -46,18 +55,54 @@
                         <p>{{ feedback_run.rubric_title }}</p>
                     </div>
 
-                    <span
-                        class="meta-rating-status{% if feedback_run.manual_evaluation_count %} is-rated{% endif %}"
-                    >
-                        {% if feedback_run.manual_evaluation_count == 0 %}
-                            Noch nicht bewertet
-                        {% elif feedback_run.manual_evaluation_count == 1 %}
-                            1 manuelle Bewertung
-                        {% else %}
-                            {{ feedback_run.manual_evaluation_count }} manuelle Bewertungen
-                        {% endif %}
-                    </span>
+                    <div class="meta-run-heading-actions">
+                        <span
+                            class="meta-rating-status{% if feedback_run.aggregate_score is not none %} is-aggregate{% endif %}"
+                            {% if feedback_run.aggregate_score is not none %}
+                                style="--meta-rating-hue: {{ feedback_run.aggregate_score | meta_score_hue }};"
+                                title="Arithmetischer Mittelwert aus allen Kriterien der {{ feedback_run.evaluations | length }} gespeicherten Meta-Bewertung{% if feedback_run.evaluations | length != 1 %}en{% endif %}."
+                            {% endif %}
+                        >
+                            {% if feedback_run.aggregate_score is none %}
+                                Noch nicht bewertet
+                            {% else %}
+                                <strong>
+                                    Ø {{ feedback_run.aggregate_score | meta_score }} / 3
+                                </strong>
+                                <small>
+                                    aus {{ feedback_run.evaluations | length }} Meta-Bewertung{% if feedback_run.evaluations | length != 1 %}en{% endif %}
+                                </small>
+                            {% endif %}
+                        </span>
+
+                        <form
+                            class="meta-run-remove-form"
+                            method="post"
+                            action="/feedback-runs/{{ feedback_run.feedback_run_id }}/remove-from-evaluation"
+                            data-confirm-feedback-run-remove
+                            data-feedback-run-label="{{ feedback_run.task_title }}"
+                            data-evaluation-count="{{ feedback_run.evaluations | length }}"
+                        >
+                            <input
+                                type="hidden"
+                                name="csrf_token"
+                                value="{{ csrf_token }}"
+                            >
+                            <button class="danger-button" type="submit">
+                                Feedbackbogen entfernen
+                            </button>
+                        </form>
+                    </div>
                 </div>
+
+                {% if feedback_run_notice_id == feedback_run.feedback_run_id and notice_message %}
+                    <div
+                        class="meta-automatic-result {% if notice_tone == 'error' %}meta-automatic-result-error{% else %}meta-automatic-result-success{% endif %}"
+                        role="status"
+                    >
+                        <p>{{ notice_message }}</p>
+                    </div>
+                {% endif %}
 
                 <dl class="metadata meta-run-metadata">
                     <div>
@@ -68,6 +113,12 @@
                         <dt>Modell</dt>
                         <dd>{{ feedback_run.model }}</dd>
                     </div>
+                    {% if feedback_run.reasoning_effort %}
+                        <div>
+                            <dt>Denktiefe</dt>
+                            <dd>{{ feedback_run.reasoning_effort }}</dd>
+                        </div>
+                    {% endif %}
                     <div>
                         <dt>Feedbackdauer</dt>
                         <dd>{{ feedback_run.duration_ms | duration_ms }}</dd>
@@ -101,9 +152,18 @@
 
                         {% if feedback_run.task_snapshot.material %}
                             <section>
-                                <h3>Material oder Textgrundlage</h3>
+                                <h3>Material der gespeicherten Aufgabe</h3>
                                 <p class="meta-preserved-text">
                                     {{ feedback_run.task_snapshot.material }}
+                                </p>
+                            </section>
+                        {% endif %}
+
+                        {% if feedback_run.original_text %}
+                            <section>
+                                <h3>Originaltext dieses Feedbacklaufs</h3>
+                                <p class="meta-preserved-text">
+                                    {{ feedback_run.original_text }}
                                 </p>
                             </section>
                         {% endif %}
@@ -165,50 +225,341 @@
                     </div>
                 </details>
 
+                <section class="meta-automatic-evaluation">
+                    <div class="meta-automatic-heading">
+                        <div>
+                            <span class="meta-cloud-badge">Cloud · optional</span>
+                            <h3>Automatische Vorbewertung</h3>
+                        </div>
+                        <span class="meta-model-badge">
+                            {{ automatic_evaluation_model }}
+                        </span>
+                    </div>
+
+                    <p>
+                        Ein getrenntes starkes Bewertungsmodell prüft jede
+                        Feedbackaussage gegen Aufgabe, Aufgabenmaterial,
+                        optionalen Originaltext, Kriterien und Schülertext. Es
+                        bewertet dieselben vier Qualitätskriterien von 0 bis 3
+                        und begründet jeden Befund detailliert.
+                    </p>
+
+                    {% if automatic_feedback_run_id == feedback_run.feedback_run_id and notice_message %}
+                        <div
+                            class="meta-automatic-result {% if notice_tone == 'error' %}meta-automatic-result-error{% else %}meta-automatic-result-success{% endif %}"
+                            role="status"
+                        >
+                            <strong>
+                                {% if notice_tone == "error" %}
+                                    Vorbewertung fehlgeschlagen
+                                {% else %}
+                                    Vorbewertung abgeschlossen
+                                {% endif %}
+                            </strong>
+                            <p>{{ notice_message }}</p>
+                        </div>
+                    {% endif %}
+
+                    <dl class="metadata meta-automatic-metadata">
+                        <div>
+                            <dt>Anbieter</dt>
+                            <dd>{{ automatic_evaluation_provider }}</dd>
+                        </div>
+                        <div>
+                            <dt>Bewertungsmodell</dt>
+                            <dd>{{ automatic_evaluation_model }}</dd>
+                        </div>
+                        <div>
+                            <dt>Denkmodus</dt>
+                            <dd>
+                                {{ automatic_evaluation_reasoning_mode }} ·
+                                {{ automatic_evaluation_reasoning_effort }}
+                            </dd>
+                        </div>
+                        <div>
+                            <dt>Prompt-Version</dt>
+                            <dd>
+                                <code>{{ automatic_evaluation_prompt_version }}</code>
+                            </dd>
+                        </div>
+                    </dl>
+
+                    <p class="meta-cloud-warning">
+                        Erst beim folgenden Klick werden der anonymisierte
+                        Schülertext, Aufgabe, Aufgabenmaterial, der optionale
+                        Originaltext dieses Laufs, Feedback-Kriterien und das
+                        erzeugte Feedback an die OpenAI API übertragen. Der
+                        Aufruf kann kostenpflichtig sein. Es gibt keinen
+                        automatischen Provider-Wechsel. Die
+                        Response-Speicherung wird mit <code>store=false</code>
+                        deaktiviert; geltende providerseitige
+                        Aufbewahrungsregeln bleiben unberührt.
+                    </p>
+
+                    {% if automatic_evaluation_configured %}
+                        <form
+                            method="post"
+                            action="/feedback-runs/{{ feedback_run.feedback_run_id }}/automatic-evaluations"
+                            data-automatic-evaluation-form
+                            data-evaluation-model="{{ automatic_evaluation_model }}"
+                            data-feedback-run-id="{{ feedback_run.feedback_run_id }}"
+                        >
+                            <input
+                                type="hidden"
+                                name="csrf_token"
+                                value="{{ csrf_token }}"
+                            >
+
+                            <label
+                                class="meta-evaluation-name-label"
+                                for="automatic-evaluation-name-{{ feedback_run.feedback_run_id }}"
+                            >
+                                Name der Vorbewertung (optional)
+                            </label>
+                            <input
+                                id="automatic-evaluation-name-{{ feedback_run.feedback_run_id }}"
+                                name="evaluation_name"
+                                type="text"
+                                maxlength="{{ max_evaluation_name_chars }}"
+                                autocomplete="off"
+                                placeholder="z. B. Sol max – Vergleichslauf 1"
+                            >
+                            <p class="hint meta-evaluation-name-hint">
+                                Leer lassen, wenn die automatische Bezeichnung
+                                verwendet werden soll.
+                            </p>
+
+                            <button
+                                class="meta-automatic-button"
+                                type="submit"
+                                data-automatic-evaluation-button
+                                data-default-label="{% if feedback_run.automatic_evaluation_count %}Erneut automatisch vorbewerten{% else %}Jetzt automatisch vorbewerten{% endif %}"
+                            >
+                                {% if feedback_run.automatic_evaluation_count %}
+                                    Erneut automatisch vorbewerten
+                                {% else %}
+                                    Jetzt automatisch vorbewerten
+                                {% endif %}
+                            </button>
+
+                            <section
+                                class="loading-indicator meta-automatic-loading"
+                                role="status"
+                                aria-live="polite"
+                                aria-atomic="true"
+                                data-automatic-evaluation-loading
+                                hidden
+                            >
+                                <div
+                                    class="loading-bar"
+                                    role="progressbar"
+                                    aria-label="Automatische Vorbewertung läuft"
+                                >
+                                    <span></span>
+                                </div>
+
+                                <p
+                                    class="loading-message"
+                                    data-automatic-evaluation-message
+                                >
+                                    Bewertungsdaten werden sicher übertragen …
+                                </p>
+
+                                <p
+                                    class="loading-hint"
+                                    data-automatic-evaluation-hint
+                                >
+                                    Bitte lass dieses Browserfenster geöffnet.
+                                </p>
+                            </section>
+
+                            <div
+                                class="meta-automatic-result meta-automatic-result-error"
+                                role="alert"
+                                data-automatic-evaluation-client-error
+                                hidden
+                            >
+                                <strong>Anfrage fehlgeschlagen</strong>
+                                <p data-automatic-evaluation-client-error-message>
+                                    Die automatische Vorbewertung konnte nicht gestartet werden.
+                                </p>
+                            </div>
+                        </form>
+                    {% else %}
+                        <p class="meta-configuration-warning" role="status">
+                            Für diese Funktion muss <code>OPENAI_API_KEY</code>
+                            serverseitig in der <code>.env</code>-Datei gesetzt
+                            sein. Ohne Key wird nichts übertragen.
+                        </p>
+                    {% endif %}
+
+                    <p class="hint">
+                        Jede erfolgreiche Anfrage erzeugt einen unveränderten
+                        automatischen Datensatz. Frühere Vorbewertungen werden
+                        nicht überschrieben.
+                    </p>
+                </section>
+
                 {% if feedback_run.evaluations %}
-                    <section
+                    <details
                         class="meta-evaluation-history"
                         aria-label="Gespeicherte Bewertungen"
                     >
-                        <h3>Gespeicherte Bewertungen</h3>
-
-                        {% for evaluation in feedback_run.evaluations %}
-                            <article class="meta-evaluation-record">
-                                <div class="meta-evaluation-record-heading">
-                                    <strong>{{ evaluation.type_label }}</strong>
-                                    <span>
-                                        {{ evaluation.created_at | datetime_utc }}
+                        <summary class="meta-evaluation-history-summary">
+                            <span>Gespeicherte Meta-Bewertungen</span>
+                            <span class="meta-evaluation-history-overview">
+                                <span>
+                                    {{ feedback_run.evaluations | length }}
+                                    Bewertung{% if feedback_run.evaluations | length != 1 %}en{% endif %}
+                                </span>
+                                {% if feedback_run.aggregate_score is not none %}
+                                    <span
+                                        class="meta-evaluation-average"
+                                        style="--meta-rating-hue: {{ feedback_run.aggregate_score | meta_score_hue }};"
+                                        title="Arithmetischer Mittelwert aus allen Kriterien dieser Meta-Bewertungen."
+                                    >
+                                        Ø {{ feedback_run.aggregate_score | meta_score }} / 3
                                     </span>
-                                </div>
-                                <p class="meta-rubric-version">
-                                    Bewertungsbogen:
-                                    <code>{{ evaluation.rubric_version }}</code>
-                                </p>
+                                {% endif %}
+                            </span>
+                        </summary>
 
-                                <dl class="meta-rating-list">
-                                    {% for rating in evaluation.ratings %}
-                                        <div class="meta-rating-result">
-                                            <dt>
-                                                <span>{{ rating.criterion_title }}</span>
-                                                <span
-                                                    class="meta-score-badge meta-score-{{ rating.score }}"
-                                                >
-                                                    {{ rating.score }}/3 –
-                                                    {{ rating.rating_label }}
+                        <div class="meta-evaluation-history-content">
+                            {% for evaluation in feedback_run.evaluations %}
+                                <details class="meta-evaluation-record">
+                                    <summary class="meta-evaluation-record-heading">
+                                        <span class="meta-evaluation-record-title">
+                                            <strong>
+                                                {{ evaluation.evaluation_name or evaluation.type_label }}
+                                            </strong>
+                                            {% if evaluation.evaluation_name %}
+                                                <span class="meta-evaluation-type-label">
+                                                    {{ evaluation.type_label }}
                                                 </span>
-                                            </dt>
-                                            <dd>{{ rating.justification }}</dd>
+                                            {% endif %}
+                                        </span>
+                                        <span class="meta-evaluation-record-summary-meta">
+                                            {% if evaluation.average_score is not none %}
+                                                <span
+                                                    class="meta-evaluation-average"
+                                                    style="--meta-rating-hue: {{ evaluation.average_score | meta_score_hue }};"
+                                                    title="Arithmetischer Mittelwert der Kriterien dieser Bewertung."
+                                                >
+                                                    Ø {{ evaluation.average_score | meta_score }} / 3
+                                                </span>
+                                            {% endif %}
+                                            <span class="meta-evaluation-created-at">
+                                                {{ evaluation.created_at | datetime_utc }}
+                                            </span>
+                                        </span>
+                                    </summary>
+
+                                    <div class="meta-evaluation-record-content">
+                                        <p class="meta-rubric-version">
+                                            Bewertungsbogen:
+                                            <code>{{ evaluation.rubric_version }}</code>
+                                        </p>
+                                        {% if evaluation.source_evaluation_id %}
+                                            <p class="meta-rubric-version">
+                                                Manuelle Prüfung der KI-Vorbewertung:
+                                                <code>
+                                                    {{ evaluation.source_evaluation_id }}
+                                                </code>
+                                            </p>
+                                        {% endif %}
+
+                                        {% if evaluation.evaluator_provider %}
+                                            <dl class="metadata meta-evaluator-metadata">
+                                                <div>
+                                                    <dt>Bewertungsanbieter</dt>
+                                                    <dd>{{ evaluation.evaluator_provider }}</dd>
+                                                </div>
+                                                <div>
+                                                    <dt>Bewertungsmodell</dt>
+                                                    <dd>{{ evaluation.evaluator_model }}</dd>
+                                                </div>
+                                                <div>
+                                                    <dt>Bewertungsdauer</dt>
+                                                    <dd>
+                                                        {{ evaluation.duration_ms | duration_ms }}
+                                                    </dd>
+                                                </div>
+                                                <div>
+                                                    <dt>Prompt-Version</dt>
+                                                    <dd>
+                                                        <code>
+                                                            {{ evaluation.evaluator_prompt_version or "Nicht verfügbar" }}
+                                                        </code>
+                                                    </dd>
+                                                </div>
+                                                <div>
+                                                    <dt>Request-ID</dt>
+                                                    <dd>
+                                                        {{ evaluation.provider_request_id or "Nicht verfügbar" }}
+                                                    </dd>
+                                                </div>
+                                            </dl>
+                                        {% endif %}
+
+                                        <dl class="meta-rating-list">
+                                            {% for rating in evaluation.ratings %}
+                                                <div class="meta-rating-result">
+                                                    <dt>
+                                                        <span>{{ rating.criterion_title }}</span>
+                                                        <span
+                                                            class="meta-score-badge meta-score-{{ rating.score }}"
+                                                        >
+                                                            {{ rating.score }}/3 –
+                                                            {{ rating.rating_label }}
+                                                        </span>
+                                                    </dt>
+                                                    <dd>{{ rating.justification }}</dd>
+                                                </div>
+                                            {% endfor %}
+                                        </dl>
+
+                                        <div class="meta-evaluation-record-actions">
+                                            <a
+                                                class="button-link secondary-link compact-button"
+                                                href="/feedback-runs/{{ feedback_run.feedback_run_id }}/evaluations/{{ evaluation.evaluation_id }}/pdf"
+                                                aria-label="{{ evaluation.evaluation_name or evaluation.type_label }} als PDF exportieren"
+                                            >
+                                                PDF exportieren
+                                            </a>
+
+                                            <form
+                                                class="meta-evaluation-delete-form"
+                                                method="post"
+                                                action="/feedback-runs/{{ feedback_run.feedback_run_id }}/evaluations/{{ evaluation.evaluation_id }}/delete"
+                                                data-confirm-evaluation-delete
+                                                data-evaluation-label="{{ evaluation.evaluation_name or evaluation.type_label }}"
+                                            >
+                                                <input
+                                                    type="hidden"
+                                                    name="csrf_token"
+                                                    value="{{ csrf_token }}"
+                                                >
+                                                <button class="danger-button compact-button" type="submit">
+                                                    Bewertung löschen
+                                                </button>
+                                            </form>
                                         </div>
-                                    {% endfor %}
-                                </dl>
-                            </article>
-                        {% endfor %}
-                    </section>
+                                    </div>
+                                </details>
+                            {% endfor %}
+                        </div>
+                    </details>
                 {% endif %}
 
-                <details class="meta-manual-evaluation">
+                <details
+                    class="meta-manual-evaluation"
+                    data-manual-evaluation-details
+                    {% if notice_code == "automatic-evaluation-saved" and automatic_feedback_run_id == feedback_run.feedback_run_id %}open data-open-after-automatic-evaluation{% endif %}
+                >
                     <summary>
-                        {% if feedback_run.manual_evaluation_count %}
+                        {% if automatic_prefill %}
+                            KI-Vorbewertung manuell prüfen
+                        {% elif feedback_run.manual_evaluation_count %}
                             Weitere manuelle Bewertung anlegen
                         {% else %}
                             Manuell bewerten
@@ -219,9 +570,18 @@
                         <div class="meta-manual-intro">
                             <h3>{{ manual_meta_rubric.title }}</h3>
                             <p>
-                                Bewerte jedes Kriterium von 0 bis 3 und
-                                begründe deine Einschätzung kurz. Es wird
-                                keine Gesamtnote gebildet.
+                                {% if automatic_prefill %}
+                                    Die Felder sind mit der neuesten
+                                    KI-Vorbewertung vorausgefüllt. Prüfe und
+                                    verändere Punkte sowie Begründungen nach
+                                    Bedarf. Beim Speichern entsteht eine neue
+                                    manuelle Bewertung; das KI-Original bleibt
+                                    unverändert.
+                                {% else %}
+                                    Bewerte jedes Kriterium von 0 bis 3 und
+                                    begründe deine Einschätzung. Es wird keine
+                                    Gesamtnote gebildet.
+                                {% endif %}
                             </p>
                             <p class="meta-rubric-version">
                                 Version:
@@ -239,8 +599,35 @@
                                 name="csrf_token"
                                 value="{{ csrf_token }}"
                             >
+                            {% if automatic_prefill %}
+                                <input
+                                    type="hidden"
+                                    name="source_evaluation_id"
+                                    value="{{ automatic_prefill.evaluation_id }}"
+                                >
+                            {% endif %}
+
+                            <label
+                                class="meta-evaluation-name-label"
+                                for="manual-evaluation-name-{{ feedback_run.feedback_run_id }}"
+                            >
+                                Name der Bewertung (optional)
+                            </label>
+                            <input
+                                id="manual-evaluation-name-{{ feedback_run.feedback_run_id }}"
+                                name="evaluation_name"
+                                type="text"
+                                maxlength="{{ max_evaluation_name_chars }}"
+                                autocomplete="off"
+                                placeholder="z. B. Eigene Prüfung – Durchgang 1"
+                            >
+                            <p class="hint meta-evaluation-name-hint">
+                                Der Name dient nur der späteren Zuordnung und
+                                verändert den Bewertungsbogen nicht.
+                            </p>
 
                             {% for criterion in manual_meta_rubric.criteria %}
+                                {% set prefill_rating = automatic_prefill.ratings[loop.index0] if automatic_prefill else none %}
                                 <fieldset class="meta-quality-criterion">
                                     <legend>
                                         {{ loop.index }}.
@@ -258,6 +645,7 @@
                                                     type="radio"
                                                     name="score_{{ criterion.key }}"
                                                     value="{{ score }}"
+                                                    {% if prefill_rating and prefill_rating.score == score %}checked{% endif %}
                                                     required
                                                 >
                                                 <span>
@@ -272,22 +660,26 @@
                                         class="meta-justification-label"
                                         for="justification-{{ feedback_run.feedback_run_id }}-{{ criterion.key }}"
                                     >
-                                        Kurze Begründung
+                                        Begründung
                                     </label>
                                     <textarea
                                         id="justification-{{ feedback_run.feedback_run_id }}-{{ criterion.key }}"
                                         name="justification_{{ criterion.key }}"
-                                        rows="3"
+                                        rows="5"
                                         maxlength="{{ max_meta_justification_chars }}"
                                         required
                                         placeholder="Nenne konkrete Beobachtungen aus dem Feedback."
-                                    ></textarea>
+                                    >{% if prefill_rating %}{{ prefill_rating.justification }}{% endif %}</textarea>
                                 </fieldset>
                             {% endfor %}
 
                             <div class="meta-manual-actions">
                                 <button type="submit">
-                                    Manuelle Bewertung speichern
+                                    {% if automatic_prefill %}
+                                        Geprüfte manuelle Bewertung getrennt speichern
+                                    {% else %}
+                                        Manuelle Bewertung speichern
+                                    {% endif %}
                                 </button>
                                 <p class="hint">
                                     Jeder Klick legt eine neue, eigenständige
@@ -298,12 +690,6 @@
                         </form>
                     </div>
                 </details>
-
-                <p class="meta-run-note">
-                    Die automatische Bewertung mit einem getrennt
-                    ausgewiesenen Bewertungsmodell folgt im nächsten
-                    0.9-Teilschritt.
-                </p>
             </article>
         {% endfor %}
     </section>

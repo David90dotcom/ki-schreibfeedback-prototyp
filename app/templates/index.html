@@ -146,6 +146,42 @@
             {% endif %}
         </div>
 
+        <details
+            class="analysis-original-text-panel"
+            data-analysis-original-text-panel
+            {% if not selected_task_id %}hidden{% endif %}
+            {% if original_text %}open{% endif %}
+        >
+            <summary>
+                Originaltext für diesen Lauf (optional)
+            </summary>
+
+            <div class="analysis-original-text-content">
+                <label for="original-text">
+                    Gedicht, Quelle oder anderer Ausgangstext
+                </label>
+                <textarea
+                    id="original-text"
+                    name="original_text"
+                    rows="10"
+                    maxlength="30000"
+                    {% if not selected_task_id %}disabled{% endif %}
+                    placeholder="Hier bei Bedarf den vollständigen Originaltext einfügen …"
+                >{{ original_text }}</textarea>
+
+                <p class="hint">
+                    Dieses Feld gehört nur zum aktuellen Analyselauf und ist
+                    unabhängig vom Material der gespeicherten Aufgabe. Beide
+                    Inhalte werden getrennt an das ausgewählte Modell
+                    übermittelt. Der Originaltext wird im technischen
+                    Feedbacklauf gespeichert und steht später auch für die
+                    Feedback-Bewertung zur Verfügung. Bitte nur
+                    datenschutzrechtlich und urheberrechtlich zulässige Texte
+                    eingeben.
+                </p>
+            </div>
+        </details>
+
         <label for="provider">Modellanbieter</label>
 
         <select id="provider" name="provider">
@@ -357,6 +393,31 @@
                     Andere Modell-ID …
                 </option>
             </select>
+
+            <label for="openai-reasoning-effort">
+                Denktiefe (Reasoning)
+            </label>
+
+            <select
+                id="openai-reasoning-effort"
+                name="openai_reasoning_effort"
+            >
+                {% for effort, label in openai_reasoning_effort_options %}
+                    <option
+                        value="{{ effort }}"
+                        {% if effort == selected_openai_reasoning_effort %}selected{% endif %}
+                    >
+                        {{ label }}
+                    </option>
+                {% endfor %}
+            </select>
+
+            <p class="hint">
+                GPT-5.6 unterstützt die Stufen von <code>none</code>
+                bis <code>max</code>. Für den stärksten Qualitätslauf
+                wählst du GPT-5.6 Sol mit <code>max</code>; höhere
+                Stufen können Laufzeit und Kosten deutlich erhöhen.
+            </p>
 
             <div
                 class="custom-model"

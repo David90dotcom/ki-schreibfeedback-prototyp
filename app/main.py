@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -32,6 +33,7 @@ from app.config import (
 )
 from app.domain.feedback_evaluation import (
     MANUAL_META_EVALUATION_RUBRIC,
+    MAX_EVALUATION_NAME_CHARS,
     MAX_META_JUSTIFICATION_CHARS,
     META_EVALUATION_SCORE_OPTIONS,
 )
@@ -47,7 +49,15 @@ from app.llm.errors import (
 )
 from app.llm.mistral_client import MistralProvider
 from app.llm.ollama_client import OllamaProvider
-from app.llm.openai_client import OpenAIProvider
+from app.llm.openai_client import (
+    OPENAI_REASONING_EFFORTS,
+    OpenAIProvider,
+)
+from app.llm.openai_evaluation_client import (
+    OPENAI_EVALUATION_REASONING_EFFORT,
+    OPENAI_EVALUATION_REASONING_MODE,
+    OpenAIAutomaticEvaluationProvider,
+)
 from app.llm.runpod_client import (
     RunPodJobStatusCallback,
     RunPodProvider,
@@ -62,9 +72,17 @@ from app.security import (
     start_authenticated_session,
     verify_credentials,
 )
+from app.services.automatic_feedback_evaluation_service import (
+    AUTOMATIC_EVALUATION_PROMPT_VERSION,
+    AutomaticFeedbackEvaluationService,
+)
 from app.services.feedback_service import (
     FeedbackResult,
     FeedbackService,
+)
+from app.services.feedback_evaluation_pdf_service import (
+    FeedbackEvaluationPdfError,
+    FeedbackEvaluationPdfService,
 )
 from app.services.rubric_feedback_service import (
     RubricFeedbackResult,
@@ -85,6 +103,8 @@ from app.services.runpod_job_store import (
 )
 from app.services.runpod_status_service import RunPodStatusService
 from app.services.task_store import (
+    FeedbackEvaluationDeleteConflictError,
+    MAX_MATERIAL_CHARS,
     TaskNotFoundError,
     TaskStore,
     TaskStoreError,
@@ -97,6 +117,7 @@ OLLAMA_FALLBACK_BASE_URL = "http://localhost:11434"
 MAX_MODEL_NAME_CHARS = 200
 SESSION_COOKIE_NAME = "ki-schreibfeedback-session"
 RUNPOD_JOB_STATUS_REFRESH_TIMEOUT_SECONDS = 3.0
+logger = logging.getLogger(__name__)
 
 
 def _static_asset_version() -> str:
@@ -104,7 +125,12 @@ def _static_asset_version() -> str:
 
     digest = hashlib.sha256()
 
-    for filename in ("app.js", "rubrics.js", "style.css"):
+    for filename in (
+        "app.js",
+        "feedback_evaluations.js",
+        "rubrics.js",
+        "style.css",
+    ):
         digest.update((BASE_DIR / "static" / filename).read_bytes())
 
     return digest.hexdigest()[:12]
@@ -116,6 +142,16 @@ OPENAI_MODEL_CATALOG = (
     ("gpt-5.6-luna", "GPT-5.6 Luna – günstig"),
     ("gpt-5.6-terra", "GPT-5.6 Terra – ausgewogen"),
     ("gpt-5.6-sol", "GPT-5.6 Sol – höchste Leistung"),
+)
+
+OPENAI_REASONING_EFFORT_OPTIONS = (
+    ("", "Modellstandard"),
+    ("none", "None – ohne zusätzlichen Denkaufwand"),
+    ("low", "Low – geringer Denkaufwand"),
+    ("medium", "Medium – ausgewogen"),
+    ("high", "High – hoher Denkaufwand"),
+    ("xhigh", "XHigh – sehr hoher Denkaufwand"),
+    ("max", "Max – maximale Denktiefe"),
 )
 
 MISTRAL_MODEL_CATALOG = (
@@ -202,6 +238,18 @@ def _format_datetime_utc(value: datetime | None) -> str:
     return normalized.strftime("%d.%m.%Y, %H:%M UTC")
 
 
+def _format_meta_score(value: float | int | None) -> str:
+    if value is None:
+        return "Nicht verfügbar"
+
+    return f"{float(value):.1f}".replace(".", ",")
+
+
+def _meta_score_hue(value: float | int | None) -> str:
+    score = min(3.0, max(0.0, float(value or 0)))
+    return f"{(score / 3) * 120:.1f}"
+
+
 def _runtime_session_secret() -> str:
     """Verlangt außerhalb der lokalen Entwicklung ein festes Secret."""
     if settings.session_secret:
@@ -253,6 +301,8 @@ templates.env.filters[
 ] = render_feedback_inline_markdown
 templates.env.filters["duration_ms"] = _format_duration_ms
 templates.env.filters["datetime_utc"] = _format_datetime_utc
+templates.env.filters["meta_score"] = _format_meta_score
+templates.env.filters["meta_score_hue"] = _meta_score_hue
 templates.env.globals[
     "static_asset_version"
 ] = STATIC_ASSET_VERSION
@@ -291,6 +341,19 @@ rubric_feedback_service = RubricFeedbackService(
     providers=feedback_service.providers,
     max_input_chars=settings.max_input_chars,
 )
+
+automatic_evaluation_provider = OpenAIAutomaticEvaluationProvider(
+    api_key=settings.openai_api_key,
+    model_name=settings.openai_evaluation_model,
+)
+
+automatic_feedback_evaluation_service = (
+    AutomaticFeedbackEvaluationService(
+        evaluator=automatic_evaluation_provider,
+    )
+)
+
+feedback_evaluation_pdf_service = FeedbackEvaluationPdfService()
 
 task_store = TaskStore(
     settings.analysis_database_path,
@@ -466,6 +529,7 @@ def _template_context(
     ollama_custom_model: str = "",
     selected_openai_model: str | None = None,
     openai_custom_model: str = "",
+    selected_openai_reasoning_effort: str = "",
     openai_override_used: bool = False,
     selected_mistral_model: str | None = None,
     mistral_custom_model: str = "",
@@ -474,6 +538,7 @@ def _template_context(
     runpod_tracking_id: str | None = None,
     task_options: list[FeedbackTask] | None = None,
     selected_task_id: str = "",
+    original_text: str = "",
     result: FeedbackResult | RubricFeedbackResult | None = None,
     feedback_run_id: str | None = None,
     runpod_warm_window: dict[str, object] | None = None,
@@ -530,6 +595,7 @@ def _template_context(
         "student_text": student_text,
         "task_options": task_options or [],
         "selected_task_id": selected_task_id,
+        "original_text": original_text,
         "result": result,
         "feedback_run_id": feedback_run_id,
         "error": error,
@@ -566,6 +632,12 @@ def _template_context(
             or settings.openai_model
         ),
         "openai_custom_model": openai_custom_model,
+        "openai_reasoning_effort_options": (
+            OPENAI_REASONING_EFFORT_OPTIONS
+        ),
+        "selected_openai_reasoning_effort": (
+            selected_openai_reasoning_effort
+        ),
         "openai_env_key_configured": bool(
             settings.openai_api_key
         ),
@@ -622,6 +694,43 @@ FEEDBACK_EVALUATION_NOTICES = {
     "evaluation-failed": (
         "Die manuelle Bewertung konnte nicht gespeichert werden. Bitte "
         "prüfe alle vier Bewertungsstufen und Begründungen.",
+        "error",
+    ),
+    "evaluation-deleted": (
+        "Die ausgewählte Bewertung wurde gelöscht.",
+        "success",
+    ),
+    "evaluation-delete-linked": (
+        "Die KI-Vorbewertung ist noch mit einer manuellen Prüfung "
+        "verknüpft. Lösche zuerst die verknüpfte manuelle Bewertung.",
+        "error",
+    ),
+    "evaluation-delete-failed": (
+        "Die ausgewählte Bewertung konnte nicht gelöscht werden.",
+        "error",
+    ),
+    "feedback-run-removed": (
+        "Der Feedbackbogen und alle zugehörigen Bewertungen wurden aus "
+        "der Feedback-Bewertung entfernt. Der technische Feedbacklauf "
+        "bleibt zur Nachvollziehbarkeit erhalten.",
+        "success",
+    ),
+    "feedback-run-remove-failed": (
+        "Der Feedbackbogen konnte nicht aus der Feedback-Bewertung "
+        "entfernt werden.",
+        "error",
+    ),
+    "automatic-evaluation-saved": (
+        "Die automatische Vorbewertung wurde unverändert gespeichert. "
+        "Du kannst sie nun im manuellen Formular prüfen und als getrennte "
+        "Bewertung speichern.",
+        "success",
+    ),
+    "automatic-evaluation-failed": (
+        "Die automatische Vorbewertung konnte nicht abgeschlossen oder "
+        "gespeichert werden. Es wurde kein unvollständiger Datensatz "
+        "angelegt. Prüfe OPENAI_API_KEY, Modellzugriff und Verbindung. "
+        "Die technische Ursache steht im Serverterminal.",
         "error",
     ),
 }
@@ -834,6 +943,22 @@ def _validate_model_name(
     return model_name
 
 
+def _validate_openai_reasoning_effort(
+    reasoning_effort: str,
+) -> str | None:
+    normalized = reasoning_effort.strip().lower()
+
+    if not normalized:
+        return None
+
+    if normalized not in OPENAI_REASONING_EFFORTS:
+        raise ValueError(
+            "Bitte wähle eine gültige OpenAI-Denktiefe."
+        )
+
+    return normalized
+
+
 def _validate_runpod_tracking_id(raw_tracking_id: str) -> str:
     """Akzeptiert ausschließlich kanonische UUIDs aus dem Analyseformular."""
 
@@ -977,6 +1102,7 @@ def _provider_for_request(
     mistral_model: str = "",
     mistral_custom_model: str = "",
     mistral_api_key: str = "",
+    openai_reasoning_effort: str = "",
 ) -> LLMProvider:
     if provider_key == "ollama":
         if not _ollama_available():
@@ -1033,6 +1159,11 @@ def _provider_for_request(
                 openai_model,
                 openai_custom_model,
                 settings.openai_model,
+            ),
+            reasoning_effort=(
+                _validate_openai_reasoning_effort(
+                    openai_reasoning_effort
+                )
             ),
         )
 
@@ -1205,6 +1336,14 @@ async def logout(
 async def feedback_evaluations_page(
     request: Request,
     notice: str = Query(default="", max_length=32),
+    automatic_feedback_run_id: str = Query(
+        default="",
+        max_length=36,
+    ),
+    feedback_run_notice_id: str = Query(
+        default="",
+        max_length=36,
+    ),
 ) -> Response:
     authenticated_user = _authenticated_user(request)
 
@@ -1246,6 +1385,32 @@ async def feedback_evaluations_page(
             "max_meta_justification_chars": (
                 MAX_META_JUSTIFICATION_CHARS
             ),
+            "max_evaluation_name_chars": (
+                MAX_EVALUATION_NAME_CHARS
+            ),
+            "automatic_evaluation_configured": (
+                automatic_evaluation_provider.configured
+            ),
+            "automatic_evaluation_provider": (
+                automatic_evaluation_provider.provider_name
+            ),
+            "automatic_evaluation_model": (
+                automatic_evaluation_provider.model_name
+            ),
+            "automatic_evaluation_reasoning_mode": (
+                OPENAI_EVALUATION_REASONING_MODE
+            ),
+            "automatic_evaluation_reasoning_effort": (
+                OPENAI_EVALUATION_REASONING_EFFORT
+            ),
+            "automatic_evaluation_prompt_version": (
+                AUTOMATIC_EVALUATION_PROMPT_VERSION
+            ),
+            "notice_code": notice,
+            "automatic_feedback_run_id": (
+                automatic_feedback_run_id
+            ),
+            "feedback_run_notice_id": feedback_run_notice_id,
             "notice_message": notice_message,
             "notice_tone": notice_tone,
             "error": error,
@@ -1284,6 +1449,66 @@ async def save_feedback_run_for_evaluation(
 
 
 @app.post(
+    "/feedback-runs/{feedback_run_id}/automatic-evaluations"
+)
+async def create_automatic_feedback_evaluation(
+    request: Request,
+    feedback_run_id: UUID,
+    evaluation_name: str = Form(
+        "",
+        max_length=MAX_EVALUATION_NAME_CHARS,
+    ),
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        stored_feedback_run = (
+            await task_store.get_feedback_run_for_evaluation(
+                str(feedback_run_id)
+            )
+        )
+        result = await automatic_feedback_evaluation_service.evaluate(
+            stored_feedback_run
+        )
+        await task_store.create_automatic_feedback_evaluation(
+            feedback_run_id=str(feedback_run_id),
+            scores={
+                rating.criterion_key: rating.score
+                for rating in result.ratings
+            },
+            justifications={
+                rating.criterion_key: rating.justification
+                for rating in result.ratings
+            },
+            evaluator_provider=result.provider,
+            evaluator_model=result.model,
+            evaluator_prompt_version=result.prompt_version,
+            duration_ms=result.duration_ms,
+            provider_request_id=result.provider_request_id,
+            evaluation_name=evaluation_name,
+        )
+        notice = "automatic-evaluation-saved"
+    except Exception:
+        logger.exception(
+            "Die automatische Feedbackvorbewertung ist fehlgeschlagen."
+        )
+        notice = "automatic-evaluation-failed"
+
+    return RedirectResponse(
+        url=(
+            f"/feedback-evaluations?notice={notice}"
+            f"&automatic_feedback_run_id={feedback_run_id}"
+            f"#feedback-run-{feedback_run_id}"
+        ),
+        status_code=303,
+    )
+
+
+@app.post(
     "/feedback-runs/{feedback_run_id}/manual-evaluations"
 )
 async def create_manual_feedback_evaluation(
@@ -1317,6 +1542,11 @@ async def create_manual_feedback_evaluation(
         min_length=1,
         max_length=MAX_META_JUSTIFICATION_CHARS,
     ),
+    source_evaluation_id: str = Form("", max_length=64),
+    evaluation_name: str = Form(
+        "",
+        max_length=MAX_EVALUATION_NAME_CHARS,
+    ),
     csrf_token: str = Form("", max_length=256),
 ) -> RedirectResponse:
     if _authenticated_user(request) is None:
@@ -1349,6 +1579,8 @@ async def create_manual_feedback_evaluation(
                     justification_action_learning_activation
                 ),
             },
+            source_evaluation_id=source_evaluation_id,
+            evaluation_name=evaluation_name,
         )
         notice = "evaluation-saved"
     except TaskStoreError:
@@ -1357,7 +1589,156 @@ async def create_manual_feedback_evaluation(
     return RedirectResponse(
         url=(
             f"/feedback-evaluations?notice={notice}"
+            f"&feedback_run_notice_id={feedback_run_id}"
             f"#feedback-run-{feedback_run_id}"
+        ),
+        status_code=303,
+    )
+
+
+@app.post(
+    "/feedback-runs/{feedback_run_id}/evaluations/"
+    "{evaluation_id}/delete"
+)
+async def delete_feedback_evaluation(
+    request: Request,
+    feedback_run_id: UUID,
+    evaluation_id: UUID,
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        await task_store.delete_feedback_evaluation(
+            feedback_run_id=str(feedback_run_id),
+            evaluation_id=str(evaluation_id),
+        )
+        notice = "evaluation-deleted"
+    except FeedbackEvaluationDeleteConflictError:
+        notice = "evaluation-delete-linked"
+    except TaskStoreError:
+        logger.exception(
+            "Eine gespeicherte Feedbackbewertung konnte nicht "
+            "gelöscht werden."
+        )
+        notice = "evaluation-delete-failed"
+
+    return RedirectResponse(
+        url=(
+            f"/feedback-evaluations?notice={notice}"
+            f"&feedback_run_notice_id={feedback_run_id}"
+            f"#feedback-run-{feedback_run_id}"
+        ),
+        status_code=303,
+    )
+
+
+@app.get(
+    "/feedback-runs/{feedback_run_id}/evaluations/"
+    "{evaluation_id}/pdf"
+)
+async def export_feedback_evaluation_pdf(
+    request: Request,
+    feedback_run_id: UUID,
+    evaluation_id: UUID,
+) -> Response:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    try:
+        feedback_run = await task_store.get_feedback_run_for_evaluation(
+            str(feedback_run_id)
+        )
+    except TaskStoreError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"message": "Der Feedbacklauf wurde nicht gefunden."},
+        ) from exc
+
+    evaluation = next(
+        (
+            item
+            for item in feedback_run.evaluations
+            if item.evaluation_id == str(evaluation_id)
+        ),
+        None,
+    )
+
+    if evaluation is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"message": "Die Bewertung wurde nicht gefunden."},
+        )
+
+    try:
+        pdf = feedback_evaluation_pdf_service.render(
+            feedback_run=feedback_run,
+            evaluation=evaluation,
+        )
+    except FeedbackEvaluationPdfError as exc:
+        logger.exception(
+            "Eine gespeicherte Meta-Bewertung konnte nicht als PDF "
+            "exportiert werden."
+        )
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "message": (
+                    "Der PDF-Export konnte nicht erzeugt werden."
+                )
+            },
+        ) from exc
+
+    return Response(
+        content=pdf.content,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="{pdf.filename}"'
+            ),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@app.post(
+    "/feedback-runs/{feedback_run_id}/remove-from-evaluation"
+)
+async def remove_feedback_run_from_evaluation(
+    request: Request,
+    feedback_run_id: UUID,
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        await task_store.remove_feedback_run_from_evaluation(
+            feedback_run_id=str(feedback_run_id),
+        )
+        return RedirectResponse(
+            url=(
+                "/feedback-evaluations?notice="
+                "feedback-run-removed"
+            ),
+            status_code=303,
+        )
+    except TaskStoreError:
+        logger.exception(
+            "Ein Feedbackbogen konnte nicht aus der "
+            "Feedback-Bewertung entfernt werden."
+        )
+
+    return RedirectResponse(
+        url=(
+            "/feedback-evaluations?notice="
+            "feedback-run-remove-failed"
         ),
         status_code=303,
     )
@@ -2178,12 +2559,17 @@ async def analyze(
     student_text: str = Form(...),
     provider: str = Form(...),
     task_id: str = Form("", max_length=100),
+    original_text: str = Form(
+        "",
+        max_length=MAX_MATERIAL_CHARS,
+    ),
     csrf_token: str = Form("", max_length=256),
     ollama_base_url: str = Form(""),
     ollama_model: str = Form(""),
     ollama_custom_model: str = Form(""),
     openai_model: str = Form(""),
     openai_custom_model: str = Form(""),
+    openai_reasoning_effort: str = Form("", max_length=16),
     openai_api_key: str = Form(""),
     mistral_model: str = Form(""),
     mistral_custom_model: str = Form(""),
@@ -2226,6 +2612,7 @@ async def analyze(
             ollama_custom_model=ollama_custom_model,
             openai_model=openai_model,
             openai_custom_model=openai_custom_model,
+            openai_reasoning_effort=openai_reasoning_effort,
             openai_api_key=openai_api_key,
             mistral_model=mistral_model,
             mistral_custom_model=mistral_custom_model,
@@ -2250,6 +2637,7 @@ async def analyze(
             result = await rubric_feedback_service.analyze_text(
                 student_text=student_text,
                 task=selected_task,
+                original_text=original_text,
                 provider_key=provider,
                 provider_override=provider_override,
             )
@@ -2258,6 +2646,7 @@ async def analyze(
                 feedback_run_id = await task_store.save_feedback_run(
                     task=selected_task,
                     student_text=student_text,
+                    original_text=original_text,
                     provider=result.provider,
                     model=result.model,
                     duration_ms=result.duration_ms,
@@ -2271,6 +2660,7 @@ async def analyze(
                     execution_duration_ms=(
                         result.execution_duration_ms
                     ),
+                    reasoning_effort=result.reasoning_effort,
                 )
             except TaskStoreError:
                 storage_warning = (
@@ -2324,11 +2714,15 @@ async def analyze(
             student_text=student_text,
             task_options=task_options,
             selected_task_id=task_id.strip(),
+            original_text=original_text,
             ollama_base_url=ollama_base_url,
             selected_ollama_model=ollama_model,
             ollama_custom_model=ollama_custom_model,
             selected_openai_model=openai_model,
             openai_custom_model=openai_custom_model,
+            selected_openai_reasoning_effort=(
+                openai_reasoning_effort
+            ),
             openai_override_used=openai_override_used,
             selected_mistral_model=mistral_model,
             mistral_custom_model=mistral_custom_model,

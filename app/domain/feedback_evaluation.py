@@ -6,7 +6,9 @@ from datetime import datetime
 
 
 MANUAL_EVALUATION_TYPE = "manual"
+AUTOMATIC_EVALUATION_TYPE = "automatic"
 MAX_META_JUSTIFICATION_CHARS = 2000
+MAX_EVALUATION_NAME_CHARS = 120
 META_EVALUATION_SCORE_OPTIONS = (
     (0, "nicht erfüllt"),
     (1, "teilweise erfüllt"),
@@ -167,10 +169,13 @@ class StoredFeedbackEvaluation:
     feedback_run_id: str
     created_at: datetime
     evaluation_type: str
+    evaluation_name: str | None
     rubric_version: str
     ratings: tuple[FeedbackEvaluationRating, ...]
     evaluator_provider: str | None
     evaluator_model: str | None
+    evaluator_prompt_version: str | None
+    source_evaluation_id: str | None
     duration_ms: int | None
     queue_duration_ms: float | None
     execution_duration_ms: float | None
@@ -181,7 +186,18 @@ class StoredFeedbackEvaluation:
         if self.evaluation_type == MANUAL_EVALUATION_TYPE:
             return "Manuelle Bewertung"
 
-        return "Automatische Bewertung"
+        return "Automatische Vorbewertung"
+
+    @property
+    def average_score(self) -> float | None:
+        """Arithmetischer Mittelwert der Kriterien dieser Bewertung."""
+
+        if not self.ratings:
+            return None
+
+        return sum(rating.score for rating in self.ratings) / len(
+            self.ratings
+        )
 
 
 @dataclass(frozen=True)
@@ -195,6 +211,7 @@ class StoredFeedbackRun:
     selected_for_evaluation_at: datetime
     provider: str
     model: str
+    reasoning_effort: str | None
     duration_ms: int
     queue_duration_ms: float | None
     execution_duration_ms: float | None
@@ -203,6 +220,7 @@ class StoredFeedbackRun:
     task_snapshot: dict[str, object]
     feedback_payload: dict[str, object]
     evaluations: tuple[StoredFeedbackEvaluation, ...]
+    original_text: str | None = None
 
     @property
     def task_title(self) -> str:
@@ -229,4 +247,40 @@ class StoredFeedbackRun:
         return sum(
             evaluation.evaluation_type == MANUAL_EVALUATION_TYPE
             for evaluation in self.evaluations
+        )
+
+    @property
+    def automatic_evaluation_count(self) -> int:
+        return sum(
+            evaluation.evaluation_type == AUTOMATIC_EVALUATION_TYPE
+            for evaluation in self.evaluations
+        )
+
+    @property
+    def aggregate_score(self) -> float | None:
+        """Rein berechneter Mittelwert aller gespeicherten Einzelwerte."""
+
+        scores = [
+            rating.score
+            for evaluation in self.evaluations
+            for rating in evaluation.ratings
+        ]
+
+        if not scores:
+            return None
+
+        return sum(scores) / len(scores)
+
+    @property
+    def latest_automatic_evaluation(
+        self,
+    ) -> StoredFeedbackEvaluation | None:
+        return next(
+            (
+                evaluation
+                for evaluation in self.evaluations
+                if evaluation.evaluation_type
+                == AUTOMATIC_EVALUATION_TYPE
+            ),
+            None,
         )

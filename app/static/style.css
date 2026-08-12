@@ -1303,6 +1303,15 @@ fieldset > label:first-of-type {
     background: var(--success-bg);
 }
 
+.criterion-status-mostly_met {
+    border-left-color: #65a30d;
+}
+
+.criterion-status-mostly_met .criterion-status-badge {
+    color: #4d7c0f;
+    background: #f7fee7;
+}
+
 .criterion-status-partially_met {
     border-left-color: #d97706;
 }
@@ -1404,10 +1413,22 @@ fieldset > label:first-of-type {
     border-radius: 999px;
 }
 
-.meta-rating-status.is-rated {
-    color: #166534;
-    background: #dcfce7;
-    border-color: #86d7a6;
+.meta-rating-status.is-aggregate {
+    display: grid;
+    justify-items: end;
+    color: hsl(var(--meta-rating-hue) 68% 27%);
+    text-align: right;
+    background: hsl(var(--meta-rating-hue) 78% 94%);
+    border-color: hsl(var(--meta-rating-hue) 58% 62%);
+}
+
+.meta-rating-status.is-aggregate strong {
+    font-size: 0.9rem;
+}
+
+.meta-rating-status.is-aggregate small {
+    font-size: 0.7rem;
+    font-weight: 600;
 }
 
 .meta-action-button,
@@ -1460,6 +1481,17 @@ fieldset > label:first-of-type {
     color: var(--muted);
 }
 
+.meta-run-heading-actions {
+    display: grid;
+    flex: 0 0 auto;
+    justify-items: end;
+    gap: 10px;
+}
+
+.meta-run-remove-form .danger-button {
+    width: auto;
+}
+
 .meta-run-metadata {
     margin-top: 18px;
 }
@@ -1471,6 +1503,29 @@ fieldset > label:first-of-type {
     background: #ffffff;
     border: 1px solid #ddd6fe;
     border-radius: 10px;
+}
+
+.analysis-original-text-panel {
+    margin: 18px 0;
+    overflow: hidden;
+    background: #faf8ff;
+    border: 1px solid #ddd6fe;
+    border-radius: 10px;
+}
+
+.analysis-original-text-panel > summary {
+    padding: 14px 16px;
+    color: var(--primary);
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.analysis-original-text-content {
+    padding: 0 16px 16px;
+}
+
+.analysis-original-text-content .hint {
+    margin-bottom: 0;
 }
 
 .meta-source-details summary,
@@ -1608,33 +1663,253 @@ fieldset > label:first-of-type {
     margin-top: 7px !important;
 }
 
-.meta-evaluation-history {
+.meta-automatic-evaluation {
     margin: 22px 0 18px;
+    padding: 18px;
+    background: #faf8ff;
+    border: 2px solid var(--meta-border);
+    border-radius: 12px;
 }
 
-.meta-evaluation-history > h3 {
-    margin: 0 0 12px;
+.meta-automatic-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.meta-automatic-heading h3 {
+    margin: 6px 0 0;
+}
+
+.meta-cloud-badge,
+.meta-model-badge {
+    display: inline-flex;
+    width: fit-content;
+    padding: 3px 8px;
+    color: var(--meta-text);
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.3;
+    background: #ede9fe;
+    border: 1px solid #c4b5fd;
+    border-radius: 999px;
+}
+
+.meta-model-badge {
+    flex: 0 0 auto;
+    color: #1d4ed8;
+    background: #eff6ff;
+    border-color: #93c5fd;
+}
+
+.meta-automatic-evaluation > p {
+    margin: 12px 0 0;
+}
+
+.meta-automatic-result {
+    margin-top: 15px;
+    padding: 12px 13px;
+    border: 1px solid;
+    border-radius: 9px;
+}
+
+.meta-automatic-result p {
+    margin: 4px 0 0;
+}
+
+.meta-automatic-result-success {
+    color: #166534;
+    background: var(--success-bg);
+    border-color: var(--success-border);
+}
+
+.meta-automatic-result-error {
+    color: #991b1b;
+    background: var(--error-bg);
+    border-color: var(--error-border);
+}
+
+.meta-automatic-metadata,
+.meta-evaluator-metadata {
+    margin-top: 15px;
+}
+
+.meta-automatic-metadata code,
+.meta-evaluator-metadata dd {
+    overflow-wrap: anywhere;
+}
+
+.meta-cloud-warning,
+.meta-configuration-warning {
+    padding: 12px 13px;
+    color: #7c2d12;
+    background: #fff7ed;
+    border: 1px solid #fdba74;
+    border-radius: 9px;
+}
+
+.meta-configuration-warning {
+    color: #92400e;
+    background: #fffbeb;
+    border-color: #f5c451;
+}
+
+.meta-automatic-evaluation form {
+    margin: 14px 0 0;
+}
+
+.meta-evaluation-name-label {
+    display: block;
+    margin: 0 0 6px;
+    font-weight: 700;
+}
+
+.meta-evaluation-name-hint {
+    margin: 6px 0 12px;
+}
+
+.meta-automatic-loading {
+    color: #4c1d95;
+    background: var(--meta-bg);
+    border-color: var(--meta-border);
+}
+
+.meta-automatic-loading .loading-bar {
+    background: #ddd6fe;
+}
+
+.meta-automatic-loading .loading-bar span {
+    background: var(--meta-action);
+}
+
+.meta-automatic-button {
+    background: var(--meta-action);
+}
+
+.meta-automatic-button:hover {
+    background: var(--meta-action-hover);
+}
+
+.meta-evaluation-history {
+    margin: 22px 0 18px;
+    overflow: hidden;
+    background: #ffffff;
+    border: 1px solid #ddd6fe;
+    border-radius: 10px;
+}
+
+.meta-evaluation-history-summary,
+.meta-evaluation-record-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    list-style: none;
+    cursor: pointer;
+}
+
+.meta-evaluation-history-summary::-webkit-details-marker,
+.meta-evaluation-record-heading::-webkit-details-marker {
+    display: none;
+}
+
+.meta-evaluation-history-summary::before,
+.meta-evaluation-record-heading::before {
+    content: "▸";
+    color: var(--meta-action);
+    line-height: 1;
+    transform-origin: center;
+    transition: transform 150ms ease;
+}
+
+.meta-evaluation-history[open]
+    > .meta-evaluation-history-summary::before,
+.meta-evaluation-record[open]
+    > .meta-evaluation-record-heading::before {
+    transform: rotate(90deg);
+}
+
+.meta-evaluation-history-summary {
+    padding: 13px 15px;
+    color: var(--meta-text);
+    font-weight: 700;
+    background: var(--meta-bg);
+}
+
+.meta-evaluation-history-summary:hover,
+.meta-evaluation-record-heading:hover {
+    background: #ede9fe;
+}
+
+.meta-evaluation-history-summary:focus-visible,
+.meta-evaluation-record-heading:focus-visible {
+    outline: 3px solid #c4b5fd;
+    outline-offset: -3px;
+}
+
+.meta-evaluation-history-overview,
+.meta-evaluation-record-summary-meta {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.meta-evaluation-history-overview {
+    color: var(--muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.meta-evaluation-history-content {
+    padding: 4px 14px 14px;
 }
 
 .meta-evaluation-record {
-    margin-top: 12px;
-    padding: 16px;
+    margin-top: 10px;
+    overflow: hidden;
     background: #f9fafb;
     border: 1px solid var(--border);
     border-radius: 10px;
 }
 
 .meta-evaluation-record-heading {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
+    padding: 13px 15px;
 }
 
-.meta-evaluation-record-heading span,
+.meta-evaluation-record-title {
+    display: grid;
+    gap: 3px;
+}
+
+.meta-evaluation-type-label {
+    display: block;
+}
+
+.meta-evaluation-created-at,
+.meta-evaluation-type-label,
 .meta-rubric-version {
     color: var(--muted);
     font-size: 0.88rem;
+}
+
+.meta-evaluation-average {
+    flex: 0 0 auto;
+    padding: 3px 8px;
+    color: hsl(var(--meta-rating-hue) 68% 27%);
+    font-size: 0.8rem;
+    font-weight: 700;
+    line-height: 1.3;
+    white-space: nowrap;
+    background: hsl(var(--meta-rating-hue) 78% 94%);
+    border: 1px solid hsl(var(--meta-rating-hue) 58% 62%);
+    border-radius: 999px;
+}
+
+.meta-evaluation-record-content {
+    padding: 12px 15px 15px;
+    border-top: 1px solid var(--border);
 }
 
 .meta-rubric-version {
@@ -1675,6 +1950,25 @@ fieldset > label:first-of-type {
     white-space: pre-wrap;
 }
 
+.meta-evaluation-record-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.meta-evaluation-delete-form {
+    margin: 0;
+}
+
+.meta-evaluation-record-actions .button-link,
+.meta-evaluation-delete-form .danger-button {
+    width: auto;
+}
+
 .meta-score-badge {
     flex: 0 0 auto;
     padding: 3px 8px;
@@ -1711,6 +2005,11 @@ fieldset > label:first-of-type {
 .meta-manual-evaluation-content {
     padding: 18px;
     border-top: 1px solid #ddd6fe;
+}
+
+.meta-manual-evaluation[data-open-after-automatic-evaluation] {
+    scroll-margin-top: 18px;
+    box-shadow: 0 0 0 3px rgb(167 139 250 / 24%);
 }
 
 .meta-manual-intro h3,
@@ -1820,6 +2119,11 @@ fieldset > label:first-of-type {
         animation: none;
         transform: translateX(75%);
     }
+
+    .meta-evaluation-history-summary::before,
+    .meta-evaluation-record-heading::before {
+        transition: none;
+    }
 }
 
 @media (max-width: 700px) {
@@ -1832,11 +2136,42 @@ fieldset > label:first-of-type {
     .criterion-editor-label,
     .criterion-feedback-header,
     .meta-run-heading,
-    .meta-evaluation-record-heading,
+    .meta-run-heading-actions,
+    .meta-automatic-heading,
     .meta-rating-result dt,
     .meta-manual-actions {
         align-items: stretch;
         flex-direction: column;
+    }
+
+    .meta-run-heading-actions {
+        justify-items: stretch;
+    }
+
+    .meta-run-remove-form .danger-button {
+        width: 100%;
+    }
+
+    .meta-evaluation-history-summary,
+    .meta-evaluation-record-heading {
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: start;
+    }
+
+    .meta-evaluation-history-overview,
+    .meta-evaluation-record-summary-meta {
+        grid-column: 2;
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+
+    .meta-evaluation-record-actions {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .meta-evaluation-delete-form {
+        width: 100%;
     }
 
     .session-area {

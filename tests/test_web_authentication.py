@@ -140,11 +140,45 @@ class WebAuthenticationTests(unittest.TestCase):
             },
             follow_redirects=False,
         )
+        automatic_response = self.client.post(
+            (
+                "/feedback-runs/"
+                "00000000-0000-0000-0000-000000000001/"
+                "automatic-evaluations"
+            ),
+            data={
+                "csrf_token": "nicht-relevant-ohne-anmeldung",
+            },
+            follow_redirects=False,
+        )
+        pdf_response = self.client.get(
+            (
+                "/feedback-runs/"
+                "00000000-0000-0000-0000-000000000001/"
+                "evaluations/"
+                "00000000-0000-0000-0000-000000000002/pdf"
+            ),
+            follow_redirects=False,
+        )
+        remove_response = self.client.post(
+            (
+                "/feedback-runs/"
+                "00000000-0000-0000-0000-000000000001/"
+                "remove-from-evaluation"
+            ),
+            data={
+                "csrf_token": "nicht-relevant-ohne-anmeldung",
+            },
+            follow_redirects=False,
+        )
 
         for response in (
             overview_response,
             save_response,
             manual_response,
+            automatic_response,
+            pdf_response,
+            remove_response,
         ):
             self.assertEqual(response.status_code, 303)
             self.assertEqual(response.headers["location"], "/login")

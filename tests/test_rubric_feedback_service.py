@@ -125,7 +125,7 @@ class RubricFeedbackServiceTests(unittest.TestCase):
                         },
                         {
                             "criterion_id": "K1",
-                            "status": "partially_met",
+                            "status": "mostly_met",
                             "feedback": "Der Titel ist vorhanden.",
                             "next_step": "Ergänze den Autor.",
                         },
@@ -144,6 +144,7 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             service.analyze_text(
                 student_text="Ein anonymisierter Schülertext.",
                 task=_task(),
+                original_text="Ein laufbezogenes Beispielgedicht.",
                 provider_key="mistral",
             )
         )
@@ -151,6 +152,18 @@ class RubricFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(len(provider.prompts), 1)
         self.assertIn("Interpretiere das Gedicht.", provider.prompts[0])
         self.assertIn("Das Beispielgedicht", provider.prompts[0])
+        self.assertIn(
+            "Ein laufbezogenes Beispielgedicht.",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            '"original_text_for_this_run"',
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "unabhängig",
+            provider.prompts[0],
+        )
         self.assertIn('"criterion_id": "K1"', provider.prompts[0])
         self.assertIn('"criterion_id": "K2"', provider.prompts[0])
         self.assertNotIn(FIRST_CRITERION_ID, provider.prompts[0])
@@ -166,6 +179,14 @@ class RubricFeedbackServiceTests(unittest.TestCase):
         )
         self.assertIn(
             "keine Sternchen",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "mostly_met = überwiegend erfüllt",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "Technische Statuswerte gehören ausschließlich",
             provider.prompts[0],
         )
         self.assertEqual(
@@ -191,13 +212,25 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             reference_schema["enum"],
             ["K1", "K2"],
         )
+        status_schema = item_properties["status"]
+        assert isinstance(status_schema, dict)
+        self.assertEqual(
+            status_schema["enum"],
+            [
+                "met",
+                "mostly_met",
+                "partially_met",
+                "not_met",
+                "not_assessable",
+            ],
+        )
         self.assertEqual(
             [item.criterion_id for item in result.criteria_feedback],
             [FIRST_CRITERION_ID, SECOND_CRITERION_ID],
         )
         self.assertEqual(
             result.criteria_feedback[0].status_label,
-            "Teilweise erfüllt",
+            "Überwiegend erfüllt",
         )
         self.assertEqual(
             result.criteria_feedback[0].criterion_title,

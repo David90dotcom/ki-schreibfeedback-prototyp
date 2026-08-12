@@ -14,6 +14,7 @@ class FeedbackResult:
     execution_duration_ms: float | None = None
     provider_request_id: str | None = None
     worker_id: str | None = None
+    reasoning_effort: str | None = None
 
 
 class FeedbackService:
@@ -77,7 +78,21 @@ class FeedbackService:
             execution_duration_ms=response.execution_duration_ms,
             provider_request_id=response.provider_request_id,
             worker_id=response.worker_id,
+            reasoning_effort=self._reasoning_effort(
+                response.raw_metadata
+            ),
         )
+
+    @staticmethod
+    def _reasoning_effort(
+        raw_metadata: dict[str, object],
+    ) -> str | None:
+        value = raw_metadata.get("reasoning_effort")
+
+        if not isinstance(value, str) or not value.strip():
+            return None
+
+        return value.strip().lower()
 
     def _build_feedback_prompt(
         self,
