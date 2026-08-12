@@ -443,9 +443,84 @@ class TaskManagementTests(unittest.TestCase):
             "Der Feedbacklauf wurde für die spätere Bewertung gespeichert.",
             overview.text,
         )
-        self.assertNotIn(
+        self.assertIn(
             "Anonymisierter Schülertext",
             overview.text,
+        )
+        self.assertIn("Bewertungsgrundlage anzeigen", overview.text)
+        self.assertIn("Manuell bewerten", overview.text)
+        self.assertIn("Fachliche Korrektheit", overview.text)
+        self.assertIn("Transparenz und Begründung", overview.text)
+        self.assertIn("Adressaten- und Kontextpassung", overview.text)
+        self.assertIn(
+            "Handlungsorientierung und Lernaktivierung",
+            overview.text,
+        )
+        self.assertIn('name="score_factual_correctness"', overview.text)
+        self.assertIn(
+            'name="justification_action_learning_activation"',
+            overview.text,
+        )
+        self.assertIn("meta-feedback-v1", overview.text)
+
+        manual_response = self.client.post(
+            f"/feedback-runs/{feedback_run_id}/manual-evaluations",
+            data={
+                "csrf_token": self.csrf_token,
+                "score_factual_correctness": "3",
+                "justification_factual_correctness": (
+                    "Die fachlichen Hinweise stimmen mit dem Text überein."
+                ),
+                "score_transparency_reasoning": "2",
+                "justification_transparency_reasoning": (
+                    "Die wichtigsten Urteile sind nachvollziehbar belegt."
+                ),
+                "score_audience_context_fit": "3",
+                "justification_audience_context_fit": (
+                    "Sprache und Umfang passen zur achten Klasse."
+                ),
+                "score_action_learning_activation": "2",
+                "justification_action_learning_activation": (
+                    "Die nächsten Schritte sind konkret umsetzbar."
+                ),
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(manual_response.status_code, 303)
+        self.assertEqual(
+            manual_response.headers["location"],
+            (
+                "/feedback-evaluations?notice=evaluation-saved"
+                f"#feedback-run-{feedback_run_id}"
+            ),
+        )
+        evaluated_runs = asyncio.run(
+            self.store.list_feedback_runs_for_evaluation()
+        )
+        self.assertEqual(evaluated_runs[0].manual_evaluation_count, 1)
+        self.assertEqual(len(evaluated_runs[0].evaluations), 1)
+
+        evaluated_overview = self.client.get(
+            "/feedback-evaluations?notice=evaluation-saved"
+        )
+        self.assertEqual(evaluated_overview.status_code, 200)
+        self.assertIn("1 manuelle Bewertung", evaluated_overview.text)
+        self.assertIn("Gespeicherte Bewertungen", evaluated_overview.text)
+        self.assertIn("Manuelle Bewertung", evaluated_overview.text)
+        self.assertIn("3/3", evaluated_overview.text)
+        self.assertIn("erfüllt", evaluated_overview.text)
+        self.assertIn(
+            "Die fachlichen Hinweise stimmen mit dem Text überein.",
+            evaluated_overview.text,
+        )
+        self.assertIn(
+            "Die manuelle Bewertung wurde als eigenständiger Datensatz",
+            evaluated_overview.text,
+        )
+        self.assertIn(
+            "Weitere manuelle Bewertung anlegen",
+            evaluated_overview.text,
         )
 
     def test_empty_task_selection_keeps_previous_analysis_path(self) -> None:
@@ -522,6 +597,50 @@ class TaskManagementTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_manual_evaluation_requires_valid_csrf_token(self) -> None:
+        task = self._create_task()
+        student_text = "Anonymisierter Schülertext"
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="openai",
+                model="test-model",
+                duration_ms=100,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Testfeedback",
+                },
+            )
+        )
+        asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+
+        response = self.client.post(
+            f"/feedback-runs/{feedback_run_id}/manual-evaluations",
+            data={
+                "csrf_token": "ungueltig",
+                "score_factual_correctness": "3",
+                "justification_factual_correctness": "Begründung",
+                "score_transparency_reasoning": "3",
+                "justification_transparency_reasoning": "Begründung",
+                "score_audience_context_fit": "3",
+                "justification_audience_context_fit": "Begründung",
+                "score_action_learning_activation": "3",
+                "justification_action_learning_activation": "Begründung",
+            },
+        )
+
+        self.assertEqual(response.status_code, 403)
+        selected_run = asyncio.run(
+            self.store.list_feedback_runs_for_evaluation()
+        )[0]
+        self.assertEqual(selected_run.evaluations, ())
 
     def test_writing_task_requires_valid_csrf_token(self) -> None:
         response = self.client.post(

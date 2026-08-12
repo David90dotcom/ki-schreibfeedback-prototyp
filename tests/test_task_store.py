@@ -8,10 +8,14 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.domain.feedback_evaluation import (
+    MANUAL_META_EVALUATION_RUBRIC,
+)
 from app.domain.rubric import FeedbackTaskDraft
 from app.services.analysis_run_store import AnalysisRunStore
 from app.services.runpod_job_store import RunPodJobStore
 from app.services.task_store import (
+    FeedbackEvaluationValidationError,
     FeedbackRunSelectionError,
     TaskStore,
     TaskStoreError,
@@ -47,6 +51,38 @@ class TaskStoreTests(unittest.TestCase):
                 ],
             )
         )
+
+    def _create_selected_feedback_run(self) -> str:
+        task = self._create_task()
+        student_text = "Anonymisierter Text für die Qualitätsbewertung."
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="openai",
+                model="erzeuger-modell",
+                duration_ms=640,
+                feedback_payload={
+                    "criteria": [
+                        {
+                            "criterion_id": "criterion-1",
+                            "criterion_title": "Einleitung",
+                            "status": "partially_met",
+                            "feedback": "Der Titel ist vorhanden.",
+                            "next_step": "Ergänze Autor und Thema.",
+                        }
+                    ],
+                    "overall_feedback": "Ein sinnvoller Anfang.",
+                },
+            )
+        )
+        asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+        return feedback_run_id
 
     def test_criterion_limits_are_configurable(self) -> None:
         limited_store = TaskStore(
@@ -349,6 +385,144 @@ class TaskStoreTests(unittest.TestCase):
         )
         self.assertEqual(listed, [selected])
 
+    def test_manual_feedback_evaluations_are_versioned_and_separate(
+        self,
+    ) -> None:
+        feedback_run_id = self._create_selected_feedback_run()
+        criterion_keys = [
+            criterion.key
+            for criterion in MANUAL_META_EVALUATION_RUBRIC.criteria
+        ]
+        first_scores = dict(zip(criterion_keys, (3, 2, 2, 1)))
+        second_scores = dict(zip(criterion_keys, (2, 3, 3, 2)))
+        first_justifications = {
+            key: f"Erste begründete Einschätzung zu {key}."
+            for key in criterion_keys
+        }
+        second_justifications = {
+            key: f"  Zweite begründete Einschätzung zu {key}.  "
+            for key in criterion_keys
+        }
+
+        first = asyncio.run(
+            self.store.create_manual_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                scores=first_scores,
+                justifications=first_justifications,
+            )
+        )
+        second = asyncio.run(
+            self.store.create_manual_feedback_evaluation(
+                feedback_run_id=feedback_run_id,
+                scores=second_scores,
+                justifications=second_justifications,
+            )
+        )
+        selected_run = asyncio.run(
+            self.store.list_feedback_runs_for_evaluation()
+        )[0]
+
+        self.assertNotEqual(first.evaluation_id, second.evaluation_id)
+        self.assertEqual(first.evaluation_type, "manual")
+        self.assertEqual(
+            first.rubric_version,
+            MANUAL_META_EVALUATION_RUBRIC.version,
+        )
+        self.assertEqual(len(first.ratings), 4)
+        self.assertEqual(first.ratings[0].score, 3)
+        self.assertEqual(first.ratings[0].rating_label, "erfüllt")
+        self.assertEqual(
+            first.ratings[0].criterion_title,
+            "Fachliche Korrektheit",
+        )
+        self.assertEqual(
+            second.ratings[0].justification,
+            second_justifications[criterion_keys[0]].strip(),
+        )
+        self.assertIsNone(first.evaluator_provider)
+        self.assertIsNone(first.evaluator_model)
+        self.assertIsNone(first.duration_ms)
+        self.assertEqual(selected_run.manual_evaluation_count, 2)
+        self.assertEqual(
+            {item.evaluation_id for item in selected_run.evaluations},
+            {first.evaluation_id, second.evaluation_id},
+        )
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            evaluation_count = connection.execute(
+                "SELECT COUNT(*) FROM feedback_evaluations"
+            ).fetchone()[0]
+            rating_count = connection.execute(
+                "SELECT COUNT(*) FROM feedback_evaluation_ratings"
+            ).fetchone()[0]
+
+        self.assertEqual(evaluation_count, 2)
+        self.assertEqual(rating_count, 8)
+
+    def test_manual_feedback_evaluation_rejects_incomplete_input(
+        self,
+    ) -> None:
+        feedback_run_id = self._create_selected_feedback_run()
+        criterion_keys = [
+            criterion.key
+            for criterion in MANUAL_META_EVALUATION_RUBRIC.criteria
+        ]
+
+        with self.assertRaises(FeedbackEvaluationValidationError):
+            asyncio.run(
+                self.store.create_manual_feedback_evaluation(
+                    feedback_run_id=feedback_run_id,
+                    scores={criterion_keys[0]: 3},
+                    justifications={criterion_keys[0]: "Begründung"},
+                )
+            )
+
+        with self.assertRaises(FeedbackEvaluationValidationError):
+            asyncio.run(
+                self.store.create_manual_feedback_evaluation(
+                    feedback_run_id=feedback_run_id,
+                    scores={key: 2 for key in criterion_keys},
+                    justifications={
+                        key: ("   " if key == criterion_keys[2] else "Beleg")
+                        for key in criterion_keys
+                    },
+                )
+            )
+
+        selected_run = asyncio.run(
+            self.store.list_feedback_runs_for_evaluation()
+        )[0]
+        self.assertEqual(selected_run.evaluations, ())
+
+    def test_manual_feedback_evaluation_requires_selected_run(self) -> None:
+        task = self._create_task()
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text="Anonymisierter Text",
+                provider="ollama",
+                model="lokales-modell",
+                duration_ms=100,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Feedback",
+                },
+            )
+        )
+        criterion_keys = [
+            criterion.key
+            for criterion in MANUAL_META_EVALUATION_RUBRIC.criteria
+        ]
+
+        with self.assertRaises(FeedbackRunSelectionError):
+            asyncio.run(
+                self.store.create_manual_feedback_evaluation(
+                    feedback_run_id=feedback_run_id,
+                    scores={key: 2 for key in criterion_keys},
+                    justifications={key: "Begründung" for key in criterion_keys},
+                )
+            )
+
     def test_feedback_run_selection_rejects_mismatched_text(self) -> None:
         task = self._create_task()
         feedback_run_id = asyncio.run(
@@ -399,6 +573,10 @@ class TaskStoreTests(unittest.TestCase):
 
         with sqlite3.connect(self.store.database_path) as connection:
             connection.execute(
+                "DROP TABLE feedback_evaluation_ratings"
+            )
+            connection.execute("DROP TABLE feedback_evaluations")
+            connection.execute(
                 "DROP INDEX idx_rubric_feedback_runs_evaluation"
             )
             connection.execute(
@@ -429,10 +607,22 @@ class TaskStoreTests(unittest.TestCase):
                     "SELECT feedback_run_id FROM rubric_feedback_runs"
                 ).fetchall()
             }
+            tables = {
+                row[0]
+                for row in connection.execute(
+                    """
+                    SELECT name
+                    FROM sqlite_master
+                    WHERE type = 'table'
+                    """
+                ).fetchall()
+            }
 
         self.assertIn("student_text", columns)
         self.assertIn("selected_for_evaluation_at", columns)
         self.assertIn(feedback_run_id, stored_ids)
+        self.assertIn("feedback_evaluations", tables)
+        self.assertIn("feedback_evaluation_ratings", tables)
 
         selected = asyncio.run(
             self.store.select_feedback_run_for_evaluation(

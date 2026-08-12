@@ -11,7 +11,13 @@ from pathlib import Path
 from threading import Lock
 from uuid import uuid4
 
-from app.domain.feedback_evaluation import StoredFeedbackRun
+from app.domain.feedback_evaluation import (
+    MANUAL_EVALUATION_TYPE,
+    MANUAL_META_EVALUATION_RUBRIC,
+    FeedbackEvaluationRating,
+    StoredFeedbackEvaluation,
+    StoredFeedbackRun,
+)
 from app.domain.rubric import (
     FeedbackTask,
     FeedbackTaskDraft,
@@ -48,6 +54,10 @@ class FeedbackRunNotFoundError(TaskStoreError):
 
 class FeedbackRunSelectionError(TaskStoreError):
     """Der Feedbacklauf kann nicht zur Bewertung ausgewählt werden."""
+
+
+class FeedbackEvaluationValidationError(TaskStoreError):
+    """Die übermittelte Meta-Bewertung ist nicht vollständig gültig."""
 
 
 class TaskStore:
@@ -304,6 +314,28 @@ class TaskStore:
         return await asyncio.to_thread(
             self._list_feedback_runs_for_evaluation_sync,
             limit,
+        )
+
+    async def create_manual_feedback_evaluation(
+        self,
+        *,
+        feedback_run_id: str,
+        scores: dict[str, int],
+        justifications: dict[str, str],
+    ) -> StoredFeedbackEvaluation:
+        try:
+            ratings = MANUAL_META_EVALUATION_RUBRIC.build_ratings(
+                scores=scores,
+                justifications=justifications,
+            )
+        except ValueError as exc:
+            raise FeedbackEvaluationValidationError(str(exc)) from exc
+
+        return await asyncio.to_thread(
+            self._create_manual_feedback_evaluation_sync,
+            str(uuid4()),
+            feedback_run_id,
+            ratings,
         )
 
     def _initialize_sync(self) -> None:
@@ -818,6 +850,123 @@ class TaskStore:
                 "Die ausgewählten Feedbackläufe konnten nicht geladen werden."
             ) from exc
 
+    def _create_manual_feedback_evaluation_sync(
+        self,
+        evaluation_id: str,
+        feedback_run_id: str,
+        ratings: tuple[FeedbackEvaluationRating, ...],
+    ) -> StoredFeedbackEvaluation:
+        with self._write_lock:
+            try:
+                with self._connect() as connection:
+                    self._create_schema(connection)
+                    feedback_run = connection.execute(
+                        """
+                        SELECT selected_for_evaluation_at,
+                               student_text
+                        FROM rubric_feedback_runs
+                        WHERE feedback_run_id = ?
+                        """,
+                        (feedback_run_id,),
+                    ).fetchone()
+
+                    if feedback_run is None:
+                        raise FeedbackRunNotFoundError(
+                            "Der Feedbacklauf wurde nicht gefunden."
+                        )
+
+                    if (
+                        feedback_run["selected_for_evaluation_at"] is None
+                        or feedback_run["student_text"] is None
+                    ):
+                        raise FeedbackRunSelectionError(
+                            "Der Feedbacklauf wurde noch nicht ausdrücklich "
+                            "für die Bewertung gespeichert."
+                        )
+
+                    created_at = datetime.now(timezone.utc).isoformat()
+                    connection.execute(
+                        """
+                        INSERT INTO feedback_evaluations (
+                            evaluation_id,
+                            feedback_run_id,
+                            created_at,
+                            evaluation_type,
+                            rubric_version,
+                            evaluator_provider,
+                            evaluator_model,
+                            duration_ms,
+                            queue_duration_ms,
+                            execution_duration_ms,
+                            provider_request_id
+                        )
+                        VALUES (?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL)
+                        """,
+                        (
+                            evaluation_id,
+                            feedback_run_id,
+                            created_at,
+                            MANUAL_EVALUATION_TYPE,
+                            MANUAL_META_EVALUATION_RUBRIC.version,
+                        ),
+                    )
+                    connection.executemany(
+                        """
+                        INSERT INTO feedback_evaluation_ratings (
+                            evaluation_id,
+                            criterion_key,
+                            position,
+                            criterion_title,
+                            criterion_question,
+                            score,
+                            rating_label,
+                            justification
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        [
+                            (
+                                evaluation_id,
+                                rating.criterion_key,
+                                rating.position,
+                                rating.criterion_title,
+                                rating.criterion_question,
+                                rating.score,
+                                rating.rating_label,
+                                rating.justification,
+                            )
+                            for rating in ratings
+                        ],
+                    )
+                    evaluation = self._load_stored_feedback_evaluation(
+                        connection,
+                        evaluation_id,
+                    )
+
+                if evaluation is None:
+                    raise TaskStoreError(
+                        "Die gespeicherte Bewertung konnte nicht geladen "
+                        "werden."
+                    )
+
+                return evaluation
+
+            except (
+                FeedbackRunNotFoundError,
+                FeedbackRunSelectionError,
+                TaskStoreError,
+            ):
+                raise
+            except (TypeError, ValueError) as exc:
+                raise TaskStoreError(
+                    "Die gespeicherte Bewertung besitzt ein ungültiges "
+                    "Datenformat."
+                ) from exc
+            except sqlite3.Error as exc:
+                raise TaskStoreError(
+                    "Die manuelle Bewertung konnte nicht gespeichert werden."
+                ) from exc
+
     def _connect(self) -> sqlite3.Connection:
         self.database_path.parent.mkdir(
             parents=True,
@@ -897,6 +1046,44 @@ class TaskStore:
                     ON DELETE RESTRICT
             );
 
+            CREATE TABLE IF NOT EXISTS feedback_evaluations (
+                evaluation_id TEXT PRIMARY KEY,
+                feedback_run_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                evaluation_type TEXT NOT NULL
+                    CHECK (evaluation_type IN ('manual', 'automatic')),
+                rubric_version TEXT NOT NULL,
+                evaluator_provider TEXT,
+                evaluator_model TEXT,
+                duration_ms INTEGER CHECK (
+                    duration_ms IS NULL OR duration_ms >= 0
+                ),
+                queue_duration_ms REAL,
+                execution_duration_ms REAL,
+                provider_request_id TEXT,
+                FOREIGN KEY (feedback_run_id)
+                    REFERENCES rubric_feedback_runs (feedback_run_id)
+                    ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS feedback_evaluation_ratings (
+                evaluation_id TEXT NOT NULL,
+                criterion_key TEXT NOT NULL,
+                position INTEGER NOT NULL CHECK (position >= 0),
+                criterion_title TEXT NOT NULL,
+                criterion_question TEXT NOT NULL,
+                score INTEGER NOT NULL CHECK (score BETWEEN 0 AND 3),
+                rating_label TEXT NOT NULL,
+                justification TEXT NOT NULL CHECK (
+                    length(trim(justification)) > 0
+                ),
+                PRIMARY KEY (evaluation_id, criterion_key),
+                UNIQUE (evaluation_id, position),
+                FOREIGN KEY (evaluation_id)
+                    REFERENCES feedback_evaluations (evaluation_id)
+                    ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS
                 idx_feedback_tasks_active
             ON feedback_tasks (archived_at, updated_at DESC);
@@ -908,6 +1095,13 @@ class TaskStore:
             CREATE INDEX IF NOT EXISTS
                 idx_rubric_feedback_runs_task
             ON rubric_feedback_runs (task_id, created_at DESC);
+
+            CREATE INDEX IF NOT EXISTS
+                idx_feedback_evaluations_run
+            ON feedback_evaluations (
+                feedback_run_id,
+                created_at DESC
+            );
             """
         )
         TaskStore._migrate_criterion_titles(connection)
@@ -983,6 +1177,104 @@ class TaskStore:
             )
 
     @staticmethod
+    def _load_feedback_evaluations(
+        connection: sqlite3.Connection,
+        feedback_run_id: str,
+    ) -> tuple[StoredFeedbackEvaluation, ...]:
+        rows = connection.execute(
+            """
+            SELECT evaluation_id
+            FROM feedback_evaluations
+            WHERE feedback_run_id = ?
+            ORDER BY created_at DESC, evaluation_id DESC
+            """,
+            (feedback_run_id,),
+        ).fetchall()
+
+        evaluations = [
+            TaskStore._load_stored_feedback_evaluation(
+                connection,
+                row["evaluation_id"],
+            )
+            for row in rows
+        ]
+        return tuple(
+            evaluation
+            for evaluation in evaluations
+            if evaluation is not None
+        )
+
+    @staticmethod
+    def _load_stored_feedback_evaluation(
+        connection: sqlite3.Connection,
+        evaluation_id: str,
+    ) -> StoredFeedbackEvaluation | None:
+        row = connection.execute(
+            """
+            SELECT evaluation_id,
+                   feedback_run_id,
+                   created_at,
+                   evaluation_type,
+                   rubric_version,
+                   evaluator_provider,
+                   evaluator_model,
+                   duration_ms,
+                   queue_duration_ms,
+                   execution_duration_ms,
+                   provider_request_id
+            FROM feedback_evaluations
+            WHERE evaluation_id = ?
+            """,
+            (evaluation_id,),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        rating_rows = connection.execute(
+            """
+            SELECT criterion_key,
+                   position,
+                   criterion_title,
+                   criterion_question,
+                   score,
+                   rating_label,
+                   justification
+            FROM feedback_evaluation_ratings
+            WHERE evaluation_id = ?
+            ORDER BY position
+            """,
+            (evaluation_id,),
+        ).fetchall()
+        ratings = tuple(
+            FeedbackEvaluationRating(
+                criterion_key=rating_row["criterion_key"],
+                position=rating_row["position"],
+                criterion_title=rating_row["criterion_title"],
+                criterion_question=rating_row["criterion_question"],
+                score=rating_row["score"],
+                rating_label=rating_row["rating_label"],
+                justification=rating_row["justification"],
+            )
+            for rating_row in rating_rows
+        )
+
+        return StoredFeedbackEvaluation(
+            evaluation_id=row["evaluation_id"],
+            feedback_run_id=row["feedback_run_id"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            evaluation_type=row["evaluation_type"],
+            rubric_version=row["rubric_version"],
+            ratings=ratings,
+            evaluator_provider=row["evaluator_provider"],
+            evaluator_model=row["evaluator_model"],
+            duration_ms=row["duration_ms"],
+            queue_duration_ms=row["queue_duration_ms"],
+            execution_duration_ms=row["execution_duration_ms"],
+            provider_request_id=row["provider_request_id"],
+        )
+
+    @staticmethod
     def _load_stored_feedback_run(
         connection: sqlite3.Connection,
         feedback_run_id: str,
@@ -1039,6 +1331,10 @@ class TaskStore:
             student_text=row["student_text"],
             task_snapshot=task_snapshot,
             feedback_payload=feedback_payload,
+            evaluations=TaskStore._load_feedback_evaluations(
+                connection,
+                feedback_run_id,
+            ),
         )
 
     @staticmethod

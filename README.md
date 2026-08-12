@@ -1,6 +1,6 @@
-# KI-Schreibfeedback-Prototyp 0.9a (Entwicklung)
+# KI-Schreibfeedback-Prototyp 0.9b (Entwicklung)
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.9a ergänzt den abgeschlossenen Stand 0.8 um die bewusste Auswahl einzelner Feedbackläufe für eine spätere Meta-Bewertung. Die bisherigen Provider-, Aufgaben- und Analysefunktionen bleiben unverändert verfügbar.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 0.9b ergänzt den abgeschlossenen Stand 0.9a um einen versionierten manuellen Meta-Bewertungsbogen mit vier Qualitätskriterien und getrennt gespeicherten Mehrfachbewertungen. Die bisherigen Provider-, Aufgaben- und Analysefunktionen bleiben unverändert verfügbar.
 
 > **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
 
@@ -14,7 +14,8 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der 
 | **0.6.0** | stabiler Release | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
 | **0.7** | abgeschlossen | Additive Mistral-API-Anbindung mit Ministral 14B, Small, Medium, Large und freier Modell-ID auf Basis des unveränderten Tags `v0.6.0` |
 | **0.8** | abgeschlossen | Aufgaben mit jeweils einer Feedback-Vorlage, geordnete Einzelkriterien, SQLite-Verwaltung, portabler Austausch und strukturiertes Feedback pro Kriterium |
-| **0.9a** | in Entwicklung | Bewusste Auswahl von Feedbackläufen, Speicherung des anonymisierten Texts und getrennte Übersicht auf der Meta-Ebene |
+| **0.9a** | abgeschlossen | Bewusste Auswahl von Feedbackläufen, Speicherung des anonymisierten Texts und getrennte Übersicht auf der Meta-Ebene |
+| **0.9b** | in Entwicklung | Manuelle Qualitätsbewertung mit vier Kriterien, Begründungen, versioniertem Bogen und eigenständiger Bewertungshistorie |
 
 Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Version 0.6.0 ist der neue stabile Standard; Modell-Payload und vLLM-Startkonfiguration bleiben gegenüber 0.5.0 unverändert.
 
@@ -30,7 +31,7 @@ flowchart TD
     D --> G["Ollama (nur lokal)"]
     D --> H["Mistral API (optional)"]
     C --> I["SQLite: Aufgaben, Feedback-Vorlagen und Feedbackläufe"]
-    I --> J["Optionale Meta-Ebene: ausgewählte Feedbackläufe"]
+    I --> J["Optionale Meta-Ebene: Feedbackläufe und manuelle Bewertungen"]
 ```
 
 Startseite und Analysefunktion sind nur nach erfolgreicher Anmeldung erreichbar. Zugangsdaten werden serverseitig gegen einen Argon2-Passworthash geprüft. RunPod-API-Key, Endpoint-ID und weitere Secrets werden ausschließlich serverseitig aus der `.env` gelesen und nicht an den Browser übertragen.
@@ -60,6 +61,11 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 - getrennte dritte Registerkarte „Feedback-Bewertung“ mit Modell, Aufgabe und Feedbackdauer
 - aufklappbare Detailansicht mit Zusammenfassung und allen Einzelfeedbacks
 - Speicherung des anonymisierten Schülertexts erst nach dem bewussten Auswahlklick
+- getrennt aufklappbare Bewertungsgrundlage mit Aufgabe, Material, Schülertext und Feedback-Kriterien
+- versionierter manueller Meta-Bewertungsbogen mit vier Qualitätskriterien
+- vier Bewertungsstufen von 0 bis 3 und verpflichtende Begründung je Qualitätskriterium
+- getrennte, unveränderlich erhaltene Mehrfachbewertungen ohne künstliche Gesamtnote
+- persistente Snapshots von Version, Prüffragen und Skalenbezeichnungen jeder Bewertung
 - Auswahl zwischen lokalem Ollama, OpenAI, Mistral und RunPod Serverless im Entwicklungsmodus
 - Deaktivierung lokaler Ollama-Aufrufe im Produktionsmodus
 - konfigurierbare Standardmodelle für alle vier Provider
@@ -159,7 +165,9 @@ Die strukturierte Modellantwort wird vollständig validiert: Jede gespeicherte K
 
 Aufgaben, Kriterien, Snapshots der Feedback-Vorlagen und Kriterienfeedback werden in der über `ANALYSIS_DATABASE_PATH` konfigurierten SQLite-Datei gespeichert. Das vorhandene Docker-Volume `/app/data` macht diese Daten auch über einen Container-Neustart oder ein Redeployment hinweg persistent.
 
-Nach einem erfolgreichen Kriterienfeedback erscheint ein optisch abgesetzter Bereich „Optional · Meta-Ebene“. Erst der dortige Klick auf „Für Feedback-Bewertung speichern“ ergänzt den anonymisierten Schülertext im vorhandenen Feedbacklauf und nimmt diesen in die dritte Registerkarte „Feedback-Bewertung“ auf. Dort lassen sich die Gesamtzusammenfassung sowie alle Einzelfeedbacks und Überarbeitungshinweise aufklappen. Es wird dabei noch keine manuelle oder automatische Bewertung gestartet und keine zusätzliche Cloudanfrage ausgelöst. Nicht ausgewählte technische Feedbackläufe bleiben in der neuen Übersicht unsichtbar und enthalten weiterhin nur den Hash des Schülertexts.
+Nach einem erfolgreichen Kriterienfeedback erscheint ein optisch abgesetzter Bereich „Optional · Meta-Ebene“. Erst der dortige Klick auf „Für Feedback-Bewertung speichern“ ergänzt den anonymisierten Schülertext im vorhandenen Feedbacklauf und nimmt diesen in die dritte Registerkarte „Feedback-Bewertung“ auf. Nicht ausgewählte technische Feedbackläufe bleiben in der neuen Übersicht unsichtbar und enthalten weiterhin nur den Hash des Schülertexts.
+
+In der dritten Registerkarte lassen sich Bewertungsgrundlage, Gesamtzusammenfassung sowie alle Einzelfeedbacks und Überarbeitungshinweise getrennt aufklappen. Der manuelle Meta-Bewertungsbogen `meta-feedback-v1` erfasst „Fachliche Korrektheit“, „Transparenz und Begründung“, „Adressaten- und Kontextpassung“ sowie „Handlungsorientierung und Lernaktivierung“. Jedes Kriterium wird mit 0 bis 3 Punkten und einer verpflichtenden kurzen Begründung gespeichert. Es wird keine Gesamtnote berechnet. Jeder Speichervorgang erzeugt eine neue eigenständige Bewertung; ältere Bewertungen werden nicht überschrieben. Version, Kriterientexte, Skalenbezeichnungen und Begründungen bleiben als Snapshot erhalten. Die manuelle Bewertung löst keine Modell- oder Cloudanfrage aus. Eine automatische Meta-Bewertung wird erst in einem folgenden 0.9-Teilschritt ergänzt.
 
 Eine einzelne Feedback-Vorlage kann direkt an ihrer Aufgabenkarte als JSON exportiert werden. Der Gesamtexport enthält alle aktiven und archivierten Aufgaben mit ihren Feedback-Vorlagen als ZIP-Paket. Größere Bestände werden darin automatisch in JSON-Teile mit jeweils höchstens 200 Vorlagen und 5 MiB aufgeteilt. JSON-Einzelexporte und ZIP-Gesamtpakete werden über dasselbe Importformular eingelesen. Der Import prüft zuerst die vollständige Datei und legt anschließend alle Aufgaben atomar mit neuen internen IDs an; vorhandene Vorlagen werden nicht überschrieben. Archivierte Quellen werden dabei als neue aktive Kopien importiert.
 
@@ -216,12 +224,12 @@ Die bereinigte 0.6-Oberfläche zeigt diese Verwaltungsdetails vorübergehend nic
 Die automatisierten Tests führen keine echten Modellanfragen aus:
 
 ```powershell
-& ".\.venv\Scripts\python.exe" -m unittest discover -s tests -v
+& ".\.venv\Scripts\python.exe" -m pytest -q
 & ".\.venv\Scripts\python.exe" scripts\check_architecture.py
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der aktuelle Entwicklungsstand umfasst 140 erfolgreiche Tests. Sie decken zusätzlich zur bisherigen Browser- und Providerauswahl die SQLite-Verwaltung von Aufgaben und Feedback-Vorlagen, Kriterienreihenfolge, Duplizieren, Löschen und Archivieren, strukturierte Kriterienantworten, den unveränderten bisherigen Analyseweg, die explizite Auswahl von Feedbackläufen, die additive 0.8-Datenbankmigration sowie Anmeldung und CSRF-Schutz der neuen Routen ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der aktuelle Entwicklungsstand umfasst 144 erfolgreiche Tests. Sie decken zusätzlich zur bisherigen Browser- und Providerauswahl die SQLite-Verwaltung von Aufgaben und Feedback-Vorlagen, Kriterienreihenfolge, Duplizieren, Löschen und Archivieren, strukturierte Kriterienantworten, den unveränderten bisherigen Analyseweg, die explizite Auswahl von Feedbackläufen, additive Datenbankmigrationen, versionierte manuelle Mehrfachbewertungen, Eingabevalidierung sowie Anmeldung und CSRF-Schutz der neuen Routen ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 

@@ -121,8 +121,31 @@ class WebAuthenticationTests(unittest.TestCase):
             },
             follow_redirects=False,
         )
+        manual_response = self.client.post(
+            (
+                "/feedback-runs/"
+                "00000000-0000-0000-0000-000000000001/"
+                "manual-evaluations"
+            ),
+            data={
+                "csrf_token": "nicht-relevant-ohne-anmeldung",
+                "score_factual_correctness": "3",
+                "justification_factual_correctness": "Begründung",
+                "score_transparency_reasoning": "3",
+                "justification_transparency_reasoning": "Begründung",
+                "score_audience_context_fit": "3",
+                "justification_audience_context_fit": "Begründung",
+                "score_action_learning_activation": "3",
+                "justification_action_learning_activation": "Begründung",
+            },
+            follow_redirects=False,
+        )
 
-        for response in (overview_response, save_response):
+        for response in (
+            overview_response,
+            save_response,
+            manual_response,
+        ):
             self.assertEqual(response.status_code, 303)
             self.assertEqual(response.headers["location"], "/login")
 

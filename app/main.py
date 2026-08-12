@@ -30,11 +30,16 @@ from app.config import (
     APP_MODE_PRODUCTION,
     settings,
 )
+from app.domain.feedback_evaluation import (
+    MANUAL_META_EVALUATION_RUBRIC,
+    MAX_META_JUSTIFICATION_CHARS,
+    META_EVALUATION_SCORE_OPTIONS,
+)
+from app.domain.rubric import FeedbackTask
 from app.feedback_markdown import (
     render_feedback_inline_markdown,
     render_feedback_markdown,
 )
-from app.domain.rubric import FeedbackTask
 from app.llm.base import LLMProvider
 from app.llm.errors import (
     ProviderError,
@@ -607,6 +612,16 @@ FEEDBACK_EVALUATION_NOTICES = {
     ),
     "save-failed": (
         "Der Feedbacklauf konnte nicht für die Bewertung gespeichert werden.",
+        "error",
+    ),
+    "evaluation-saved": (
+        "Die manuelle Bewertung wurde als eigenständiger Datensatz "
+        "gespeichert.",
+        "success",
+    ),
+    "evaluation-failed": (
+        "Die manuelle Bewertung konnte nicht gespeichert werden. Bitte "
+        "prüfe alle vier Bewertungsstufen und Begründungen.",
         "error",
     ),
 }
@@ -1224,6 +1239,13 @@ async def feedback_evaluations_page(
                 request.session
             ),
             "feedback_runs": feedback_runs,
+            "manual_meta_rubric": MANUAL_META_EVALUATION_RUBRIC,
+            "meta_evaluation_score_options": (
+                META_EVALUATION_SCORE_OPTIONS
+            ),
+            "max_meta_justification_chars": (
+                MAX_META_JUSTIFICATION_CHARS
+            ),
             "notice_message": notice_message,
             "notice_tone": notice_tone,
             "error": error,
@@ -1257,6 +1279,86 @@ async def save_feedback_run_for_evaluation(
 
     return RedirectResponse(
         url=f"/feedback-evaluations?notice={notice}",
+        status_code=303,
+    )
+
+
+@app.post(
+    "/feedback-runs/{feedback_run_id}/manual-evaluations"
+)
+async def create_manual_feedback_evaluation(
+    request: Request,
+    feedback_run_id: UUID,
+    score_factual_correctness: int = Form(..., ge=0, le=3),
+    justification_factual_correctness: str = Form(
+        ...,
+        min_length=1,
+        max_length=MAX_META_JUSTIFICATION_CHARS,
+    ),
+    score_transparency_reasoning: int = Form(..., ge=0, le=3),
+    justification_transparency_reasoning: str = Form(
+        ...,
+        min_length=1,
+        max_length=MAX_META_JUSTIFICATION_CHARS,
+    ),
+    score_audience_context_fit: int = Form(..., ge=0, le=3),
+    justification_audience_context_fit: str = Form(
+        ...,
+        min_length=1,
+        max_length=MAX_META_JUSTIFICATION_CHARS,
+    ),
+    score_action_learning_activation: int = Form(
+        ...,
+        ge=0,
+        le=3,
+    ),
+    justification_action_learning_activation: str = Form(
+        ...,
+        min_length=1,
+        max_length=MAX_META_JUSTIFICATION_CHARS,
+    ),
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        await task_store.create_manual_feedback_evaluation(
+            feedback_run_id=str(feedback_run_id),
+            scores={
+                "factual_correctness": score_factual_correctness,
+                "transparency_reasoning": score_transparency_reasoning,
+                "audience_context_fit": score_audience_context_fit,
+                "action_learning_activation": (
+                    score_action_learning_activation
+                ),
+            },
+            justifications={
+                "factual_correctness": (
+                    justification_factual_correctness
+                ),
+                "transparency_reasoning": (
+                    justification_transparency_reasoning
+                ),
+                "audience_context_fit": (
+                    justification_audience_context_fit
+                ),
+                "action_learning_activation": (
+                    justification_action_learning_activation
+                ),
+            },
+        )
+        notice = "evaluation-saved"
+    except TaskStoreError:
+        notice = "evaluation-failed"
+
+    return RedirectResponse(
+        url=(
+            f"/feedback-evaluations?notice={notice}"
+            f"#feedback-run-{feedback_run_id}"
+        ),
         status_code=303,
     )
 

@@ -9,8 +9,9 @@
             <h2>Feedback-Bewertung</h2>
             <p class="hint">
                 Hier erscheinen ausschließlich Feedbackläufe, die nach
-                einer Textanalyse bewusst für die spätere Bewertung
-                gespeichert wurden.
+                einer Textanalyse bewusst für die Meta-Ebene gespeichert
+                wurden. Du kannst jeden Lauf anhand desselben versionierten
+                Qualitätsrasters mehrfach und getrennt bewerten.
             </p>
         </div>
     </div>
@@ -35,15 +36,26 @@
 {% if feedback_runs %}
     <section class="meta-run-list" aria-label="Gespeicherte Feedbackläufe">
         {% for feedback_run in feedback_runs %}
-            <article class="card meta-run-card">
+            <article
+                class="card meta-run-card"
+                id="feedback-run-{{ feedback_run.feedback_run_id }}"
+            >
                 <div class="meta-run-heading">
                     <div>
                         <h2>{{ feedback_run.task_title }}</h2>
                         <p>{{ feedback_run.rubric_title }}</p>
                     </div>
 
-                    <span class="meta-rating-status">
-                        Noch nicht bewertet
+                    <span
+                        class="meta-rating-status{% if feedback_run.manual_evaluation_count %} is-rated{% endif %}"
+                    >
+                        {% if feedback_run.manual_evaluation_count == 0 %}
+                            Noch nicht bewertet
+                        {% elif feedback_run.manual_evaluation_count == 1 %}
+                            1 manuelle Bewertung
+                        {% else %}
+                            {{ feedback_run.manual_evaluation_count }} manuelle Bewertungen
+                        {% endif %}
                     </span>
                 </div>
 
@@ -75,6 +87,49 @@
                         </dd>
                     </div>
                 </dl>
+
+                <details class="meta-source-details">
+                    <summary>Bewertungsgrundlage anzeigen</summary>
+
+                    <div class="meta-source-details-content">
+                        <section>
+                            <h3>Aufgabenstellung</h3>
+                            <p class="meta-preserved-text">
+                                {{ feedback_run.task_snapshot.instructions }}
+                            </p>
+                        </section>
+
+                        {% if feedback_run.task_snapshot.material %}
+                            <section>
+                                <h3>Material oder Textgrundlage</h3>
+                                <p class="meta-preserved-text">
+                                    {{ feedback_run.task_snapshot.material }}
+                                </p>
+                            </section>
+                        {% endif %}
+
+                        <section>
+                            <h3>Anonymisierter Schülertext</h3>
+                            <p class="meta-preserved-text meta-student-text">
+                                {{ feedback_run.student_text }}
+                            </p>
+                        </section>
+
+                        <section>
+                            <h3>Verwendete Feedback-Kriterien</h3>
+                            <ol class="meta-source-criteria">
+                                {% for criterion in feedback_run.task_snapshot.rubric.criteria %}
+                                    <li>
+                                        <strong>
+                                            {{ criterion.title or ("Kriterium " ~ loop.index) }}
+                                        </strong>
+                                        <span>{{ criterion.text }}</span>
+                                    </li>
+                                {% endfor %}
+                            </ol>
+                        </section>
+                    </div>
+                </details>
 
                 <details class="meta-feedback-details">
                     <summary>Feedbackdetails anzeigen</summary>
@@ -110,9 +165,144 @@
                     </div>
                 </details>
 
+                {% if feedback_run.evaluations %}
+                    <section
+                        class="meta-evaluation-history"
+                        aria-label="Gespeicherte Bewertungen"
+                    >
+                        <h3>Gespeicherte Bewertungen</h3>
+
+                        {% for evaluation in feedback_run.evaluations %}
+                            <article class="meta-evaluation-record">
+                                <div class="meta-evaluation-record-heading">
+                                    <strong>{{ evaluation.type_label }}</strong>
+                                    <span>
+                                        {{ evaluation.created_at | datetime_utc }}
+                                    </span>
+                                </div>
+                                <p class="meta-rubric-version">
+                                    Bewertungsbogen:
+                                    <code>{{ evaluation.rubric_version }}</code>
+                                </p>
+
+                                <dl class="meta-rating-list">
+                                    {% for rating in evaluation.ratings %}
+                                        <div class="meta-rating-result">
+                                            <dt>
+                                                <span>{{ rating.criterion_title }}</span>
+                                                <span
+                                                    class="meta-score-badge meta-score-{{ rating.score }}"
+                                                >
+                                                    {{ rating.score }}/3 –
+                                                    {{ rating.rating_label }}
+                                                </span>
+                                            </dt>
+                                            <dd>{{ rating.justification }}</dd>
+                                        </div>
+                                    {% endfor %}
+                                </dl>
+                            </article>
+                        {% endfor %}
+                    </section>
+                {% endif %}
+
+                <details class="meta-manual-evaluation">
+                    <summary>
+                        {% if feedback_run.manual_evaluation_count %}
+                            Weitere manuelle Bewertung anlegen
+                        {% else %}
+                            Manuell bewerten
+                        {% endif %}
+                    </summary>
+
+                    <div class="meta-manual-evaluation-content">
+                        <div class="meta-manual-intro">
+                            <h3>{{ manual_meta_rubric.title }}</h3>
+                            <p>
+                                Bewerte jedes Kriterium von 0 bis 3 und
+                                begründe deine Einschätzung kurz. Es wird
+                                keine Gesamtnote gebildet.
+                            </p>
+                            <p class="meta-rubric-version">
+                                Version:
+                                <code>{{ manual_meta_rubric.version }}</code>
+                            </p>
+                        </div>
+
+                        <form
+                            class="meta-manual-form"
+                            method="post"
+                            action="/feedback-runs/{{ feedback_run.feedback_run_id }}/manual-evaluations"
+                        >
+                            <input
+                                type="hidden"
+                                name="csrf_token"
+                                value="{{ csrf_token }}"
+                            >
+
+                            {% for criterion in manual_meta_rubric.criteria %}
+                                <fieldset class="meta-quality-criterion">
+                                    <legend>
+                                        {{ loop.index }}.
+                                        {{ criterion.title }}
+                                    </legend>
+                                    <p>{{ criterion.question }}</p>
+
+                                    <div class="meta-score-options">
+                                        {% for score, label in meta_evaluation_score_options %}
+                                            <label
+                                                for="score-{{ feedback_run.feedback_run_id }}-{{ criterion.key }}-{{ score }}"
+                                            >
+                                                <input
+                                                    id="score-{{ feedback_run.feedback_run_id }}-{{ criterion.key }}-{{ score }}"
+                                                    type="radio"
+                                                    name="score_{{ criterion.key }}"
+                                                    value="{{ score }}"
+                                                    required
+                                                >
+                                                <span>
+                                                    <strong>{{ score }}/3</strong>
+                                                    {{ label }}
+                                                </span>
+                                            </label>
+                                        {% endfor %}
+                                    </div>
+
+                                    <label
+                                        class="meta-justification-label"
+                                        for="justification-{{ feedback_run.feedback_run_id }}-{{ criterion.key }}"
+                                    >
+                                        Kurze Begründung
+                                    </label>
+                                    <textarea
+                                        id="justification-{{ feedback_run.feedback_run_id }}-{{ criterion.key }}"
+                                        name="justification_{{ criterion.key }}"
+                                        rows="3"
+                                        maxlength="{{ max_meta_justification_chars }}"
+                                        required
+                                        placeholder="Nenne konkrete Beobachtungen aus dem Feedback."
+                                    ></textarea>
+                                </fieldset>
+                            {% endfor %}
+
+                            <div class="meta-manual-actions">
+                                <button type="submit">
+                                    Manuelle Bewertung speichern
+                                </button>
+                                <p class="hint">
+                                    Jeder Klick legt eine neue, eigenständige
+                                    Bewertung an. Vorhandene Bewertungen bleiben
+                                    unverändert erhalten.
+                                </p>
+                            </div>
+                        </form>
+                    </div>
+                </details>
+
                 <p class="meta-run-note">
-                    Die manuelle und die automatische Bewertung werden
-                    in den nächsten 0.9-Teilschritten ergänzt.
+                    Die automatische Bewertung mit einem getrennt
+                    ausgewiesenen Bewertungsmodell folgt im nächsten
+                    0.9-Teilschritt.
                 </p>
             </article>
         {% endfor %}
