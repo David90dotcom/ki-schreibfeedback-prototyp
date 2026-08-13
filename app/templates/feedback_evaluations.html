@@ -53,6 +53,11 @@
                     <div>
                         <h2>{{ feedback_run.task_title }}</h2>
                         <p>{{ feedback_run.rubric_title }}</p>
+                        {% if feedback_run.is_standard_feedback %}
+                            <span class="meta-context-badge">
+                                Kontextarmes Standardfeedback
+                            </span>
+                        {% endif %}
                     </div>
 
                     <div class="meta-run-heading-actions">
@@ -104,7 +109,21 @@
                     </div>
                 {% endif %}
 
+                {% if feedback_run.is_standard_feedback %}
+                    <div class="meta-context-note" role="note">
+                        <strong>Bewusst reduzierter Erzeugungskontext:</strong>
+                        Der Feedback-KI lagen nur der allgemeine Standardprompt
+                        und der anonymisierte Schülertext vor. Aufgabe, Material,
+                        Originaltext, Jahrgangsstufe und Feedback-Kriterien
+                        wurden ihr nicht übermittelt.
+                    </div>
+                {% endif %}
+
                 <dl class="metadata meta-run-metadata">
+                    <div>
+                        <dt>Feedbackart</dt>
+                        <dd>{{ feedback_run.feedback_mode_label }}</dd>
+                    </div>
                     <div>
                         <dt>Anbieter</dt>
                         <dd>{{ feedback_run.provider }}</dd>
@@ -123,10 +142,19 @@
                         <dt>Feedbackdauer</dt>
                         <dd>{{ feedback_run.duration_ms | duration_ms }}</dd>
                     </div>
-                    <div>
-                        <dt>Einzelkriterien</dt>
-                        <dd>{{ feedback_run.criterion_count }}</dd>
-                    </div>
+                    {% if feedback_run.is_standard_feedback %}
+                        <div>
+                            <dt>Erzeugungsprompt</dt>
+                            <dd>
+                                {{ feedback_run.generation_prompt_version or "Nicht gespeichert" }}
+                            </dd>
+                        </div>
+                    {% else %}
+                        <div>
+                            <dt>Einzelkriterien</dt>
+                            <dd>{{ feedback_run.criterion_count }}</dd>
+                        </div>
+                    {% endif %}
                     <div>
                         <dt>Erzeugt</dt>
                         <dd>{{ feedback_run.created_at | datetime_utc }}</dd>
@@ -143,29 +171,56 @@
                     <summary>Bewertungsgrundlage anzeigen</summary>
 
                     <div class="meta-source-details-content">
-                        <section>
-                            <h3>Aufgabenstellung</h3>
-                            <p class="meta-preserved-text">
-                                {{ feedback_run.task_snapshot.instructions }}
-                            </p>
-                        </section>
-
-                        {% if feedback_run.task_snapshot.material %}
+                        {% if feedback_run.is_standard_feedback %}
                             <section>
-                                <h3>Material der gespeicherten Aufgabe</h3>
+                                <h3>Erzeugungskontext</h3>
                                 <p class="meta-preserved-text">
-                                    {{ feedback_run.task_snapshot.material }}
+                                    {{ feedback_run.task_snapshot.instructions }}
                                 </p>
                             </section>
-                        {% endif %}
 
-                        {% if feedback_run.original_text %}
+                            {% if feedback_run.generation_system_prompt %}
+                                <section>
+                                    <h3>Verwendete Systemnachricht</h3>
+                                    <p class="meta-preserved-text">
+                                        {{ feedback_run.generation_system_prompt }}
+                                    </p>
+                                </section>
+                            {% endif %}
+
+                            {% if feedback_run.generation_prompt_template %}
+                                <section>
+                                    <h3>Verwendete Standardprompt-Vorlage</h3>
+                                    <p class="meta-preserved-text">
+                                        {{ feedback_run.generation_prompt_template }}
+                                    </p>
+                                </section>
+                            {% endif %}
+                        {% else %}
                             <section>
-                                <h3>Originaltext dieses Feedbacklaufs</h3>
+                                <h3>Aufgabenstellung</h3>
                                 <p class="meta-preserved-text">
-                                    {{ feedback_run.original_text }}
+                                    {{ feedback_run.task_snapshot.instructions }}
                                 </p>
                             </section>
+
+                            {% if feedback_run.task_snapshot.material %}
+                                <section>
+                                    <h3>Material der gespeicherten Aufgabe</h3>
+                                    <p class="meta-preserved-text">
+                                        {{ feedback_run.task_snapshot.material }}
+                                    </p>
+                                </section>
+                            {% endif %}
+
+                            {% if feedback_run.original_text %}
+                                <section>
+                                    <h3>Originaltext dieses Feedbacklaufs</h3>
+                                    <p class="meta-preserved-text">
+                                        {{ feedback_run.original_text }}
+                                    </p>
+                                </section>
+                            {% endif %}
                         {% endif %}
 
                         <section>
@@ -175,19 +230,21 @@
                             </p>
                         </section>
 
-                        <section>
-                            <h3>Verwendete Feedback-Kriterien</h3>
-                            <ol class="meta-source-criteria">
-                                {% for criterion in feedback_run.task_snapshot.rubric.criteria %}
-                                    <li>
-                                        <strong>
-                                            {{ criterion.title or ("Kriterium " ~ loop.index) }}
-                                        </strong>
-                                        <span>{{ criterion.text }}</span>
-                                    </li>
-                                {% endfor %}
-                            </ol>
-                        </section>
+                        {% if not feedback_run.is_standard_feedback %}
+                            <section>
+                                <h3>Verwendete Feedback-Kriterien</h3>
+                                <ol class="meta-source-criteria">
+                                    {% for criterion in feedback_run.task_snapshot.rubric.criteria %}
+                                        <li>
+                                            <strong>
+                                                {{ criterion.title or ("Kriterium " ~ loop.index) }}
+                                            </strong>
+                                            <span>{{ criterion.text }}</span>
+                                        </li>
+                                    {% endfor %}
+                                </ol>
+                            </section>
+                        {% endif %}
                     </div>
                 </details>
 
@@ -196,32 +253,46 @@
 
                     <div class="meta-feedback-details-content">
                         <section class="meta-feedback-overall">
-                            <h3>Zusammenfassung</h3>
-                            <p>
-                                {{ feedback_run.feedback_payload.overall_feedback | feedback_inline_markdown }}
-                            </p>
+                            <h3>
+                                {% if feedback_run.is_standard_feedback %}
+                                    Gesamtfeedback
+                                {% else %}
+                                    Zusammenfassung
+                                {% endif %}
+                            </h3>
+                            {% if feedback_run.is_standard_feedback %}
+                                <div class="feedback">
+                                    {{ feedback_run.feedback_payload.overall_feedback | feedback_markdown }}
+                                </div>
+                            {% else %}
+                                <p>
+                                    {{ feedback_run.feedback_payload.overall_feedback | feedback_inline_markdown }}
+                                </p>
+                            {% endif %}
                         </section>
 
-                        <section class="meta-feedback-criteria">
-                            <h3>Einzelfeedbacks</h3>
+                        {% if not feedback_run.is_standard_feedback %}
+                            <section class="meta-feedback-criteria">
+                                <h3>Einzelfeedbacks</h3>
 
-                            <div class="meta-feedback-text">
-                                {% for item in feedback_run.feedback_payload.criteria %}
-                                    <section class="meta-feedback-item">
-                                        <h4>
-                                            {{ item.criterion_title or ("Kriterium " ~ loop.index) }}
-                                        </h4>
-                                        <p>
-                                            {{ item.feedback | feedback_inline_markdown }}
-                                        </p>
-                                        <p class="meta-feedback-next-step">
-                                            <strong>Überarbeitung:</strong>
-                                            {{ item.next_step | feedback_inline_markdown }}
-                                        </p>
-                                    </section>
-                                {% endfor %}
-                            </div>
-                        </section>
+                                <div class="meta-feedback-text">
+                                    {% for item in feedback_run.feedback_payload.criteria %}
+                                        <section class="meta-feedback-item">
+                                            <h4>
+                                                {{ item.criterion_title or ("Kriterium " ~ loop.index) }}
+                                            </h4>
+                                            <p>
+                                                {{ item.feedback | feedback_inline_markdown }}
+                                            </p>
+                                            <p class="meta-feedback-next-step">
+                                                <strong>Überarbeitung:</strong>
+                                                {{ item.next_step | feedback_inline_markdown }}
+                                            </p>
+                                        </section>
+                                    {% endfor %}
+                                </div>
+                            </section>
+                        {% endif %}
                     </div>
                 </details>
 

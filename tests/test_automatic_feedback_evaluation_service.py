@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
@@ -14,6 +15,12 @@ from app.services.automatic_feedback_evaluation_service import (
     MIN_AUTOMATIC_JUSTIFICATION_CHARS,
     AutomaticFeedbackEvaluationError,
     AutomaticFeedbackEvaluationService,
+)
+from app.services.feedback_service import (
+    STANDARD_FEEDBACK_CLOUD_SYSTEM_PROMPT,
+    STANDARD_FEEDBACK_MODE,
+    STANDARD_FEEDBACK_PROMPT_TEMPLATE,
+    STANDARD_FEEDBACK_PROMPT_VERSION,
 )
 
 
@@ -173,6 +180,70 @@ class AutomaticFeedbackEvaluationServiceTests(
                 "action_learning_activation",
             },
         )
+
+    async def test_standard_feedback_supplies_its_reduced_generation_context(
+        self,
+    ) -> None:
+        standard_run = replace(
+            self.feedback_run,
+            task_snapshot={
+                "title": "Kontextarmes Standardfeedback",
+                "subject": "Deutsch",
+                "grade_level": "",
+                "instructions": (
+                    "Keine konkrete Aufgabenstellung wurde übermittelt."
+                ),
+                "material": "",
+                "rubric": {
+                    "title": "Ohne Feedback-Vorlage",
+                    "criteria": [],
+                },
+            },
+            feedback_payload={
+                "criteria": [],
+                "overall_feedback": "Freies Gesamtfeedback",
+                "generation_context": {
+                    "mode": STANDARD_FEEDBACK_MODE,
+                    "label": "Kontextarmes Standardfeedback",
+                    "prompt_version": STANDARD_FEEDBACK_PROMPT_VERSION,
+                    "system_prompt": (
+                        STANDARD_FEEDBACK_CLOUD_SYSTEM_PROMPT
+                    ),
+                    "prompt_template": STANDARD_FEEDBACK_PROMPT_TEMPLATE,
+                },
+            },
+            original_text=None,
+        )
+
+        await self.service.evaluate(standard_run)
+
+        request = self.evaluator.evaluate.await_args.kwargs
+        self.assertIn(
+            "standard_without_feedback_template",
+            request["instructions"],
+        )
+        self.assertIn(
+            "verfügbaren Evidenz",
+            request["instructions"],
+        )
+        self.assertIn(
+            f'"mode": "{STANDARD_FEEDBACK_MODE}"',
+            request["input_text"],
+        )
+        self.assertIn(
+            f'"prompt_version": "{STANDARD_FEEDBACK_PROMPT_VERSION}"',
+            request["input_text"],
+        )
+        self.assertIn(
+            "das Feedback leicht verstehen",
+            request["input_text"],
+        )
+        self.assertIn(
+            STANDARD_FEEDBACK_CLOUD_SYSTEM_PROMPT,
+            request["input_text"],
+        )
+        self.assertIn("Freies Gesamtfeedback", request["input_text"])
+        self.assertNotIn("feedback-model", request["input_text"])
 
     async def test_evaluate_rejects_undetailed_justification(self) -> None:
         response = json.loads(self.evaluator.evaluate.return_value.text)

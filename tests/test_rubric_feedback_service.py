@@ -12,6 +12,12 @@ from app.domain.rubric import (
 )
 from app.llm.base import LLMResponse
 from app.services.rubric_feedback_service import (
+    EVIDENCE_VALIDATION_VERSION,
+    PARTIAL_RESULT_OVERALL_FEEDBACK,
+    RUBRIC_FEEDBACK_MODE,
+    RUBRIC_FEEDBACK_PROMPT_VERSION,
+    UNVERIFIED_CRITERION_FEEDBACK,
+    UNVERIFIED_CRITERION_NEXT_STEP,
     RubricFeedbackError,
     RubricFeedbackService,
 )
@@ -101,6 +107,7 @@ def _response_with_references(*references: str) -> str:
                 {
                     "criterion_id": reference,
                     "status": "met",
+                    "evidence_quotes": ["Schülertext"],
                     "feedback": "Erfüllt.",
                     "next_step": "Beibehalten.",
                 }
@@ -120,12 +127,18 @@ class RubricFeedbackServiceTests(unittest.TestCase):
                         {
                             "criterion_id": "K2",
                             "status": "not_met",
+                            "evidence_quotes": [
+                                "Ein anonymisierter Schülertext."
+                            ],
                             "feedback": "Sprachliche Bilder fehlen.",
                             "next_step": "Suche und erläutere ein Bild.",
                         },
                         {
                             "criterion_id": "K1",
                             "status": "mostly_met",
+                            "evidence_quotes": [
+                                "anonymisierter Schülertext"
+                            ],
                             "feedback": "Der Titel ist vorhanden.",
                             "next_step": "Ergänze den Autor.",
                         },
@@ -189,6 +202,38 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             "Technische Statuswerte gehören ausschließlich",
             provider.prompts[0],
         )
+        self.assertIn(
+            "Ausschließlich student_text zeigt",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "Ein Kriterium ist niemals ein Beleg",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "mit „Du hast ...“",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "wörtlich übernommene Ausschnitte",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "jeder Aussage, etwas „fehle“",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "keinen passenden Ausschnitt sicher und wörtlich",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "Empfehlung zur eigenen Kontrolle anhand des Kriteriums",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "inhaltlichen Überarbeitungshinweis",
+            provider.prompts[0],
+        )
         self.assertEqual(
             provider.response_schema_names,
             ["rubric_feedback"],
@@ -224,6 +269,14 @@ class RubricFeedbackServiceTests(unittest.TestCase):
                 "not_assessable",
             ],
         )
+        evidence_schema = item_properties["evidence_quotes"]
+        assert isinstance(evidence_schema, dict)
+        self.assertEqual(evidence_schema["minItems"], 0)
+        self.assertEqual(evidence_schema["maxItems"], 3)
+        self.assertIn(
+            "evidence_quotes",
+            item_schema["required"],
+        )
         self.assertEqual(
             [item.criterion_id for item in result.criteria_feedback],
             [FIRST_CRITERION_ID, SECOND_CRITERION_ID],
@@ -236,6 +289,14 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             result.criteria_feedback[0].criterion_title,
             "Einleitung: Grundangaben",
         )
+        self.assertEqual(
+            result.criteria_feedback[0].evidence_quotes,
+            ("anonymisierter Schülertext",),
+        )
+        self.assertTrue(
+            result.criteria_feedback[0].evidence_verified
+        )
+        self.assertEqual(result.evidence_warnings, ())
         self.assertEqual(result.provider_request_id, "request-123")
         self.assertEqual(result.worker_id, "worker-456")
         self.assertEqual(
@@ -246,6 +307,34 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             result.payload()["criteria"][0]["criterion_title"],
             "Einleitung: Grundangaben",
         )
+        self.assertNotIn(
+            "evidence_quotes",
+            result.payload()["criteria"][0],
+        )
+        self.assertTrue(
+            result.payload()["criteria"][0]["evidence_verified"]
+        )
+        generation_context = result.payload()["generation_context"]
+        self.assertEqual(
+            generation_context["mode"],
+            RUBRIC_FEEDBACK_MODE,
+        )
+        self.assertEqual(
+            generation_context["prompt_version"],
+            RUBRIC_FEEDBACK_PROMPT_VERSION,
+        )
+        self.assertEqual(
+            generation_context["evidence_validation"],
+            EVIDENCE_VALIDATION_VERSION,
+        )
+        self.assertEqual(
+            generation_context["validated_quote_count"],
+            2,
+        )
+        self.assertEqual(
+            generation_context["unverified_criterion_count"],
+            0,
+        )
 
     def test_accepts_json_inside_optional_code_fence(self) -> None:
         provider = _RubricProvider(
@@ -255,12 +344,14 @@ class RubricFeedbackServiceTests(unittest.TestCase):
     {
       "criterion_id": "K1",
       "status": "met",
+      "evidence_quotes": ["Schülertext"],
       "feedback": "Die Einleitung ist vollständig.",
       "next_step": "Behalte diese klare Einleitung bei."
     },
     {
       "criterion_id": "K2",
       "status": "not_assessable",
+      "evidence_quotes": [],
       "feedback": "Das Kriterium ist nicht beurteilbar.",
       "next_step": "Prüfe die Aufgabenstellung."
     }
@@ -283,6 +374,223 @@ class RubricFeedbackServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(result.criteria_feedback[0].status, "met")
+        self.assertEqual(result.evidence_warnings, ())
+
+    def test_accepts_only_normalized_verbatim_student_quotes(self) -> None:
+        provider = _RubricProvider(
+            json.dumps(
+                {
+                    "criteria": [
+                        {
+                            "criterion_id": "K1",
+                            "status": "met",
+                            "evidence_quotes": [
+                                "„IN DEM GEDICHT: Luftveränderung – von "
+                                "Kurt Tucholsky; aus dem Jahr 1924 geht "
+                                "es um Reisen …“"
+                            ],
+                            "feedback": "Die Aussage ist vorhanden.",
+                            "next_step": "Behalte sie bei.",
+                        },
+                        {
+                            "criterion_id": "K2",
+                            "status": "not_met",
+                            "evidence_quotes": ["Danach endet es."],
+                            "feedback": "Ein sprachliches Bild fehlt.",
+                            "next_step": "Ergänze ein passendes Bild.",
+                        },
+                    ],
+                    "overall_feedback": "Kurze Zusammenfassung.",
+                },
+                ensure_ascii=False,
+            )
+        )
+        service = RubricFeedbackService(
+            providers={"mistral": provider},
+            max_input_chars=8000,
+        )
+
+        result = asyncio.run(
+            service.analyze_text(
+                student_text=(
+                    "In dem Gedicht „Luftveränderung“, von Kurt "
+                    "Tucholsky, aus dem Jahr 1924 geht es um Reisen.\n"
+                    "Danach endet es."
+                ),
+                task=_task(),
+                provider_key="mistral",
+            )
+        )
+
+        self.assertEqual(
+            result.criteria_feedback[0].evidence_quotes,
+            (
+                "„IN DEM GEDICHT: Luftveränderung – von Kurt "
+                "Tucholsky; aus dem Jahr 1924 geht es um Reisen …“",
+            ),
+        )
+        self.assertEqual(
+            result.criteria_feedback[1].evidence_quotes,
+            ("Danach endet es.",),
+        )
+
+    def test_replaces_unverified_quote_with_safe_partial_result(self) -> None:
+        for quote, expected_error, shows_preview in (
+            (
+                "Das steht nur im Erwartungshorizont.",
+                "nicht als zusammenhängende Wortfolge",
+                True,
+            ),
+            (
+                "Ein weiterer Schülertext.",
+                "nicht als zusammenhängende Wortfolge",
+                True,
+            ),
+            (
+                "Ein anderer Schulertext.",
+                "nicht als zusammenhängende Wortfolge",
+                True,
+            ),
+            ("E", "zu kurz", False),
+        ):
+            with self.subTest(quote=quote):
+                provider = _RubricProvider(
+                    json.dumps(
+                        {
+                            "criteria": [
+                                {
+                                    "criterion_id": "K1",
+                                    "status": "met",
+                                    "evidence_quotes": [quote],
+                                    "feedback": "Angeblich belegt.",
+                                    "next_step": "Beibehalten.",
+                                },
+                                {
+                                    "criterion_id": "K2",
+                                    "status": "not_assessable",
+                                    "evidence_quotes": [],
+                                    "feedback": "Keine sichere Bewertung.",
+                                    "next_step": "Prüfe das Kriterium.",
+                                },
+                            ],
+                            "overall_feedback": "Zusammenfassung.",
+                        }
+                    )
+                )
+                service = RubricFeedbackService(
+                    providers={"mistral": provider},
+                    max_input_chars=8000,
+                )
+
+                result = asyncio.run(
+                    service.analyze_text(
+                        student_text="Ein anderer Schülertext.",
+                        task=_task(),
+                        provider_key="mistral",
+                    )
+                )
+
+                first_result = result.criteria_feedback[0]
+                self.assertEqual(first_result.status, "not_assessable")
+                self.assertFalse(first_result.evidence_verified)
+                self.assertEqual(
+                    first_result.feedback,
+                    UNVERIFIED_CRITERION_FEEDBACK,
+                )
+                self.assertEqual(
+                    first_result.next_step,
+                    UNVERIFIED_CRITERION_NEXT_STEP,
+                )
+                self.assertNotIn("Angeblich belegt", first_result.feedback)
+                self.assertEqual(
+                    result.overall_feedback,
+                    PARTIAL_RESULT_OVERALL_FEEDBACK,
+                )
+                self.assertEqual(len(result.evidence_warnings), 1)
+                self.assertIn(
+                    expected_error,
+                    result.evidence_warnings[0],
+                )
+                self.assertIn("K1 – Einleitung", result.evidence_warnings[0])
+
+                if shows_preview:
+                    self.assertIn(
+                        f"Zurückgewiesener Beleg: „{quote}“",
+                        result.evidence_warnings[0],
+                    )
+
+                payload = result.payload()
+                self.assertFalse(
+                    payload["criteria"][0]["evidence_verified"]
+                )
+                self.assertEqual(
+                    payload["generation_context"][
+                        "unverified_criterion_count"
+                    ],
+                    1,
+                )
+
+    def test_replaces_empty_assessable_evidence_with_safe_result(
+        self,
+    ) -> None:
+        for status in (
+            "met",
+            "mostly_met",
+            "partially_met",
+            "not_met",
+        ):
+            with self.subTest(status=status):
+                provider = _RubricProvider(
+                    json.dumps(
+                        {
+                            "criteria": [
+                                {
+                                    "criterion_id": "K1",
+                                    "status": status,
+                                    "evidence_quotes": [],
+                                    "feedback": "Angeblicher Befund.",
+                                    "next_step": "Überarbeite den Text.",
+                                },
+                                {
+                                    "criterion_id": "K2",
+                                    "status": "not_assessable",
+                                    "evidence_quotes": [],
+                                    "feedback": "Keine sichere Bewertung.",
+                                    "next_step": "Prüfe das Kriterium.",
+                                },
+                            ],
+                            "overall_feedback": "Zusammenfassung.",
+                        }
+                    )
+                )
+                service = RubricFeedbackService(
+                    providers={"mistral": provider},
+                    max_input_chars=8000,
+                )
+
+                result = asyncio.run(
+                    service.analyze_text(
+                        student_text="Schülertext",
+                        task=_task(),
+                        provider_key="mistral",
+                    )
+                )
+
+                first_result = result.criteria_feedback[0]
+                self.assertEqual(first_result.status, "not_assessable")
+                self.assertFalse(first_result.evidence_verified)
+                self.assertEqual(
+                    first_result.feedback,
+                    UNVERIFIED_CRITERION_FEEDBACK,
+                )
+                self.assertNotIn(
+                    "Überarbeite den Text",
+                    first_result.next_step,
+                )
+                self.assertIn(
+                    "keinen überprüfbaren Schülertextbeleg",
+                    result.evidence_warnings[0],
+                )
 
     def test_rejects_missing_short_reference(self) -> None:
         provider = _RubricProvider(

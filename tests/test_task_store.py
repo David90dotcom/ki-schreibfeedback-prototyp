@@ -19,6 +19,8 @@ from app.services.task_store import (
     FeedbackEvaluationValidationError,
     FeedbackRunNotFoundError,
     FeedbackRunSelectionError,
+    STANDARD_FEEDBACK_RUBRIC_ID,
+    STANDARD_FEEDBACK_TASK_ID,
     TaskStore,
     TaskStoreError,
 )
@@ -91,6 +93,33 @@ class TaskStoreTests(unittest.TestCase):
             )
         )
         return feedback_run_id
+
+    def test_standard_feedback_context_is_stable_and_hidden(self) -> None:
+        first = asyncio.run(
+            self.store.get_or_create_standard_feedback_task()
+        )
+        second = asyncio.run(
+            self.store.get_or_create_standard_feedback_task()
+        )
+
+        self.assertEqual(first.task_id, STANDARD_FEEDBACK_TASK_ID)
+        self.assertEqual(first.rubric.rubric_id, STANDARD_FEEDBACK_RUBRIC_ID)
+        self.assertEqual(second, first)
+        self.assertEqual(first.rubric.criteria, ())
+        self.assertIn("keine konkrete Aufgabenstellung", first.instructions)
+        self.assertEqual(asyncio.run(self.store.list_tasks()), [])
+        self.assertEqual(
+            asyncio.run(self.store.list_tasks(include_archived=True)),
+            [],
+        )
+        self.assertIsNone(
+            asyncio.run(
+                self.store.get_task(
+                    STANDARD_FEEDBACK_TASK_ID,
+                    include_archived=True,
+                )
+            )
+        )
 
     def test_criterion_limits_are_configurable(self) -> None:
         limited_store = TaskStore(

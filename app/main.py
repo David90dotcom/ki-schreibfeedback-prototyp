@@ -553,8 +553,8 @@ def _template_context(
 
     if selected_provider not in available_provider_keys:
         selected_provider = (
-            "runpod"
-            if "runpod" in available_provider_keys
+            "openai"
+            if "openai" in available_provider_keys
             else provider_options[0][0]
         )
 
@@ -2673,6 +2673,28 @@ async def analyze(
                 provider_key=provider,
                 provider_override=provider_override,
             )
+
+            try:
+                standard_task = (
+                    await task_store.get_or_create_standard_feedback_task()
+                )
+                feedback_run_id = await task_store.save_feedback_run(
+                    task=standard_task,
+                    student_text=student_text,
+                    provider=result.provider,
+                    model=result.model,
+                    duration_ms=result.duration_ms,
+                    feedback_payload=result.payload(),
+                    provider_request_id=result.provider_request_id,
+                    queue_duration_ms=result.queue_duration_ms,
+                    execution_duration_ms=result.execution_duration_ms,
+                    reasoning_effort=result.reasoning_effort,
+                )
+            except TaskStoreError:
+                storage_warning = (
+                    "Das Feedback wurde erfolgreich erzeugt, konnte "
+                    "aber nicht dauerhaft gespeichert werden."
+                )
 
         if result.provider == "runpod":
             endpoint_key = (

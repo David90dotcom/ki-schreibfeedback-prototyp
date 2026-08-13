@@ -347,6 +347,18 @@ class FeedbackEvaluationPdfService:
                 [
                     ("Aufgabe", feedback_run.task_title),
                     ("Feedback-Vorlage", feedback_run.rubric_title),
+                    ("Feedbackart", feedback_run.feedback_mode_label),
+                    *(
+                        [
+                            (
+                                "Erzeugungsprompt",
+                                feedback_run.generation_prompt_version
+                                or "Nicht gespeichert",
+                            )
+                        ]
+                        if feedback_run.is_standard_feedback
+                        else []
+                    ),
                     ("Feedbackanbieter", feedback_run.provider),
                     ("Feedbackmodell", feedback_run.model),
                     (

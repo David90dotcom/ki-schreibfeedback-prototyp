@@ -243,6 +243,50 @@ class StoredFeedbackRun:
         return len(criteria) if isinstance(criteria, list) else 0
 
     @property
+    def generation_context(self) -> dict[str, object]:
+        value = self.feedback_payload.get("generation_context")
+        return value if isinstance(value, dict) else {}
+
+    @property
+    def feedback_mode(self) -> str:
+        value = self.generation_context.get("mode")
+        return value if isinstance(value, str) else "rubric_feedback"
+
+    @property
+    def is_standard_feedback(self) -> bool:
+        return self.feedback_mode == "standard_without_feedback_template"
+
+    @property
+    def feedback_mode_label(self) -> str:
+        if self.is_standard_feedback:
+            value = self.generation_context.get("label")
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+            return "Kontextarmes Standardfeedback"
+
+        return "Kriterienfeedback"
+
+    @property
+    def generation_prompt_version(self) -> str | None:
+        value = self.generation_context.get("prompt_version")
+        return (
+            value.strip()
+            if isinstance(value, str) and value.strip()
+            else None
+        )
+
+    @property
+    def generation_prompt_template(self) -> str | None:
+        value = self.generation_context.get("prompt_template")
+        return value if isinstance(value, str) and value.strip() else None
+
+    @property
+    def generation_system_prompt(self) -> str | None:
+        value = self.generation_context.get("system_prompt")
+        return value if isinstance(value, str) and value.strip() else None
+
+    @property
     def manual_evaluation_count(self) -> int:
         return sum(
             evaluation.evaluation_type == MANUAL_EVALUATION_TYPE

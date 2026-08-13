@@ -17,7 +17,12 @@ from app.services.automatic_feedback_evaluation_service import (
     AUTOMATIC_EVALUATION_PROMPT_VERSION,
     AutomaticFeedbackEvaluationResult,
 )
-from app.services.feedback_service import FeedbackResult
+from app.services.feedback_service import (
+    STANDARD_FEEDBACK_MODE,
+    STANDARD_FEEDBACK_PROMPT_VERSION,
+    STANDARD_FEEDBACK_STUDENT_TEXT_PLACEHOLDER,
+    FeedbackResult,
+)
 from app.services.rubric_feedback_service import (
     CriterionFeedbackResult,
     RubricFeedbackResult,
@@ -304,21 +309,36 @@ class TaskManagementTests(unittest.TestCase):
                     status=(
                         "mostly_met"
                         if criterion.position == 0
-                        else "not_met"
+                        else "not_assessable"
                     ),
                     status_label=(
                         "Überwiegend erfüllt"
                         if criterion.position == 0
-                        else "Nicht erfüllt"
+                        else "Nicht beurteilbar"
                     ),
-                    feedback="Konkretes **Feedback**.",
-                    next_step="Konkreter *nächster Schritt*.",
+                    feedback=(
+                        "Konkretes **Feedback**."
+                        if criterion.position == 0
+                        else "Dieser Befund wurde sicher verworfen."
+                    ),
+                    next_step=(
+                        "Konkreter *nächster Schritt*."
+                        if criterion.position == 0
+                        else "Prüfe diesen Aspekt selbst."
+                    ),
+                    evidence_verified=(criterion.position == 0),
                 )
                 for criterion in task.rubric.criteria
             ),
-            overall_feedback="Kurze **Zusammenfassung**.",
+            overall_feedback=(
+                "Ein Teil konnte nicht sicher geprüft werden."
+            ),
             duration_ms=350,
             reasoning_effort="max",
+            evidence_warnings=(
+                "K2 – Sprache: Bildlichkeit: Die KI hat keinen "
+                "überprüfbaren Schülertextbeleg geliefert.",
+            ),
         )
 
         with (
@@ -370,6 +390,16 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn("Einleitung: Grundangaben", response.text)
         self.assertIn("Überwiegend erfüllt", response.text)
         self.assertIn("criterion-status-mostly_met", response.text)
+        self.assertIn("criterion-status-not_assessable", response.text)
+        self.assertIn("Hinweis zur Belegprüfung", response.text)
+        self.assertIn(
+            "Ein Kriterienbefund konnte nicht zuverlässig",
+            response.text,
+        )
+        self.assertIn(
+            "K2 – Sprache: Bildlichkeit",
+            response.text,
+        )
         self.assertIn("<h4>Feedback</h4>", response.text)
         self.assertIn("<h4>Überarbeitung</h4>", response.text)
         self.assertNotIn("Nächster Schritt", response.text)
@@ -382,7 +412,7 @@ class TaskManagementTests(unittest.TestCase):
             response.text,
         )
         self.assertIn(
-            "Kurze <strong>Zusammenfassung</strong>.",
+            "Ein Teil konnte nicht sicher geprüft werden.",
             response.text,
         )
         self.assertNotIn("**Feedback**", response.text)
@@ -456,6 +486,11 @@ class TaskManagementTests(unittest.TestCase):
             selected_runs[0].feedback_payload["criteria"][0]["status"],
             "mostly_met",
         )
+        self.assertFalse(
+            selected_runs[0].feedback_payload["criteria"][1][
+                "evidence_verified"
+            ]
+        )
 
         overview = self.client.get(
             "/feedback-evaluations?notice=saved"
@@ -485,7 +520,7 @@ class TaskManagementTests(unittest.TestCase):
             overview.text,
         )
         self.assertIn(
-            "Kurze <strong>Zusammenfassung</strong>.",
+            "Ein Teil konnte nicht sicher geprüft werden.",
             overview.text,
         )
         self.assertIn(
@@ -630,7 +665,10 @@ class TaskManagementTests(unittest.TestCase):
         )
         self.assertEqual(missing_pdf_response.status_code, 404)
 
-    def test_empty_task_selection_keeps_previous_analysis_path(self) -> None:
+    def test_empty_task_selection_can_be_saved_for_meta_evaluation(
+        self,
+    ) -> None:
+        student_text = "Anonymisierter Schülertext"
         old_result = FeedbackResult(
             provider="openai",
             model=main.settings.openai_model,
@@ -655,7 +693,7 @@ class TaskManagementTests(unittest.TestCase):
                 data={
                     "csrf_token": self.csrf_token,
                     "task_id": "",
-                    "student_text": "Anonymisierter Schülertext",
+                    "student_text": student_text,
                     "provider": "openai",
                     "openai_model": main.settings.openai_model,
                     "openai_api_key": "test-api-key",
@@ -668,10 +706,67 @@ class TaskManagementTests(unittest.TestCase):
         rubric_analysis.assert_not_awaited()
         self.assertIn("Bisheriges Gesamtfeedback", response.text)
         self.assertNotIn("Kriterium 1", response.text)
-        self.assertNotIn(
+        self.assertIn(
             "Für Feedback-Bewertung speichern",
             response.text,
         )
+
+        run_match = re.search(
+            r'action="/feedback-runs/([^/]+)/save"',
+            response.text,
+        )
+        self.assertIsNotNone(run_match)
+        feedback_run_id = (
+            run_match.group(1) if run_match is not None else ""
+        )
+        self.assertEqual(asyncio.run(self.store.list_tasks()), [])
+        self.assertEqual(
+            asyncio.run(
+                self.store.list_tasks(include_archived=True)
+            ),
+            [],
+        )
+
+        save_response = self.client.post(
+            f"/feedback-runs/{feedback_run_id}/save",
+            data={
+                "csrf_token": self.csrf_token,
+                "student_text": student_text,
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(save_response.status_code, 303)
+
+        selected = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertTrue(selected.is_standard_feedback)
+        self.assertEqual(selected.feedback_mode, STANDARD_FEEDBACK_MODE)
+        self.assertEqual(selected.criterion_count, 0)
+        self.assertEqual(
+            selected.generation_prompt_version,
+            STANDARD_FEEDBACK_PROMPT_VERSION,
+        )
+        self.assertIn(
+            STANDARD_FEEDBACK_STUDENT_TEXT_PLACEHOLDER,
+            selected.generation_prompt_template or "",
+        )
+        self.assertNotIn(
+            student_text,
+            selected.generation_prompt_template or "",
+        )
+
+        overview = self.client.get("/feedback-evaluations")
+        self.assertEqual(overview.status_code, 200)
+        self.assertIn("Kontextarmes Standardfeedback", overview.text)
+        self.assertIn("Bewusst reduzierter Erzeugungskontext", overview.text)
+        self.assertIn(STANDARD_FEEDBACK_PROMPT_VERSION, overview.text)
+        self.assertIn("Verwendete Systemnachricht", overview.text)
+        self.assertIn("Verwendete Standardprompt-Vorlage", overview.text)
+        self.assertIn("Gesamtfeedback", overview.text)
+        self.assertNotIn("Einzelfeedbacks", overview.text)
+        self.assertIn("Automatische Vorbewertung", overview.text)
+        self.assertIn("Manuell bewerten", overview.text)
 
     def test_automatic_prerating_can_be_manually_adjusted_and_saved(
         self,

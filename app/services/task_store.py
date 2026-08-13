@@ -34,6 +34,18 @@ MAX_CRITERION_CHARS = 10000
 MAX_CRITERION_TITLE_CHARS = 120
 MAX_MATERIAL_CHARS = 30000
 MAX_TASK_INSTRUCTIONS_CHARS = 12000
+STANDARD_FEEDBACK_TASK_ID = "__system_standard_feedback_task__"
+STANDARD_FEEDBACK_RUBRIC_ID = "__system_standard_feedback_rubric__"
+STANDARD_FEEDBACK_TASK_TITLE = "Kontextarmes Standardfeedback"
+STANDARD_FEEDBACK_RUBRIC_TITLE = (
+    "Ohne Feedback-Vorlage – bisheriges Gesamtfeedback"
+)
+STANDARD_FEEDBACK_TASK_INSTRUCTIONS = (
+    "Bei der Erzeugung wurde keine konkrete Aufgabenstellung, kein "
+    "Aufgabenmaterial und keine Feedback-Vorlage übermittelt. "
+    "Bewertungsgrundlage waren ausschließlich der allgemeine "
+    "Standardprompt und der anonymisierte Schülertext."
+)
 
 
 def _normalize_student_text(value: str) -> str:
@@ -141,10 +153,20 @@ class TaskStore:
         *,
         include_archived: bool = False,
     ) -> FeedbackTask | None:
+        if task_id == STANDARD_FEEDBACK_TASK_ID:
+            return None
+
         return await asyncio.to_thread(
             self._get_task_sync,
             task_id,
             include_archived,
+        )
+
+    async def get_or_create_standard_feedback_task(self) -> FeedbackTask:
+        """Liefert den ausgeblendeten Kontext für freie Feedbackläufe."""
+
+        return await asyncio.to_thread(
+            self._get_or_create_standard_feedback_task_sync
         )
 
     async def create_task(
@@ -220,6 +242,11 @@ class TaskStore:
         criteria: list[str] | tuple[str, ...],
         criterion_titles: list[str] | tuple[str, ...] | None = None,
     ) -> FeedbackTask:
+        if task_id == STANDARD_FEEDBACK_TASK_ID:
+            raise TaskNotFoundError(
+                "Die zu bearbeitende Aufgabe wurde nicht gefunden."
+            )
+
         normalized = self._validate_input(
             title=title,
             subject=subject,
@@ -241,6 +268,11 @@ class TaskStore:
         self,
         task_id: str,
     ) -> FeedbackTask:
+        if task_id == STANDARD_FEEDBACK_TASK_ID:
+            raise TaskNotFoundError(
+                "Die zu duplizierende Aufgabe wurde nicht gefunden."
+            )
+
         source = await self.get_task(task_id)
 
         if source is None:
@@ -269,6 +301,11 @@ class TaskStore:
         self,
         task_id: str,
     ) -> TaskDeleteResult:
+        if task_id == STANDARD_FEEDBACK_TASK_ID:
+            raise TaskNotFoundError(
+                "Die zu löschende Aufgabe wurde nicht gefunden."
+            )
+
         return await asyncio.to_thread(
             self._delete_task_sync,
             task_id,
@@ -513,9 +550,12 @@ class TaskStore:
             with self._connect() as connection:
                 self._create_schema(connection)
                 where_clause = (
-                    ""
+                    "WHERE task_id <> ?"
                     if include_archived
-                    else "WHERE archived_at IS NULL"
+                    else (
+                        "WHERE task_id <> ? "
+                        "AND archived_at IS NULL"
+                    )
                 )
                 rows = connection.execute(
                     f"""
@@ -523,7 +563,8 @@ class TaskStore:
                     FROM feedback_tasks
                     {where_clause}
                     ORDER BY updated_at DESC, title COLLATE NOCASE
-                    """
+                    """,
+                    (STANDARD_FEEDBACK_TASK_ID,),
                 ).fetchall()
 
                 return [
@@ -539,6 +580,92 @@ class TaskStore:
             raise TaskStoreError(
                 "Die Aufgaben konnten nicht geladen werden."
             ) from exc
+
+    def _get_or_create_standard_feedback_task_sync(self) -> FeedbackTask:
+        with self._write_lock:
+            try:
+                self.database_path.parent.mkdir(
+                    parents=True,
+                    exist_ok=True,
+                )
+
+                with self._connect() as connection:
+                    self._create_schema(connection)
+                    task = self._load_task(
+                        connection,
+                        STANDARD_FEEDBACK_TASK_ID,
+                        include_archived=True,
+                    )
+
+                    if task is not None:
+                        return task
+
+                    timestamp = datetime.now(timezone.utc).isoformat()
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO feedback_tasks (
+                            task_id,
+                            title,
+                            subject,
+                            grade_level,
+                            instructions,
+                            material,
+                            created_at,
+                            updated_at,
+                            archived_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+                        """,
+                        (
+                            STANDARD_FEEDBACK_TASK_ID,
+                            STANDARD_FEEDBACK_TASK_TITLE,
+                            "Deutsch",
+                            "",
+                            STANDARD_FEEDBACK_TASK_INSTRUCTIONS,
+                            "",
+                            timestamp,
+                            timestamp,
+                        ),
+                    )
+                    connection.execute(
+                        """
+                        INSERT OR IGNORE INTO rubrics (
+                            rubric_id,
+                            task_id,
+                            title,
+                            created_at,
+                            updated_at,
+                            archived_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, NULL)
+                        """,
+                        (
+                            STANDARD_FEEDBACK_RUBRIC_ID,
+                            STANDARD_FEEDBACK_TASK_ID,
+                            STANDARD_FEEDBACK_RUBRIC_TITLE,
+                            timestamp,
+                            timestamp,
+                        ),
+                    )
+                    created = self._load_task(
+                        connection,
+                        STANDARD_FEEDBACK_TASK_ID,
+                        include_archived=True,
+                    )
+
+                    if created is None:
+                        raise sqlite3.IntegrityError(
+                            "Der interne Standardkontext konnte nicht "
+                            "geladen werden."
+                        )
+
+                    return created
+
+            except sqlite3.Error as exc:
+                raise TaskStoreError(
+                    "Der Standardfeedback-Kontext konnte nicht "
+                    "bereitgestellt werden."
+                ) from exc
 
     def _get_task_sync(
         self,

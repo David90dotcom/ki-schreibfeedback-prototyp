@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -12,6 +13,7 @@ from httpx import Response
 
 from app import main
 from app.services.feedback_service import FeedbackResult
+from app.services.task_store import TaskStore
 
 
 def _csrf_token_from(response: Response) -> str:
@@ -29,6 +31,15 @@ def _csrf_token_from(response: Response) -> str:
 class BrowserModelSelectionTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
+        cls.temporary_directory = tempfile.TemporaryDirectory()
+        cls.store_patcher = patch.object(
+            main,
+            "task_store",
+            TaskStore(
+                Path(cls.temporary_directory.name) / "analysis.sqlite3"
+            ),
+        )
+        cls.store_patcher.start()
         cls.client = TestClient(main.app)
         login_csrf_token = _csrf_token_from(
             cls.client.get("/login")
@@ -61,6 +72,8 @@ class BrowserModelSelectionTests(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         cls.client.close()
+        cls.store_patcher.stop()
+        cls.temporary_directory.cleanup()
 
     def test_start_page_contains_defaults_and_custom_fields(self) -> None:
         response = self.client.get("/")
@@ -128,6 +141,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('value="gpt-5.6-sol"', response.text)
         self.assertIn('value="xhigh"', response.text)
         self.assertIn('value="max"', response.text)
+        self.assertRegex(
+            response.text,
+            r'value="openai"\s+selected',
+        )
         self.assertIn("Max – maximale Denktiefe", response.text)
         self.assertIn(main.settings.mistral_model, response.text)
         self.assertIn('value="mistral"', response.text)
@@ -233,7 +250,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         )
         self.assertRegex(
             response.text,
-            r'value="runpod"\s+selected',
+            r'value="openai"\s+selected',
         )
 
     def test_custom_ollama_settings_apply_only_to_request(self) -> None:

@@ -4,6 +4,56 @@ from time import perf_counter
 from app.llm.base import LLMProvider
 
 
+STANDARD_FEEDBACK_MODE = "standard_without_feedback_template"
+STANDARD_FEEDBACK_PROMPT_VERSION = "standard-feedback-v3"
+STANDARD_FEEDBACK_STUDENT_TEXT_PLACEHOLDER = "{{STUDENT_TEXT}}"
+STANDARD_FEEDBACK_CLOUD_SYSTEM_PROMPT = (
+    "Du bist ein hilfreiches Assistenzsystem für lernförderliches "
+    "Schreibfeedback im Deutschunterricht."
+)
+STANDARD_FEEDBACK_PROMPT_TEMPLATE = f"""
+Du analysierst einen abgetippten, anonymisierten Schülertext im Fach Deutsch.
+
+Ziel:
+Gib lernförderliches Schreibfeedback. Das Feedback soll verständlich, konkret,
+wertschätzend und überarbeitungsorientiert sein.
+
+Formuliere so, dass Schülerinnen und Schüler das Feedback leicht verstehen.
+Verwende klare, nicht unnötig schwierige Sprache und erkläre unvermeidbare
+Fachbegriffe kurz.
+
+Bleibe nicht bei pauschalen Aussagen, sondern gib konkrete Hinweise, wie der
+Text verbessert werden kann.
+
+Strukturiere deine Antwort mit folgenden Überschriften:
+
+1. Gesamteindruck
+2. Stärken des Textes
+3. Verbesserungsmöglichkeiten
+4. Konkrete Überarbeitungshinweise
+5. Kurzes motivierendes Fazit
+
+Für Abschnitt 4 gilt: Verwende keine Tabellen und keine senkrechten Striche als
+Spaltentrenner. Formatiere die Vorschläge als übersichtliche nummerierte Liste.
+Nutze für jeden Vorschlag genau dieses Schema und trenne die drei Angaben jeweils
+durch eine Leerzeile:
+
+1. **Original:** kurzer Ausschnitt aus dem Schülertext
+
+   **Mögliche Überarbeitung:** konkreter Verbesserungsvorschlag
+
+   **Begründung:** kurze, verständliche Erklärung
+
+Wähle die wichtigsten Vorschläge aus, statt den gesamten Schülertext neu zu
+formulieren.
+
+Schülertext:
+\"\"\"
+{STANDARD_FEEDBACK_STUDENT_TEXT_PLACEHOLDER}
+\"\"\"
+""".strip()
+
+
 @dataclass(frozen=True)
 class FeedbackResult:
     provider: str
@@ -15,6 +65,29 @@ class FeedbackResult:
     provider_request_id: str | None = None
     worker_id: str | None = None
     reasoning_effort: str | None = None
+    prompt_version: str = STANDARD_FEEDBACK_PROMPT_VERSION
+    prompt_template: str = STANDARD_FEEDBACK_PROMPT_TEMPLATE
+
+    def payload(self) -> dict[str, object]:
+        """Erzeugt den speicherbaren Snapshot des freien Feedbacks."""
+
+        system_prompt = (
+            STANDARD_FEEDBACK_CLOUD_SYSTEM_PROMPT
+            if self.provider in {"openai", "mistral"}
+            else None
+        )
+
+        return {
+            "criteria": [],
+            "overall_feedback": self.feedback,
+            "generation_context": {
+                "mode": STANDARD_FEEDBACK_MODE,
+                "label": "Kontextarmes Standardfeedback",
+                "prompt_version": self.prompt_version,
+                "system_prompt": system_prompt,
+                "prompt_template": self.prompt_template,
+            },
+        }
 
 
 class FeedbackService:
@@ -98,26 +171,7 @@ class FeedbackService:
         self,
         student_text: str,
     ) -> str:
-        return f"""
-Du analysierst einen abgetippten, anonymisierten Schülertext im Fach Deutsch.
-
-Ziel:
-Gib lernförderliches Schreibfeedback. Das Feedback soll verständlich, konkret,
-wertschätzend und überarbeitungsorientiert sein.
-
-Bleibe nicht bei pauschalen Aussagen, sondern gib konkrete Hinweise, wie der
-Text verbessert werden kann.
-
-Strukturiere deine Antwort mit folgenden Überschriften:
-
-1. Gesamteindruck
-2. Stärken des Textes
-3. Verbesserungsmöglichkeiten
-4. Konkrete Überarbeitungshinweise
-5. Kurzes motivierendes Fazit
-
-Schülertext:
-\"\"\"
-{student_text}
-\"\"\"
-""".strip()
+        return STANDARD_FEEDBACK_PROMPT_TEMPLATE.replace(
+            STANDARD_FEEDBACK_STUDENT_TEXT_PLACEHOLDER,
+            student_text,
+        )
