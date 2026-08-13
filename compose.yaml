@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ki-schreibfeedback-web:0.6
+    image: ki-schreibfeedback-web:1.0.0-rc1
     restart: unless-stopped
     env_file:
       - path: .env

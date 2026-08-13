@@ -76,11 +76,11 @@ providers:
         - cost_tracking
 
 models:
-  - id: ollama-ministral-3-14b-instruct-2512-q8-0
+  - id: ollama-mistral-small-3-2-24b-instruct-2506-q8-0
     provider_id: ollama
-    provider_model_name: "ministral-3:14b-instruct-2512-q8_0"
-    display_name: Ministral 3 14B Instruct Q8_0 (lokal)
-    description: Lokales Modell für die kriterienbasierte Schreibfeedbackanalyse.
+    provider_model_name: "mistral-small3.2:24b-instruct-2506-q8_0"
+    display_name: Mistral Small 3.2 24B Instruct Q8_0 (lokal)
+    description: Lokal evaluiertes Standardmodell für die kriterienbasierte Schreibfeedbackanalyse.
     role: feedback
     enabled: true
 
@@ -104,11 +104,11 @@ models:
       max_output_tokens: 4000
       reasoning_effort: null
 
-  - id: runpod-ministral-3-14b-instruct-2512
+  - id: runpod-mistral-small-3-2-24b-instruct-2506-fp8
     provider_id: runpod
-    provider_model_name: "mistralai/Ministral-3-14B-Instruct-2512"
-    display_name: Ministral 3 14B Instruct (RunPod)
-    description: Zentral verfügbares Ministral-Modell über RunPod Serverless mit vLLM.
+    provider_model_name: "RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8"
+    display_name: Mistral Small 3.2 24B Instruct FP8 (RunPod)
+    description: FP8-Variante derselben 24B-Modellgeneration über RunPod Serverless mit vLLM.
     role: feedback
     enabled: true
 
@@ -266,7 +266,7 @@ models:
     provider_id: mistral
     provider_model_name: ministral-14b-2512
     display_name: Ministral 3 14B
-    description: Cloudvariante derselben Ministral-3-14B-Modellgeneration wie beim lokalen und selbst betriebenen Vergleichsmodell.
+    description: Kleineres Mistral-Cloudmodell als zusätzlicher Vergleich zum lokalen 24B-Standardmodell.
     role: feedback
     enabled: true
 

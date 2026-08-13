@@ -173,7 +173,7 @@ OPENAI_REASONING_EFFORT_OPTIONS = (
 MISTRAL_MODEL_CATALOG = (
     (
         "ministral-14b-2512",
-        "Ministral 3 14B – direkter Vergleich",
+        "Ministral 3 14B – kleineres Vergleichsmodell",
     ),
     ("mistral-small-latest", "Mistral Small – günstig"),
     ("mistral-medium-latest", "Mistral Medium – ausgewogen"),

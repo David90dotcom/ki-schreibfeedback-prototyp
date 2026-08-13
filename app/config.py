@@ -17,8 +17,12 @@ VALID_APP_MODES = {
     APP_MODE_PRODUCTION,
 }
 
+OLLAMA_DEFAULT_MODEL = (
+    "mistral-small3.2:24b-instruct-2506-q8_0"
+)
+
 RUNPOD_VLLM_MODEL = (
-    "mistralai/Ministral-3-14B-Instruct-2512"
+    "RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8"
 )
 
 LEGACY_RUNPOD_OLLAMA_MODEL = (
@@ -176,7 +180,7 @@ class Settings:
     ollama_model: str = _first_configured_value(
         "OLLAMA_DEFAULT_MODEL",
         "OLLAMA_MODEL",
-        fallback="ministral-3:14b-instruct-2512-q8_0",
+        fallback=OLLAMA_DEFAULT_MODEL,
     )
 
     ollama_request_timeout_seconds: float = (

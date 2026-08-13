@@ -23,8 +23,8 @@ from app.llm.runpod_client import RunPodProvider
 
 class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
     MODEL_NAME = (
-        "mistralai/"
-        "Ministral-3-14B-Instruct-2512"
+        "RedHatAI/"
+        "Mistral-Small-3.2-24B-Instruct-2506-FP8"
     )
     ENDPOINT_ID = "test-endpoint"
     API_KEY = "test-runpod-api-key"

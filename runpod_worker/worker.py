@@ -7,7 +7,7 @@ from typing import Any, Mapping
 import httpx
 
 
-DEFAULT_MODEL = "ministral-3:14b-instruct-2512-q8_0"
+DEFAULT_MODEL = "mistral-small3.2:24b-instruct-2506-q8_0"
 ALLOWED_OPTION_KEYS = frozenset(
     {
         "temperature",

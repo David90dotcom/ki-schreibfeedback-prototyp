@@ -192,7 +192,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('value="mistral"', response.text)
         self.assertIn('value="ministral-14b-2512"', response.text)
         self.assertIn(
-            "Ministral 3 14B – direkter Vergleich",
+            "Ministral 3 14B – kleineres Vergleichsmodell",
             response.text,
         )
         self.assertIn("Mistral Small – günstig", response.text)

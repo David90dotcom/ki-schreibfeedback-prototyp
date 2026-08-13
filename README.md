@@ -1,6 +1,6 @@
 # KI-Schreibfeedback-Prototyp 1.0.0-rc1
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Ministral-Modell über RunPod Serverless. Version 1.0.0-rc1 verwendet eine frei festlegbare Standard-Kriterienvorlage und die kriterienweise Einzelanalyse als übersichtlichen Normalbetrieb. Gemeinsame Analyse, Zwei-Pass-Prüfung, kriterienloses Gesamtfeedback, freie Modell-IDs und technische Verbindungsoptionen bleiben über „Erweiterte Forschungsoptionen anzeigen“ für gezielte Vergleiche erhalten.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Mistral-Small-3.2-24B-Modell über RunPod Serverless. Version 1.0.0-rc1 verwendet eine frei festlegbare Standard-Kriterienvorlage und die kriterienweise Einzelanalyse als übersichtlichen Normalbetrieb. Gemeinsame Analyse, Zwei-Pass-Prüfung, kriterienloses Gesamtfeedback, freie Modell-IDs und technische Verbindungsoptionen bleiben über „Erweiterte Forschungsoptionen anzeigen“ für gezielte Vergleiche erhalten.
 
 > **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
 
@@ -29,7 +29,7 @@ flowchart TD
     A["Browser: HTTPS"] --> B["Caddy: TLS und Reverse Proxy"]
     B --> C["FastAPI: Login und Sitzungsschutz"]
     C --> D["Feedback-Service"]
-    D --> E["RunPod Serverless: vLLM + Ministral"]
+    D --> E["RunPod Serverless: vLLM + Mistral Small 3.2 24B FP8"]
     D --> F["OpenAI API (optional)"]
     D --> G["Ollama (nur lokal)"]
     D --> H["Mistral API (optional)"]
@@ -95,7 +95,7 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 - optional änderbare Ollama-API-Adresse für die lokale Entwicklung
 - optionale OpenAI- und Mistral-Keys für jeweils einen einzelnen lokalen Testaufruf
 - asynchrone RunPod-Aufträge mit Statusabfrage, Zeitlimit und Abbruch bei Zeitüberschreitung
-- RunPod-Serverless-Worker mit vLLM und `mistralai/Ministral-3-14B-Instruct-2512`
+- RunPod-Serverless-Worker mit vLLM und `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8`
 - Validierung von Modell, Eingabe, Ausgabeformat und erlaubten Generierungsoptionen im Worker
 - Anzeige von Provider, tatsächlich verwendetem Modell und Gesamtdauer
 - Auswahl zwischen Standard-Pool, RTX 4090, RTX 5090 und RTX 6000 Ada über serverseitig erlaubte Endpoint-IDs
@@ -155,6 +155,9 @@ SESSION_SECRET=<erzeugtes Sitzungs-Secret>
 SESSION_MAX_AGE_SECONDS=3600
 LOGIN_RATE_LIMIT_ATTEMPTS=5
 LOGIN_RATE_LIMIT_WINDOW_SECONDS=300
+
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_DEFAULT_MODEL=mistral-small3.2:24b-instruct-2506-q8_0
 
 OPENAI_API_KEY=
 OPENAI_EVALUATION_MODEL=gpt-5.6-sol
@@ -255,7 +258,7 @@ Die automatische Meta-Vorbewertung verwendet ausschließlich den serverseitigen 
 
 ### Mistral
 
-Für die Mistral-Cloud-API werden `MISTRAL_API_KEY` und optional `MISTRAL_DEFAULT_MODEL` in der `.env` konfiguriert. Vorausgewählt ist `mistral-small-latest`; zusätzlich stehen `mistral-medium-latest` und `mistral-large-latest` als abgestufte Vergleichsmodelle bereit. `ministral-14b-2512` entspricht derselben Modellgeneration wie das lokal beziehungsweise über RunPod eingesetzte Ministral-3-14B-Modell und ermöglicht deshalb einen besonders direkten Bereitstellungsvergleich. Über „Andere Modell-ID …“ kann eine weitere von Mistral bereitgestellte Modell-ID verwendet werden.
+Für die Mistral-Cloud-API werden `MISTRAL_API_KEY` und optional `MISTRAL_DEFAULT_MODEL` in der `.env` konfiguriert. Vorausgewählt ist `mistral-small-latest`; zusätzlich stehen `mistral-medium-latest` und `mistral-large-latest` als abgestufte Vergleichsmodelle bereit. `ministral-14b-2512` bleibt als kleineres zusätzliches Cloud-Vergleichsmodell verfügbar, entspricht aber nicht dem lokalen Mistral-Small-3.2-24B-Standardmodell. Über „Andere Modell-ID …“ kann eine weitere von Mistral bereitgestellte Modell-ID verwendet werden.
 
 Wie bei OpenAI wird im Produktionsbetrieb ausschließlich der serverseitige Key verwendet. Ein optional im lokalen Entwicklungsmodus eingegebener Mistral-Key gilt nur für den einzelnen Aufruf, wird nicht gespeichert und danach nicht erneut angezeigt. Der Adapter verwendet den von Mistral dokumentierten OpenAI-kompatiblen API-Endpunkt `https://api.mistral.ai/v1`.
 
@@ -263,7 +266,9 @@ Wie bei OpenAI wird im Produktionsbetrieb ausschließlich der serverseitige Key 
 
 Für RunPod werden ein vLLM-kompatibler Serverless-Endpoint sowie `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID` und `RUNPOD_DEFAULT_MODEL` in der `.env` benötigt.
 
-Das produktiv geprüfte Modell lautet `mistralai/Ministral-3-14B-Instruct-2512`. Die Datei `runpod_worker/test_input.json` dient als direkte Testeingabe für den Worker.
+Das Zielmodell für Version 1.0 lautet `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8`. Es ist eine vLLM-kompatible FP8-Variante derselben Mistral-Small-3.2-24B-Modellgeneration wie das lokal über Ollama eingesetzte Q8-Modell. Das offizielle BF16-/FP16-Modell benötigt laut Modellkarte ungefähr 55 GB GPU-Speicher; die etwa 25,8 GB große FP8-Variante ermöglicht dagegen den vorgesehenen Betrieb auf 32- und 48-GB-GPUs. Eine RTX 4090 mit 24 GB ist für diesen Release nicht freigegeben und ihre Endpoint-ID soll leer bleiben.
+
+Der RunPod-Endpoint verwendet das fest gepinnte Worker-Image `runpod/worker-v1-vllm:v2.24.0`, `MAX_MODEL_LEN=8192` und die Mistral-spezifischen Ladeoptionen. `QUANTIZATION` wird bewusst nicht gesetzt, weil das FP8-Format bereits im Modell hinterlegt ist. Die Datei `runpod_worker/test_input.json` dient als direkte strukturierte Testeingabe. Die vollständigen Einstellungen, die sichere Reihenfolge des Rollouts und der Rückkehrweg stehen im [Deployment-Ablauf für Version 1.0.0-rc1](docs/deployment-v1.0.0-rc1.md).
 
 Container-Build, Endpoint, Queue-Verarbeitung, Scale-to-zero-Kaltstart und Rückgabe des Schreibfeedbacks an die Webanwendung wurden für Version 0.5.0 produktiv geprüft.
 
