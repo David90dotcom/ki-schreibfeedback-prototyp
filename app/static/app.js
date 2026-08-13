@@ -13,6 +13,18 @@
     }
 
     const taskSelect = form.querySelector("#task-id");
+    const advancedOptionsToggle = form.querySelector(
+        "[data-advanced-options-toggle]"
+    );
+    const advancedOptionSections = form.querySelectorAll(
+        "[data-advanced-options]"
+    );
+    const standardOptionSections = form.querySelectorAll(
+        "[data-standard-options]"
+    );
+    const contextFreeOption = form.querySelector(
+        "[data-context-free-option]"
+    );
     const taskPreviews = form.querySelectorAll(
         "[data-task-preview]"
     );
@@ -127,11 +139,16 @@
     let runpodJobsRequestInFlight = false;
     let criterionRefreshInFlight = false;
     const runpodStatusRequestsInFlight = new Set();
+
+    function advancedOptionsEnabled() {
+        return Boolean(advancedOptionsToggle?.checked);
+    }
+
     function selectedRubricAnalysisMode() {
         return (
             [...rubricAnalysisModeInputs].find(
                 (input) => input.checked
-            )?.value || "joint"
+            )?.value || (taskSelect?.value ? "criterion_wise" : "joint")
         );
     }
 
@@ -148,17 +165,105 @@
 
     function updatePipelineOptionAvailability() {
         const taskSelected = Boolean(taskSelect?.value);
+        const advancedOptions = advancedOptionsEnabled();
 
         if (analysisPipelineOption) {
-            analysisPipelineOption.hidden = !taskSelected;
+            analysisPipelineOption.hidden =
+                !taskSelected || !advancedOptions;
             analysisPipelineOption.classList.remove(
                 "analysis-pipeline-option-unavailable"
             );
         }
 
         rubricAnalysisModeInputs.forEach((input) => {
-            input.disabled = !taskSelected;
+            input.disabled = !taskSelected || !advancedOptions;
+
+            if (
+                taskSelected &&
+                !advancedOptions &&
+                input.value === "criterion_wise"
+            ) {
+                input.checked = true;
+            }
         });
+    }
+
+    function updateAdvancedOptionsVisibility() {
+        const advancedOptions = advancedOptionsEnabled();
+        const selectedProvider = providerSelect?.value;
+
+        if (contextFreeOption) {
+            contextFreeOption.disabled = !advancedOptions;
+            contextFreeOption.textContent = advancedOptions
+                ? "Ohne Feedback-Vorlage – bisheriges Gesamtfeedback"
+                : "Bitte Aufgabe mit Feedback-Vorlage auswählen";
+        }
+
+        if (taskSelect) {
+            taskSelect.required = !advancedOptions;
+        }
+
+        if (!advancedOptions && taskSelect && !taskSelect.value) {
+            const defaultTaskId = taskSelect.dataset.defaultTaskId;
+
+            if (
+                defaultTaskId &&
+                [...taskSelect.options].some(
+                    (option) => option.value === defaultTaskId
+                )
+            ) {
+                taskSelect.value = defaultTaskId;
+            }
+        }
+
+        form
+            .querySelectorAll("[data-advanced-model-option]")
+            .forEach((option) => {
+                option.hidden = !advancedOptions;
+                option.disabled = !advancedOptions;
+            });
+
+        if (!advancedOptions) {
+            modelSelects.forEach((modelSelect) => {
+                if (
+                    modelSelect.selectedOptions[0]?.matches(
+                        "[data-advanced-model-option]"
+                    )
+                ) {
+                    modelSelect.value =
+                        modelSelect.dataset.defaultModel || "";
+                }
+            });
+        }
+
+        advancedOptionSections.forEach((section) => {
+            section.hidden = !advancedOptions;
+            const providerPanel = section.closest(
+                "[data-provider-panel]"
+            );
+            const providerPanelActive =
+                !providerPanel ||
+                providerPanel.dataset.providerPanel === selectedProvider;
+
+            section
+                .querySelectorAll("input, select, button")
+                .forEach((control) => {
+                    control.disabled =
+                        !advancedOptions || !providerPanelActive;
+                });
+        });
+
+        standardOptionSections.forEach((section) => {
+            section.hidden = advancedOptions;
+        });
+
+        modelSelects.forEach(updateCustomModelField);
+        updatePipelineOptionAvailability();
+
+        if (ollamaBaseUrlInput) {
+            ollamaBaseUrlInput.required =
+                advancedOptions && selectedProvider === "ollama";
+        }
     }
 
     function updateTaskPreview() {
@@ -212,12 +317,14 @@
         const customSelected =
             modelSelect.value === CUSTOM_MODEL_VALUE;
         const panelActive = !panel.hidden;
+        const advancedOptions = advancedOptionsEnabled();
 
-        customGroup.hidden = !customSelected;
+        customGroup.hidden =
+            !customSelected || !advancedOptions;
         customInput.disabled =
-            !customSelected || !panelActive;
+            !customSelected || !panelActive || !advancedOptions;
         customInput.required =
-            customSelected && panelActive;
+            customSelected && panelActive && advancedOptions;
     }
 
     function updateProviderPanels() {
@@ -244,16 +351,15 @@
             }
         });
 
-        if (ollamaBaseUrlInput) {
-            ollamaBaseUrlInput.required =
-                selectedProvider === "ollama";
-        }
-
-        if (selectedProvider === "runpod") {
+        if (
+            selectedProvider === "runpod" &&
+            advancedOptionsEnabled()
+        ) {
             void loadRunpodStatus();
             void loadRunpodJobs();
         }
 
+        updateAdvancedOptionsVisibility();
         updatePipelineOptionAvailability();
     }
 
@@ -270,10 +376,15 @@
         }
     }
 
-    function addModelOption(modelName, label) {
+    function addModelOption(modelName, label, advanced = false) {
         const option = document.createElement("option");
         option.value = modelName;
         option.textContent = label;
+
+        if (advanced) {
+            option.dataset.advancedModelOption = "";
+        }
+
         ollamaModelSelect.append(option);
     }
 
@@ -304,13 +415,14 @@
 
         discoveredModels.forEach((modelName) => {
             if (modelName !== defaultModel) {
-                addModelOption(modelName, modelName);
+                addModelOption(modelName, modelName, true);
             }
         });
 
         addModelOption(
             CUSTOM_MODEL_VALUE,
-            "Andere Modell-ID …"
+            "Andere Modell-ID …",
+            true
         );
 
         if (currentSelection === CUSTOM_MODEL_VALUE) {
@@ -324,6 +436,7 @@
             ollamaModelSelect.value = defaultModel;
         }
 
+        updateAdvancedOptionsVisibility();
         updateCustomModelField(ollamaModelSelect);
     }
 
@@ -2008,6 +2121,14 @@
         taskSelect.addEventListener("change", updateTaskPreview);
     }
 
+    if (advancedOptionsToggle) {
+        advancedOptionsToggle.addEventListener("change", () => {
+            updateAdvancedOptionsVisibility();
+            updateTaskPreview();
+            updateProviderPanels();
+        });
+    }
+
     providerSelect.addEventListener("change", updateProviderPanels);
 
     modelSelects.forEach((modelSelect) => {
@@ -2105,6 +2226,7 @@
 
         if (
             providerSelect.value === "runpod" &&
+            advancedOptionsEnabled() &&
             latestRunpodSnapshot === null
         ) {
             void loadRunpodStatus();

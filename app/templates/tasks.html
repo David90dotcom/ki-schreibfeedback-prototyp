@@ -16,6 +16,18 @@
             Zu jeder Aufgabe gehört eine Feedback-Vorlage. Mehrere
             Einzelkriterien steuern gemeinsam das spätere Feedback.
         </p>
+        <p class="hint">
+            Lege eine aktive Aufgabe als Standard-Kriterienvorlage fest.
+            Sie wird in der Textanalyse automatisch vorausgewählt und kann
+            später jederzeit gewechselt werden.
+        </p>
+
+        {% if tasks and not default_task_id %}
+            <p class="configuration-status configuration-warning">
+                Noch keine Standard-Kriterienvorlage festgelegt. Wähle unten
+                bei der gewünschten Aufgabe „Als Standard festlegen“.
+            </p>
+        {% endif %}
     </div>
 
     <div class="management-actions">
@@ -109,8 +121,16 @@
                             </span>
                         </span>
 
-                        <span class="criteria-count">
-                            {{ task.rubric.criteria | length }} Kriterien
+                        <span class="task-card-badges">
+                            {% if task.task_id == default_task_id %}
+                                <span class="default-task-badge">
+                                    Standardvorlage
+                                </span>
+                            {% endif %}
+
+                            <span class="criteria-count">
+                                {{ task.rubric.criteria | length }} Kriterien
+                            </span>
                         </span>
                     </span>
 
@@ -180,6 +200,27 @@
                     </ol>
 
                     <div class="task-actions">
+                        {% if task.task_id == default_task_id %}
+                            <span class="default-task-indicator">
+                                Aktuelle Standardvorlage
+                            </span>
+                        {% else %}
+                            <form
+                                method="post"
+                                action="/tasks/{{ task.task_id }}/default"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="csrf_token"
+                                    value="{{ csrf_token }}"
+                                >
+
+                                <button class="secondary-button" type="submit">
+                                    Als Standard festlegen
+                                </button>
+                            </form>
+                        {% endif %}
+
                         <a
                             class="button-link secondary-link"
                             href="/tasks/{{ task.task_id }}/edit"

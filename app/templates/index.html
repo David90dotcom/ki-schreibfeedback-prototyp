@@ -24,9 +24,23 @@
                 Aufgabe und Feedback
             </label>
 
-            <select id="task-id" name="task_id">
-                <option value="">
-                    Ohne Feedback-Vorlage – bisheriges Gesamtfeedback
+            <select
+                id="task-id"
+                name="task_id"
+                data-default-task-id="{{ default_task_id }}"
+                {% if not advanced_options %}required{% endif %}
+            >
+                <option
+                    value=""
+                    data-context-free-option
+                    {% if not selected_task_id %}selected{% endif %}
+                    {% if not advanced_options %}disabled{% endif %}
+                >
+                    {% if advanced_options %}
+                        Ohne Feedback-Vorlage – bisheriges Gesamtfeedback
+                    {% else %}
+                        Bitte Aufgabe mit Feedback-Vorlage auswählen
+                    {% endif %}
                 </option>
 
                 {% for task in task_options %}
@@ -37,6 +51,9 @@
                     >
                         {{ task.title }} – {{ task.rubric.title }}
                         ({{ task.rubric.criteria | length }} Kriterien)
+                        {% if task.task_id == default_task_id %}
+                            · Standard
+                        {% endif %}
                     </option>
                 {% endfor %}
             </select>
@@ -132,20 +149,61 @@
                 {% endfor %}
             </div>
 
-            {% if task_options %}
+            {% if task_options and default_task_id %}
                 <p class="hint">
-                    Mit einer Feedback-Vorlage erhältst du ein eigenes
-                    Feedback zu jedem Kriterium.
+                    Die Standard-Kriterienvorlage ist vorausgewählt. Für einen
+                    einzelnen Lauf kannst du hier eine andere Vorlage wählen.
                     <a href="/tasks">Feedback verwalten</a>
+                </p>
+            {% elif task_options %}
+                <p class="configuration-status configuration-warning">
+                    Es ist noch keine Standard-Kriterienvorlage festgelegt.
+                    Wähle hier eine Aufgabe oder
+                    <a href="/tasks">lege eine Standardvorlage fest</a>.
                 </p>
             {% else %}
                 <p class="hint">
                     Es wurde noch keine Feedback-Vorlage angelegt.
-                    <a href="/tasks/new">Erstes Feedback erstellen</a>
-                    oder das bisherige Gesamtfeedback verwenden.
+                    <a href="/tasks/new">Erstes Feedback erstellen</a>.
+                    Das kriterienlose Gesamtfeedback ist nur in den
+                    erweiterten Forschungsoptionen verfügbar.
                 </p>
             {% endif %}
         </div>
+
+        <section class="advanced-options-switch">
+            <label for="advanced-options">
+                <input
+                    id="advanced-options"
+                    name="advanced_options"
+                    type="checkbox"
+                    value="true"
+                    data-advanced-options-toggle
+                    {% if advanced_options %}checked{% endif %}
+                >
+                <span>
+                    <strong>Erweiterte Forschungsoptionen anzeigen</strong>
+                    <small>
+                        Blendet Vergleichsverfahren, freie Modell-IDs,
+                        Verbindungsparameter und technische RunPod-Werkzeuge
+                        ein.
+                    </small>
+                </span>
+            </label>
+        </section>
+
+        <section
+            class="standard-analysis-mode"
+            data-standard-options
+            {% if advanced_options %}hidden{% endif %}
+        >
+            <strong>Standardverfahren: Kriterienweise Analyse</strong>
+            <p>
+                Jedes Kriterium wird in einem eigenen fokussierten
+                Modellaufruf geprüft. Andere Verfahren bleiben für gezielte
+                Vergleiche verfügbar.
+            </p>
+        </section>
 
         <details
             class="analysis-original-text-panel"
@@ -186,7 +244,8 @@
         <section
             class="analysis-pipeline-option"
             data-analysis-pipeline-option
-            {% if not selected_task_id %}hidden{% endif %}
+            data-advanced-options
+            {% if not selected_task_id or not advanced_options %}hidden{% endif %}
         >
             <div class="analysis-pipeline-option-heading">
                 <h3>Analyseverfahren für Kriterienfeedback</h3>
@@ -204,7 +263,7 @@
                         value="joint"
                         data-rubric-analysis-mode
                         {% if selected_rubric_analysis_mode == "joint" %}checked{% endif %}
-                        {% if not selected_task_id %}disabled{% endif %}
+                        {% if not selected_task_id or not advanced_options %}disabled{% endif %}
                     >
                     <span>
                         <strong>Gemeinsame Analyse</strong>
@@ -222,10 +281,13 @@
                         value="criterion_wise"
                         data-rubric-analysis-mode
                         {% if selected_rubric_analysis_mode == "criterion_wise" %}checked{% endif %}
-                        {% if not selected_task_id %}disabled{% endif %}
+                        {% if not selected_task_id or not advanced_options %}disabled{% endif %}
                     >
                     <span>
-                        <strong>Kriterienweise Analyse</strong>
+                        <strong>
+                            Kriterienweise Analyse
+                            <span class="focus-mode-badge">Standard</span>
+                        </strong>
                         <small>
                             Für jedes Kriterium wird nacheinander ein eigener
                             fokussierter Modellaufruf mit dem vollständigen
@@ -241,7 +303,7 @@
                         value="two_pass"
                         data-rubric-analysis-mode
                         {% if selected_rubric_analysis_mode == "two_pass" %}checked{% endif %}
-                        {% if not selected_task_id %}disabled{% endif %}
+                        {% if not selected_task_id or not advanced_options %}disabled{% endif %}
                     >
                     <span>
                         <strong>
@@ -259,11 +321,10 @@
             </fieldset>
 
             <p class="hint">
-                Alle Provider starten mit „Gemeinsame Analyse“. Die
-                kriterienweise Variante erzeugt so viele Modellaufrufe wie
-                die Vorlage Kriterien enthält; bei Cloud-APIs können dadurch
-                zusätzliche Kosten entstehen. Zwei-Pass bleibt eine bewusst
-                auswählbare Forschungsoption und ist nicht vorausgewählt.
+                Die kriterienweise Variante ist der Standardbetrieb. Die
+                gemeinsame Analyse und die Zwei-Pass-Prüfung dienen dem
+                bewussten Vergleich; Cloud-APIs können je nach Verfahren
+                zusätzliche Kosten verursachen.
             </p>
         </section>
 
@@ -288,6 +349,10 @@
             >
             <h3>Lokales Ollama-Modell</h3>
 
+            <div
+                data-advanced-options
+                {% if not advanced_options %}hidden{% endif %}
+            >
             {% if browser_overrides_allowed %}
                 <label for="ollama-base-url">
                     Ollama-API-Adresse
@@ -314,6 +379,7 @@
                     vorkonfiguriert.
                 </p>
             {% endif %}
+            </div>
 
             <label for="ollama-model">
                 Ollama-Modell
@@ -329,6 +395,10 @@
                     <option
                         value="{{ model_name }}"
                         {% if model_name == selected_ollama_model %}selected{% endif %}
+                        {% if model_name != ollama_default_model %}
+                            data-advanced-model-option
+                            {% if not advanced_options %}hidden disabled{% endif %}
+                        {% endif %}
                     >
                         {{ model_name }}
                         {% if model_name == ollama_default_model %}
@@ -339,7 +409,9 @@
 
                 <option
                     value="{{ custom_model_value }}"
+                    data-advanced-model-option
                     {% if selected_ollama_model == custom_model_value %}selected{% endif %}
+                    {% if not advanced_options %}hidden disabled{% endif %}
                 >
                     Andere Modell-ID …
                 </option>
@@ -348,6 +420,8 @@
             <div
                 class="custom-model"
                 data-custom-model-group
+                data-advanced-options
+                {% if not advanced_options or selected_ollama_model != custom_model_value %}hidden{% endif %}
             >
                 <label for="ollama-custom-model">
                     Eigene Ollama-Modell-ID
@@ -370,20 +444,25 @@
                 </p>
             </div>
 
-            <button
-                id="load-ollama-models"
-                class="secondary-button"
-                type="button"
+            <div
+                data-advanced-options
+                {% if not advanced_options %}hidden{% endif %}
             >
-                Verbindung prüfen / Modelle laden
-            </button>
+                <button
+                    id="load-ollama-models"
+                    class="secondary-button"
+                    type="button"
+                >
+                    Verbindung prüfen / Modelle laden
+                </button>
 
-            <p
-                id="ollama-model-status"
-                class="status-message"
-                role="status"
-                aria-live="polite"
-            ></p>
+                <p
+                    id="ollama-model-status"
+                    class="status-message"
+                    role="status"
+                    aria-live="polite"
+                ></p>
+            </div>
             </section>
         {% endif %}
 
@@ -394,6 +473,10 @@
         >
             <h3>OpenAI-Cloudmodell</h3>
 
+            <div
+                data-advanced-options
+                {% if not advanced_options %}hidden{% endif %}
+            >
             {% if openai_env_key_configured %}
                 <p class="configuration-status configuration-success">
                     OPENAI_API_KEY aus der .env-Datei ist
@@ -448,6 +531,7 @@
                     serverseitig hinterlegte OpenAI-Key verwendet.
                 </p>
             {% endif %}
+            </div>
 
             <label for="openai-model">
                 OpenAI-Modell
@@ -473,40 +557,49 @@
 
                 <option
                     value="{{ custom_model_value }}"
+                    data-advanced-model-option
                     {% if selected_openai_model == custom_model_value %}selected{% endif %}
+                    {% if not advanced_options %}hidden disabled{% endif %}
                 >
                     Andere Modell-ID …
                 </option>
             </select>
 
-            <label for="openai-reasoning-effort">
-                Denktiefe (Reasoning)
-            </label>
-
-            <select
-                id="openai-reasoning-effort"
-                name="openai_reasoning_effort"
+            <div
+                data-advanced-options
+                {% if not advanced_options %}hidden{% endif %}
             >
-                {% for effort, label in openai_reasoning_effort_options %}
-                    <option
-                        value="{{ effort }}"
-                        {% if effort == selected_openai_reasoning_effort %}selected{% endif %}
-                    >
-                        {{ label }}
-                    </option>
-                {% endfor %}
-            </select>
+                <label for="openai-reasoning-effort">
+                    Denktiefe (Reasoning)
+                </label>
 
-            <p class="hint">
-                GPT-5.6 unterstützt die Stufen von <code>none</code>
-                bis <code>max</code>. Für den stärksten Qualitätslauf
-                wählst du GPT-5.6 Sol mit <code>max</code>; höhere
-                Stufen können Laufzeit und Kosten deutlich erhöhen.
-            </p>
+                <select
+                    id="openai-reasoning-effort"
+                    name="openai_reasoning_effort"
+                >
+                    {% for effort, label in openai_reasoning_effort_options %}
+                        <option
+                            value="{{ effort }}"
+                            {% if effort == selected_openai_reasoning_effort %}selected{% endif %}
+                        >
+                            {{ label }}
+                        </option>
+                    {% endfor %}
+                </select>
+
+                <p class="hint">
+                    GPT-5.6 unterstützt die Stufen von <code>none</code>
+                    bis <code>max</code>. Für den stärksten Qualitätslauf
+                    wählst du GPT-5.6 Sol mit <code>max</code>; höhere
+                    Stufen können Laufzeit und Kosten deutlich erhöhen.
+                </p>
+            </div>
 
             <div
                 class="custom-model"
                 data-custom-model-group
+                data-advanced-options
+                {% if not advanced_options or selected_openai_model != custom_model_value %}hidden{% endif %}
             >
                 <label for="openai-custom-model">
                     Eigene OpenAI-Modell-ID
@@ -537,6 +630,10 @@
         >
             <h3>Mistral-Cloudmodell</h3>
 
+            <div
+                data-advanced-options
+                {% if not advanced_options %}hidden{% endif %}
+            >
             {% if mistral_env_key_configured %}
                 <p class="configuration-status configuration-success">
                     MISTRAL_API_KEY aus der .env-Datei ist
@@ -591,6 +688,7 @@
                     serverseitig hinterlegte Mistral-Key verwendet.
                 </p>
             {% endif %}
+            </div>
 
             <label for="mistral-model">
                 Mistral-Modell
@@ -616,7 +714,9 @@
 
                 <option
                     value="{{ custom_model_value }}"
+                    data-advanced-model-option
                     {% if selected_mistral_model == custom_model_value %}selected{% endif %}
+                    {% if not advanced_options %}hidden disabled{% endif %}
                 >
                     Andere Modell-ID …
                 </option>
@@ -625,6 +725,8 @@
             <div
                 class="custom-model"
                 data-custom-model-group
+                data-advanced-options
+                {% if not advanced_options or selected_mistral_model != custom_model_value %}hidden{% endif %}
             >
                 <label for="mistral-custom-model">
                     Eigene Mistral-Modell-ID
@@ -655,6 +757,19 @@
         >
             <h3>RunPod-Hardwarekonfiguration</h3>
 
+            <p
+                class="configuration-status configuration-info"
+                data-standard-options
+                {% if advanced_options %}hidden{% endif %}
+            >
+                Im Standardbetrieb wird das serverseitig konfigurierte
+                RunPod-Inferenzziel verwendet.
+            </p>
+
+            <div
+                data-advanced-options
+                {% if not advanced_options %}hidden{% endif %}
+            >
             <label for="runpod-endpoint">
                 Inferenzziel
             </label>
@@ -839,6 +954,7 @@
                     aria-live="polite"
                 ></p>
             </details>
+            </div>
         </section>
 
         <label for="student_text">

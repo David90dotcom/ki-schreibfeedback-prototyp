@@ -122,6 +122,59 @@ class TaskStoreTests(unittest.TestCase):
             )
         )
 
+    def test_default_feedback_task_can_be_selected_and_changed(self) -> None:
+        self.assertIsNone(
+            asyncio.run(self.store.get_default_feedback_task_id())
+        )
+        first = self._create_task()
+        second = asyncio.run(self.store.duplicate_task(first.task_id))
+
+        selected = asyncio.run(
+            self.store.set_default_feedback_task(first.task_id)
+        )
+
+        self.assertEqual(selected.task_id, first.task_id)
+        self.assertEqual(
+            asyncio.run(self.store.get_default_feedback_task_id()),
+            first.task_id,
+        )
+
+        asyncio.run(
+            self.store.set_default_feedback_task(second.task_id)
+        )
+
+        self.assertEqual(
+            asyncio.run(self.store.get_default_feedback_task_id()),
+            second.task_id,
+        )
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            setting_count = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM application_settings
+                WHERE setting_key = 'default_feedback_task_id'
+                """
+            ).fetchone()[0]
+
+        self.assertEqual(setting_count, 1)
+
+    def test_duplicate_does_not_replace_default_feedback_task(self) -> None:
+        source = self._create_task()
+        asyncio.run(
+            self.store.set_default_feedback_task(source.task_id)
+        )
+
+        duplicate = asyncio.run(
+            self.store.duplicate_task(source.task_id)
+        )
+
+        self.assertNotEqual(duplicate.task_id, source.task_id)
+        self.assertEqual(
+            asyncio.run(self.store.get_default_feedback_task_id()),
+            source.task_id,
+        )
+
     def test_criterion_limits_are_configurable(self) -> None:
         limited_store = TaskStore(
             Path(self.temporary_directory.name) / "limited.sqlite3",
@@ -250,6 +303,9 @@ class TaskStoreTests(unittest.TestCase):
 
     def test_unused_task_is_deleted_completely(self) -> None:
         task = self._create_task()
+        asyncio.run(
+            self.store.set_default_feedback_task(task.task_id)
+        )
 
         result = asyncio.run(
             self.store.delete_task(task.task_id)
@@ -264,9 +320,15 @@ class TaskStoreTests(unittest.TestCase):
                 )
             )
         )
+        self.assertIsNone(
+            asyncio.run(self.store.get_default_feedback_task_id())
+        )
 
     def test_used_task_is_archived_and_snapshot_remains(self) -> None:
         task = self._create_task()
+        asyncio.run(
+            self.store.set_default_feedback_task(task.task_id)
+        )
         asyncio.run(
             self.store.save_feedback_run(
                 task=task,
@@ -309,6 +371,9 @@ class TaskStoreTests(unittest.TestCase):
                 self.store.count_feedback_runs(task_id=task.task_id)
             ),
             1,
+        )
+        self.assertIsNone(
+            asyncio.run(self.store.get_default_feedback_task_id())
         )
 
     def test_feedback_run_does_not_store_student_text(self) -> None:

@@ -280,6 +280,60 @@ class TaskManagementTests(unittest.TestCase):
         )
         self.assertEqual(len(asyncio.run(self.store.list_tasks())), 1)
 
+    def test_default_task_is_configurable_and_preselected(self) -> None:
+        task = self._create_task()
+        management_page = self.client.get("/tasks")
+
+        self.assertIn(
+            f'action="/tasks/{task.task_id}/default"',
+            management_page.text,
+        )
+        self.assertIn("Als Standard festlegen", management_page.text)
+
+        response = self.client.post(
+            f"/tasks/{task.task_id}/default",
+            data={"csrf_token": self.csrf_token},
+            follow_redirects=False,
+        )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertEqual(response.headers["location"], "/tasks?notice=default")
+        self.assertEqual(
+            asyncio.run(self.store.get_default_feedback_task_id()),
+            task.task_id,
+        )
+
+        management_page = self.client.get("/tasks?notice=default")
+        self.assertIn("Standard-Kriterienvorlage festgelegt", management_page.text)
+        self.assertIn("Standardvorlage", management_page.text)
+        self.assertIn("Aktuelle Standardvorlage", management_page.text)
+
+        start_page = self.client.get("/")
+        self.assertIn(
+            f'data-default-task-id="{task.task_id}"',
+            start_page.text,
+        )
+        self.assertRegex(
+            start_page.text,
+            rf'value="{re.escape(task.task_id)}"[\s\S]{{0,180}}selected',
+        )
+        self.assertRegex(
+            start_page.text,
+            r'value="criterion_wise"[\s\S]{0,180}checked',
+        )
+        self.assertIn(
+            "Standardverfahren: Kriterienweise Analyse",
+            start_page.text,
+        )
+        self.assertIn(
+            "Erweiterte Forschungsoptionen anzeigen",
+            start_page.text,
+        )
+        self.assertNotIn(
+            "Ohne Feedback-Vorlage – bisheriges Gesamtfeedback",
+            start_page.text,
+        )
+
     def test_task_is_selectable_and_rubric_feedback_is_persisted(
         self,
     ) -> None:
@@ -358,10 +412,15 @@ class TaskManagementTests(unittest.TestCase):
 
         with (
             patch.object(
-                main.rubric_feedback_service,
+                main.criterion_wise_rubric_feedback_service,
                 "analyze_text",
                 new=AsyncMock(return_value=result),
-            ) as rubric_analysis,
+            ) as criterion_wise_analysis,
+            patch.object(
+                main.rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(),
+            ) as joint_analysis,
             patch.object(
                 main.feedback_service,
                 "analyze_text",
@@ -387,11 +446,12 @@ class TaskManagementTests(unittest.TestCase):
             response.headers["x-analysis-outcome"],
             "success",
         )
-        rubric_analysis.assert_awaited_once()
+        criterion_wise_analysis.assert_awaited_once()
+        joint_analysis.assert_not_awaited()
         old_analysis.assert_not_awaited()
-        analyzed_task = rubric_analysis.await_args.kwargs["task"]
+        analyzed_task = criterion_wise_analysis.await_args.kwargs["task"]
         analyzed_original_text = (
-            rubric_analysis.await_args.kwargs["original_text"]
+            criterion_wise_analysis.await_args.kwargs["original_text"]
         )
         self.assertEqual(
             analyzed_task.material,
@@ -994,6 +1054,69 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn("Getrennte Modellaufrufe", overview.text)
         self.assertIn("je ein Aufruf pro Kriterium", overview.text)
 
+    def test_criterion_wise_feedback_is_server_default_for_task(
+        self,
+    ) -> None:
+        task = self._create_task()
+        result = RubricFeedbackResult(
+            provider="ollama",
+            model=main.settings.ollama_model,
+            task_id=task.task_id,
+            task_title=task.title,
+            rubric_title=task.rubric.title,
+            criteria_feedback=tuple(
+                CriterionFeedbackResult(
+                    criterion_id=criterion.criterion_id,
+                    criterion_title=criterion.title,
+                    criterion_text=criterion.text,
+                    status="mostly_met",
+                    status_label="Überwiegend erfüllt",
+                    feedback="Belegter fokussierter Befund.",
+                    next_step="Überarbeite diesen Aspekt gezielt.",
+                    evidence_quotes=("Anonymisierter Schülertext",),
+                )
+                for criterion in task.rubric.criteria
+            ),
+            overall_feedback="Kriterienweise Standardanalyse.",
+            duration_ms=300,
+            pipeline_mode=CRITERION_WISE_FEEDBACK_MODE,
+            pipeline_label=CRITERION_WISE_FEEDBACK_LABEL,
+            prompt_version=CRITERION_WISE_PIPELINE_VERSION,
+            criterion_prompt_version=RUBRIC_FEEDBACK_PROMPT_VERSION,
+            criterion_request_count=2,
+            criterion_request_durations_ms=(140, 160),
+        )
+
+        with (
+            patch.object(
+                main.criterion_wise_rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(return_value=result),
+            ) as criterion_wise_analysis,
+            patch.object(
+                main.rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(),
+            ) as joint_analysis,
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "csrf_token": self.csrf_token,
+                    "task_id": task.task_id,
+                    "student_text": "Anonymisierter Schülertext",
+                    "provider": "ollama",
+                    "ollama_model": main.settings.ollama_model,
+                },
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["x-analysis-outcome"], "success")
+        criterion_wise_analysis.assert_awaited_once()
+        joint_analysis.assert_not_awaited()
+        self.assertIn("Kriterienweise Standardanalyse", response.text)
+
     def test_two_pass_feedback_is_opt_in_visible_and_persisted(
         self,
     ) -> None:
@@ -1270,6 +1393,7 @@ class TaskManagementTests(unittest.TestCase):
                     "provider": "openai",
                     "openai_model": main.settings.openai_model,
                     "openai_api_key": "test-api-key",
+                    "advanced_options": "true",
                 },
                 headers={"X-Requested-With": "XMLHttpRequest"},
             )
@@ -1984,7 +2108,7 @@ class TaskManagementTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertEqual(asyncio.run(self.store.list_tasks()), [])
 
-    def test_start_page_keeps_old_path_when_task_store_fails(self) -> None:
+    def test_start_page_does_not_fall_back_when_task_store_fails(self) -> None:
         with patch.object(
             self.store,
             "list_tasks",
@@ -1996,11 +2120,15 @@ class TaskManagementTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(
-            "Das bisherige Gesamtfeedback bleibt verfügbar.",
+            "Bitte versuche es nach einem Neustart erneut.",
+            response.text,
+        )
+        self.assertNotIn(
+            "Ohne Feedback-Vorlage – bisheriges Gesamtfeedback",
             response.text,
         )
         self.assertIn(
-            "Ohne Feedback-Vorlage – bisheriges Gesamtfeedback",
+            "Erweiterte Forschungsoptionen anzeigen",
             response.text,
         )
         self.assertNotIn("bewertungsbogen", response.text.lower())

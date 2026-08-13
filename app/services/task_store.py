@@ -48,6 +48,7 @@ STANDARD_FEEDBACK_TASK_INSTRUCTIONS = (
     "Bewertungsgrundlage waren ausschließlich der allgemeine "
     "Standardprompt und der anonymisierte Schülertext."
 )
+DEFAULT_FEEDBACK_TASK_SETTING_KEY = "default_feedback_task_id"
 
 
 def _normalize_student_text(value: str) -> str:
@@ -178,6 +179,29 @@ class TaskStore:
             self._get_task_sync,
             task_id,
             include_archived,
+        )
+
+    async def get_default_feedback_task_id(self) -> str | None:
+        """Liefert die aktive Standard-Kriterienvorlage, falls gesetzt."""
+
+        return await asyncio.to_thread(
+            self._get_default_feedback_task_id_sync
+        )
+
+    async def set_default_feedback_task(
+        self,
+        task_id: str,
+    ) -> FeedbackTask:
+        """Legt genau eine aktive Aufgabe als Standardvorlage fest."""
+
+        if task_id == STANDARD_FEEDBACK_TASK_ID:
+            raise TaskNotFoundError(
+                "Die Standard-Kriterienvorlage wurde nicht gefunden."
+            )
+
+        return await asyncio.to_thread(
+            self._set_default_feedback_task_sync,
+            task_id,
         )
 
     async def get_or_create_standard_feedback_task(self) -> FeedbackTask:
@@ -768,6 +792,86 @@ class TaskStore:
                 "Die Aufgabe konnte nicht geladen werden."
             ) from exc
 
+    def _get_default_feedback_task_id_sync(self) -> str | None:
+        try:
+            with self._connect() as connection:
+                self._create_schema(connection)
+                row = connection.execute(
+                    """
+                    SELECT setting.setting_value
+                    FROM application_settings AS setting
+                    JOIN feedback_tasks AS task
+                      ON task.task_id = setting.setting_value
+                    JOIN rubrics AS rubric
+                      ON rubric.task_id = task.task_id
+                    WHERE setting.setting_key = ?
+                      AND task.task_id <> ?
+                      AND task.archived_at IS NULL
+                      AND rubric.archived_at IS NULL
+                    """,
+                    (
+                        DEFAULT_FEEDBACK_TASK_SETTING_KEY,
+                        STANDARD_FEEDBACK_TASK_ID,
+                    ),
+                ).fetchone()
+
+                return row["setting_value"] if row is not None else None
+
+        except sqlite3.Error as exc:
+            raise TaskStoreError(
+                "Die Standard-Kriterienvorlage konnte nicht geladen werden."
+            ) from exc
+
+    def _set_default_feedback_task_sync(
+        self,
+        task_id: str,
+    ) -> FeedbackTask:
+        with self._write_lock:
+            try:
+                with self._connect() as connection:
+                    self._create_schema(connection)
+                    task = self._load_task(
+                        connection,
+                        task_id,
+                        include_archived=False,
+                    )
+
+                    if task is None:
+                        raise TaskNotFoundError(
+                            "Die Standard-Kriterienvorlage wurde nicht "
+                            "gefunden."
+                        )
+
+                    timestamp = datetime.now(timezone.utc).isoformat()
+                    connection.execute(
+                        """
+                        INSERT INTO application_settings (
+                            setting_key,
+                            setting_value,
+                            updated_at
+                        )
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(setting_key) DO UPDATE SET
+                            setting_value = excluded.setting_value,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            DEFAULT_FEEDBACK_TASK_SETTING_KEY,
+                            task_id,
+                            timestamp,
+                        ),
+                    )
+
+                return task
+
+            except TaskNotFoundError:
+                raise
+            except sqlite3.Error as exc:
+                raise TaskStoreError(
+                    "Die Standard-Kriterienvorlage konnte nicht gespeichert "
+                    "werden."
+                ) from exc
+
     def _create_task_sync(
         self,
         normalized: dict[str, object],
@@ -968,6 +1072,18 @@ class TaskStore:
                             ),
                         )
                         action = "archived"
+
+                    connection.execute(
+                        """
+                        DELETE FROM application_settings
+                        WHERE setting_key = ?
+                          AND setting_value = ?
+                        """,
+                        (
+                            DEFAULT_FEEDBACK_TASK_SETTING_KEY,
+                            task_id,
+                        ),
+                    )
 
                 return TaskDeleteResult(
                     task_id=task_id,
@@ -2071,6 +2187,12 @@ class TaskStore:
                 FOREIGN KEY (rubric_id)
                     REFERENCES rubrics (rubric_id)
                     ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS application_settings (
+                setting_key TEXT PRIMARY KEY,
+                setting_value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
 
             CREATE TABLE IF NOT EXISTS rubric_feedback_runs (

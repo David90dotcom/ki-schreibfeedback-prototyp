@@ -569,8 +569,10 @@ def _template_context(
     runpod_tracking_id: str | None = None,
     task_options: list[FeedbackTask] | None = None,
     selected_task_id: str = "",
+    default_task_id: str = "",
     original_text: str = "",
-    selected_rubric_analysis_mode: str = RUBRIC_ANALYSIS_MODE_JOINT,
+    selected_rubric_analysis_mode: str | None = None,
+    advanced_options: bool = False,
     result: FeedbackResult | RubricFeedbackResult | None = None,
     feedback_run_id: str | None = None,
     runpod_warm_window: dict[str, object] | None = None,
@@ -589,6 +591,12 @@ def _template_context(
             if "openai" in available_provider_keys
             else provider_options[0][0]
         )
+
+    default_rubric_analysis_mode = (
+        RUBRIC_ANALYSIS_MODE_CRITERION_WISE
+        if selected_task_id
+        else RUBRIC_ANALYSIS_MODE_JOINT
+    )
 
     current_ollama_model = (
         selected_ollama_model
@@ -627,13 +635,15 @@ def _template_context(
         "student_text": student_text,
         "task_options": task_options or [],
         "selected_task_id": selected_task_id,
+        "default_task_id": default_task_id,
         "original_text": original_text,
         "selected_rubric_analysis_mode": (
             selected_rubric_analysis_mode
             if selected_rubric_analysis_mode
             in VALID_RUBRIC_ANALYSIS_MODES
-            else RUBRIC_ANALYSIS_MODE_JOINT
+            else default_rubric_analysis_mode
         ),
+        "advanced_options": advanced_options,
         "result": result,
         "feedback_run_id": feedback_run_id,
         "error": error,
@@ -712,6 +722,9 @@ TASK_NOTICE_MESSAGES = {
     "archived": (
         "Die bereits verwendete Feedback-Vorlage wurde archiviert. "
         "Vorhandene Analyseergebnisse bleiben erhalten."
+    ),
+    "default": (
+        "Die Aufgabe wurde als Standard-Kriterienvorlage festgelegt."
     ),
 }
 
@@ -1130,6 +1143,7 @@ def _rubric_analysis_mode(
     raw_mode: str,
     *,
     legacy_two_pass: bool = False,
+    default_mode: str = RUBRIC_ANALYSIS_MODE_JOINT,
 ) -> str:
     """Validiert den Modus und unterstützt den bisherigen Checkbox-POST."""
     normalized_mode = raw_mode.strip().lower()
@@ -1138,7 +1152,7 @@ def _rubric_analysis_mode(
         return (
             RUBRIC_ANALYSIS_MODE_TWO_PASS
             if legacy_two_pass
-            else RUBRIC_ANALYSIS_MODE_JOINT
+            else default_mode
         )
     if normalized_mode not in VALID_RUBRIC_ANALYSIS_MODES:
         raise ValueError(
@@ -1171,7 +1185,8 @@ def _provider_for_request(
             )
 
         effective_base_url = (
-            ollama_base_url
+            ollama_base_url.strip()
+            or settings.ollama_base_url
             if settings.browser_overrides_allowed
             else settings.ollama_base_url
         )
@@ -2002,6 +2017,9 @@ async def tasks_page(
         stored_tasks = await task_store.list_tasks(
             include_archived=True
         )
+        default_task_id = (
+            await task_store.get_default_feedback_task_id()
+        )
         tasks = [
             task
             for task in stored_tasks
@@ -2010,6 +2028,7 @@ async def tasks_page(
         export_available = bool(stored_tasks)
     except TaskStoreError as exc:
         tasks = []
+        default_task_id = None
         export_available = False
         error = str(exc)
 
@@ -2023,6 +2042,7 @@ async def tasks_page(
                 request.session
             ),
             "tasks": tasks,
+            "default_task_id": default_task_id,
             "export_available": export_available,
             "notice": _task_notice_message(
                 notice,
@@ -2413,6 +2433,31 @@ async def delete_task(
     )
 
 
+@app.post("/tasks/{task_id}/default")
+async def set_default_feedback_task(
+    request: Request,
+    task_id: str,
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        await task_store.set_default_feedback_task(task_id)
+    except TaskNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    return RedirectResponse(
+        url="/tasks?notice=default",
+        status_code=303,
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(
     request: Request,
@@ -2426,11 +2471,15 @@ async def index(
 
     try:
         tasks = await task_store.list_tasks()
+        default_task_id = (
+            await task_store.get_default_feedback_task_id()
+        )
     except TaskStoreError:
         tasks = []
+        default_task_id = None
         storage_warning = (
             "Die Feedback-Vorlagen konnten momentan nicht geladen werden. "
-            "Das bisherige Gesamtfeedback bleibt verfügbar."
+            "Bitte versuche es nach einem Neustart erneut."
         )
 
     return templates.TemplateResponse(
@@ -2442,6 +2491,8 @@ async def index(
             ),
             authenticated_user=authenticated_user,
             task_options=tasks,
+            selected_task_id=default_task_id or "",
+            default_task_id=default_task_id or "",
             storage_warning=storage_warning,
         ),
     )
@@ -2805,6 +2856,7 @@ async def analyze(
     ),
     rubric_analysis_mode: str = Form("", max_length=32),
     two_pass_feedback: bool = Form(False),
+    advanced_options: bool = Form(False),
     csrf_token: str = Form("", max_length=256),
     ollama_base_url: str = Form(""),
     ollama_model: str = Form(""),
@@ -2831,10 +2883,16 @@ async def analyze(
     error: str | None = None
     storage_warning: str | None = None
     runpod_warm_window: dict[str, object] | None = None
+    selected_task_id = task_id.strip()
+    default_rubric_analysis_mode = (
+        RUBRIC_ANALYSIS_MODE_CRITERION_WISE
+        if selected_task_id
+        else RUBRIC_ANALYSIS_MODE_JOINT
+    )
     selected_rubric_analysis_mode = (
         RUBRIC_ANALYSIS_MODE_TWO_PASS
         if two_pass_feedback
-        else RUBRIC_ANALYSIS_MODE_JOINT
+        else default_rubric_analysis_mode
     )
 
     openai_override_used = (
@@ -2852,6 +2910,7 @@ async def analyze(
         selected_rubric_analysis_mode = _rubric_analysis_mode(
             rubric_analysis_mode,
             legacy_two_pass=two_pass_feedback,
+            default_mode=default_rubric_analysis_mode,
         )
 
         if provider == "runpod" and not runpod_tracking_id.strip():
@@ -2872,8 +2931,6 @@ async def analyze(
             runpod_endpoint=runpod_endpoint,
             runpod_tracking_id=runpod_tracking_id,
         )
-
-        selected_task_id = task_id.strip()
 
         if selected_task_id:
             selected_task = await task_store.get_task(
@@ -2991,8 +3048,12 @@ async def analyze(
 
     try:
         task_options = await task_store.list_tasks()
+        default_task_id = (
+            await task_store.get_default_feedback_task_id()
+        )
     except TaskStoreError:
         task_options = []
+        default_task_id = None
 
         if error is None:
             storage_warning = (
@@ -3026,10 +3087,12 @@ async def analyze(
             student_text=student_text,
             task_options=task_options,
             selected_task_id=task_id.strip(),
+            default_task_id=default_task_id or "",
             original_text=original_text,
             selected_rubric_analysis_mode=(
                 selected_rubric_analysis_mode
             ),
+            advanced_options=advanced_options,
             ollama_base_url=ollama_base_url,
             selected_ollama_model=ollama_model,
             ollama_custom_model=ollama_custom_model,

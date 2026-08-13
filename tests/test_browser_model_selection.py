@@ -150,7 +150,19 @@ class BrowserModelSelectionTests(unittest.TestCase):
             response.text,
         )
         self.assertIn(
-            "Zwei-Pass bleibt eine bewusst",
+            "gemeinsame Analyse und die Zwei-Pass-Prüfung dienen",
+            response.text,
+        )
+        self.assertIn(
+            'name="advanced_options"',
+            response.text,
+        )
+        self.assertIn(
+            "Erweiterte Forschungsoptionen anzeigen",
+            response.text,
+        )
+        self.assertIn(
+            "Bitte Aufgabe mit Feedback-Vorlage auswählen",
             response.text,
         )
         self.assertRegex(
@@ -364,6 +376,44 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn("Lokales Testfeedback", response.text)
         self.assertIn("llama4:latest", response.text)
         self.assertIn("123 ms", response.text)
+
+    def test_ollama_uses_configured_url_when_hidden_field_is_omitted(
+        self,
+    ) -> None:
+        captured: dict[str, str] = {}
+
+        async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
+            provider = kwargs["provider_override"]
+            captured["base_url"] = provider.base_url  # type: ignore[attr-defined]
+
+            return FeedbackResult(
+                provider="ollama",
+                model=provider.model_name,  # type: ignore[attr-defined]
+                feedback="Lokales Standardfeedback",
+                duration_ms=90,
+            )
+
+        with patch.object(
+            main.feedback_service,
+            "analyze_text",
+            new=AsyncMock(side_effect=fake_analyze_text),
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "student_text": "Ein kurzer Beispieltext.",
+                    "provider": "ollama",
+                    "csrf_token": self.csrf_token,
+                    "ollama_model": main.settings.ollama_model,
+                    "advanced_options": "true",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            captured["base_url"],
+            main.settings.ollama_base_url.rstrip("/"),
+        )
 
     def test_production_rejects_ollama_analysis(self) -> None:
         production_settings = replace(
