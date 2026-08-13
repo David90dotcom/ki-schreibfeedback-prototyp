@@ -1,0 +1,60 @@
+<article
+    class="criterion-feedback-card criterion-status-{{ item.status }}"
+    data-criterion-feedback-card
+    data-criterion-id="{{ item.criterion_id }}"
+>
+    <div class="criterion-feedback-header">
+        <h3>
+            {{ item.criterion_title or ("Kriterium " ~ criterion_position) }}
+        </h3>
+
+        <span class="criterion-status-badge">
+            {{ item.status_label }}
+        </span>
+    </div>
+
+    <div class="criterion-feedback-body">
+        <h4>Feedback</h4>
+        <div class="criterion-feedback-copy">
+            <p>{{ item.feedback | feedback_inline_markdown }}</p>
+
+            {% if item.next_step %}
+                <p class="criterion-feedback-next-step">
+                    {{ item.next_step | feedback_inline_markdown }}
+                </p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if feedback_run_id %}
+        <div
+            class="loading-bar criterion-refresh-progress"
+            data-criterion-refresh-progress
+            hidden
+            aria-hidden="true"
+        >
+            <span></span>
+        </div>
+
+        <div class="criterion-refresh-actions">
+            <button
+                class="criterion-refresh-button"
+                type="button"
+                data-refresh-criterion
+                data-refresh-url="/feedback-runs/{{ feedback_run_id }}/criteria/{{ item.criterion_id }}/refresh"
+            >
+                Aktualisieren
+            </button>
+
+            <p
+                class="criterion-refresh-status{% if refresh_notice %} is-success{% endif %}"
+                data-criterion-refresh-status
+                role="status"
+                aria-live="polite"
+                {% if not refresh_notice %}hidden{% endif %}
+            >
+                {{ refresh_notice or "" }}
+            </p>
+        </div>
+    {% endif %}
+</article>

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from math import isfinite
 import os
 
 from dotenv import load_dotenv
@@ -87,6 +88,28 @@ def _positive_int_from_env(
     return value
 
 
+def _positive_float_from_env(
+    name: str,
+    fallback: float,
+) -> float:
+    """Liest eine positive endliche Fließkommazahl aus der Umgebung."""
+    raw_value = os.getenv(name, str(fallback)).strip()
+
+    try:
+        value = float(raw_value)
+    except ValueError as exc:
+        raise ValueError(
+            f"{name} muss eine positive Zahl sein."
+        ) from exc
+
+    if not isfinite(value) or value <= 0:
+        raise ValueError(
+            f"{name} muss eine positive Zahl sein."
+        )
+
+    return value
+
+
 def _bounded_int_from_env(
     name: str,
     fallback: int,
@@ -154,6 +177,13 @@ class Settings:
         "OLLAMA_DEFAULT_MODEL",
         "OLLAMA_MODEL",
         fallback="ministral-3:14b-instruct-2512-q8_0",
+    )
+
+    ollama_request_timeout_seconds: float = (
+        _positive_float_from_env(
+            "OLLAMA_REQUEST_TIMEOUT_SECONDS",
+            600.0,
+        )
     )
 
     openai_api_key: str | None = (

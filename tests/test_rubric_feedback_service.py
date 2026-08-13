@@ -13,6 +13,7 @@ from app.domain.rubric import (
 from app.llm.base import LLMResponse
 from app.services.rubric_feedback_service import (
     EVIDENCE_VALIDATION_VERSION,
+    MISSING_NEXT_STEP_FALLBACK,
     PARTIAL_RESULT_OVERALL_FEEDBACK,
     RUBRIC_FEEDBACK_MODE,
     RUBRIC_FEEDBACK_PROMPT_VERSION,
@@ -273,6 +274,9 @@ class RubricFeedbackServiceTests(unittest.TestCase):
         assert isinstance(evidence_schema, dict)
         self.assertEqual(evidence_schema["minItems"], 0)
         self.assertEqual(evidence_schema["maxItems"], 3)
+        next_step_schema = item_properties["next_step"]
+        assert isinstance(next_step_schema, dict)
+        self.assertEqual(next_step_schema["minLength"], 1)
         self.assertIn(
             "evidence_quotes",
             item_schema["required"],
@@ -335,6 +339,60 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             generation_context["unverified_criterion_count"],
             0,
         )
+
+    def test_missing_or_empty_next_step_uses_neutral_fallback(
+        self,
+    ) -> None:
+        for next_step_value in (None, "", "   "):
+            with self.subTest(next_step_value=next_step_value):
+                first_criterion = {
+                    "criterion_id": "K1",
+                    "status": "met",
+                    "evidence_quotes": ["Schülertext"],
+                    "feedback": "Die Einleitung ist belegt.",
+                }
+
+                if next_step_value is not None:
+                    first_criterion["next_step"] = next_step_value
+
+                provider = _RubricProvider(
+                    json.dumps(
+                        {
+                            "criteria": [
+                                first_criterion,
+                                {
+                                    "criterion_id": "K2",
+                                    "status": "not_assessable",
+                                    "evidence_quotes": [],
+                                    "feedback": "Keine sichere Bewertung.",
+                                    "next_step": "Prüfe das Kriterium.",
+                                },
+                            ],
+                            "overall_feedback": "Zusammenfassung.",
+                        }
+                    )
+                )
+                service = RubricFeedbackService(
+                    providers={"mistral": provider},
+                    max_input_chars=8000,
+                )
+
+                result = asyncio.run(
+                    service.analyze_text(
+                        student_text="Schülertext",
+                        task=_task(),
+                        provider_key="mistral",
+                    )
+                )
+
+                self.assertEqual(
+                    result.criteria_feedback[0].next_step,
+                    MISSING_NEXT_STEP_FALLBACK,
+                )
+                self.assertIn(
+                    "next_step muss immer einen nicht leeren Klartext",
+                    provider.prompts[0],
+                )
 
     def test_accepts_json_inside_optional_code_fence(self) -> None:
         provider = _RubricProvider(

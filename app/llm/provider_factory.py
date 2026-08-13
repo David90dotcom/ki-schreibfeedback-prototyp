@@ -321,6 +321,9 @@ def create_default_provider_factory(
         builder=lambda: OllamaProvider(
             base_url=settings.ollama_base_url,
             model_name=settings.ollama_model,
+            request_timeout_seconds=(
+                settings.ollama_request_timeout_seconds
+            ),
         ),
         configuration_check=lambda: bool(
             settings.ollama_base_url.strip()

@@ -258,11 +258,11 @@ class StoredFeedbackRun:
 
     @property
     def feedback_mode_label(self) -> str:
-        if self.is_standard_feedback:
-            value = self.generation_context.get("label")
-            if isinstance(value, str) and value.strip():
-                return value.strip()
+        value = self.generation_context.get("label")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
 
+        if self.is_standard_feedback:
             return "Kontextarmes Standardfeedback"
 
         return "Kriterienfeedback"

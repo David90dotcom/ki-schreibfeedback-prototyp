@@ -22,6 +22,12 @@
     const originalTextInput = form.querySelector(
         "#original-text"
     );
+    const analysisPipelineOption = form.querySelector(
+        "[data-analysis-pipeline-option]"
+    );
+    const rubricAnalysisModeInputs = form.querySelectorAll(
+        "[data-rubric-analysis-mode]"
+    );
     const providerSelect = form.querySelector("#provider");
     const providerPanels = form.querySelectorAll(
         "[data-provider-panel]"
@@ -119,7 +125,41 @@
     let currentRunpodJobId = null;
     let currentRunpodJobStatus = null;
     let runpodJobsRequestInFlight = false;
+    let criterionRefreshInFlight = false;
     const runpodStatusRequestsInFlight = new Set();
+    function selectedRubricAnalysisMode() {
+        return (
+            [...rubricAnalysisModeInputs].find(
+                (input) => input.checked
+            )?.value || "joint"
+        );
+    }
+
+    function selectedCriterionCount() {
+        const rawCount = Number(
+            taskSelect?.selectedOptions?.[0]?.dataset
+                .criterionCount
+        );
+
+        return Number.isInteger(rawCount) && rawCount > 0
+            ? rawCount
+            : null;
+    }
+
+    function updatePipelineOptionAvailability() {
+        const taskSelected = Boolean(taskSelect?.value);
+
+        if (analysisPipelineOption) {
+            analysisPipelineOption.hidden = !taskSelected;
+            analysisPipelineOption.classList.remove(
+                "analysis-pipeline-option-unavailable"
+            );
+        }
+
+        rubricAnalysisModeInputs.forEach((input) => {
+            input.disabled = !taskSelected;
+        });
+    }
 
     function updateTaskPreview() {
         if (!taskSelect) {
@@ -150,6 +190,8 @@
         if (originalTextInput) {
             originalTextInput.disabled = !taskSelected;
         }
+
+        updatePipelineOptionAvailability();
     }
 
     function updateCustomModelField(modelSelect) {
@@ -211,6 +253,8 @@
             void loadRunpodStatus();
             void loadRunpodJobs();
         }
+
+        updatePipelineOptionAvailability();
     }
 
     function setOllamaStatus(message, status) {
@@ -1328,9 +1372,21 @@
     function beginLoading() {
         form.dataset.submitting = "true";
         form.setAttribute("aria-busy", "true");
+        analysisResponse.setAttribute("aria-busy", "true");
+        delete analysisResponse.dataset.analysisOutcome;
         submitButton.disabled = true;
         submitButton.textContent = "Feedback wird generiert …";
         loadingIndicator.hidden = false;
+        const rubricAnalysisMode = taskSelect?.value
+            ? selectedRubricAnalysisMode()
+            : "joint";
+        const twoPassSelected = rubricAnalysisMode === "two_pass";
+        const criterionWiseSelected =
+            rubricAnalysisMode === "criterion_wise";
+        const criterionCount = selectedCriterionCount();
+        const criterionCountLabel = criterionCount
+            ? `${criterionCount} Kriterien`
+            : "Die Kriterien";
 
         if (providerSelect.value === "runpod") {
             activeRunpodTrackingId =
@@ -1338,11 +1394,55 @@
             currentRunpodJobId = null;
             currentRunpodJobStatus = null;
             startRunpodLiveTracking();
+
+            if (twoPassSelected) {
+                setLiveMessage(
+                    "RunPod führt zwei aufeinanderfolgende Modellprüfungen aus",
+                    "Nach der Befundphase startet mit demselben Modell eine eingeschränkte Zweitprüfung. Dabei können nacheinander zwei Job-IDs entstehen."
+                );
+            } else if (criterionWiseSelected) {
+                setLiveMessage(
+                    "RunPod analysiert jedes Kriterium getrennt",
+                    `${criterionCountLabel} werden nacheinander als eigenständige Jobs verarbeitet. Die bereits abgeschlossenen Kriterien bleiben voneinander getrennt.`
+                );
+            }
             return;
         }
 
         const localModelSelected =
             providerSelect.value === "ollama";
+
+        if (twoPassSelected) {
+            loadingMessage.textContent = localModelSelected
+                ? "Das lokale Modell führt Befund- und Prüfphase aus …"
+                : "Das Cloudmodell führt Befund- und Prüfphase aus …";
+            loadingHint.textContent =
+                "Der erste Aufruf sammelt belegte Kandidaten. Nach der technischen Prüfung kontrolliert dasselbe Modell nur diese Befunde in einem zweiten Aufruf.";
+
+            slowResponseTimer = window.setTimeout(() => {
+                loadingMessage.textContent =
+                    "Das experimentelle Zwei-Pass-Feedback arbeitet weiterhin …";
+                loadingHint.textContent =
+                    "Zwei vollständige Modellaufrufe dauern länger als der bisherige Modus. Bitte lass das Browserfenster bis zum geprüften Ergebnis geöffnet.";
+            }, SLOW_RESPONSE_DELAY_MS);
+            return;
+        }
+
+        if (criterionWiseSelected) {
+            loadingMessage.textContent = localModelSelected
+                ? "Das lokale Modell analysiert die Kriterien nacheinander …"
+                : "Das Cloudmodell analysiert die Kriterien nacheinander …";
+            loadingHint.textContent =
+                `${criterionCountLabel} erhalten jeweils einen eigenen fokussierten Modellaufruf mit dem vollständigen Schülertext.`;
+
+            slowResponseTimer = window.setTimeout(() => {
+                loadingMessage.textContent =
+                    "Die kriterienweise Analyse arbeitet weiterhin …";
+                loadingHint.textContent =
+                    "Jeder Kriterienaufruf wird vollständig abgeschlossen, bevor der nächste beginnt. Größere lokale Modelle können dafür mehrere Minuten benötigen.";
+            }, SLOW_RESPONSE_DELAY_MS);
+            return;
+        }
 
         loadingMessage.textContent = localModelSelected
             ? "Das lokale Modell verarbeitet den Text …"
@@ -1375,6 +1475,7 @@
         stopRunpodLiveTracking();
         delete form.dataset.submitting;
         form.removeAttribute("aria-busy");
+        analysisResponse.removeAttribute("aria-busy");
         submitButton.disabled = false;
         submitButton.textContent =
             submitButton.dataset.defaultLabel ||
@@ -1407,6 +1508,248 @@
         addTextElement(section, "h2", "Fehler");
         addTextElement(section, "p", message);
         analysisResponse.replaceChildren(section);
+        analysisResponse.dataset.analysisOutcome = "error";
+        analysisResponse.hidden = false;
+        section.tabIndex = -1;
+        section.focus({preventScroll: true});
+        section.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+        });
+    }
+
+    function renderAnalysisResponse(responseHtml, responseOutcome) {
+        const responseTemplate = document.createElement("template");
+        responseTemplate.innerHTML = responseHtml.trim();
+        const resultOrError = responseTemplate.content.querySelector(
+            "[data-analysis-result], [data-analysis-error]"
+        );
+
+        if (!resultOrError) {
+            console.error(
+                "Die Analyseantwort enthielt weder Ergebnis noch Fehler.",
+                {
+                    responseOutcome,
+                    responseLength: responseHtml.length,
+                }
+            );
+            renderClientError(
+                "Der Server hat die Anfrage beantwortet, aber weder ein " +
+                "darstellbares Ergebnis noch eine Fehlermeldung geliefert. " +
+                "Bitte prüfe das Serverterminal und versuche es erneut."
+            );
+            return;
+        }
+
+        const renderedOutcome = resultOrError.matches(
+            "[data-analysis-error]"
+        )
+            ? "error"
+            : "success";
+
+        analysisResponse.replaceChildren(responseTemplate.content);
+        analysisResponse.dataset.analysisOutcome =
+            responseOutcome || renderedOutcome;
+        analysisResponse.hidden = false;
+        localizeResultTimes(analysisResponse);
+
+        resultOrError.tabIndex = -1;
+        resultOrError.focus({preventScroll: true});
+        resultOrError.scrollIntoView({
+            behavior: "smooth",
+            block: "start",
+        });
+    }
+
+    function setCriterionRefreshControlsDisabled(disabled) {
+        analysisResponse
+            .querySelectorAll("button")
+            .forEach((button) => {
+                button.disabled = disabled;
+            });
+
+        if (submitButton) {
+            submitButton.disabled = disabled;
+        }
+    }
+
+    function setCriterionRefreshStatus(
+        card,
+        message,
+        tone = "neutral"
+    ) {
+        const status = card?.querySelector(
+            "[data-criterion-refresh-status]"
+        );
+
+        if (!status) {
+            return;
+        }
+
+        status.textContent = message;
+        status.hidden = false;
+        status.classList.remove(
+            "is-neutral",
+            "is-success",
+            "is-error"
+        );
+        status.classList.add(`is-${tone}`);
+    }
+
+    async function refreshCriterion(button) {
+        if (
+            criterionRefreshInFlight ||
+            form.dataset.submitting === "true"
+        ) {
+            return;
+        }
+
+        const card = button.closest(
+            "[data-criterion-feedback-card]"
+        );
+        const refreshUrl = button.dataset.refreshUrl;
+
+        if (!card || !refreshUrl) {
+            return;
+        }
+
+        criterionRefreshInFlight = true;
+        form.dataset.criterionRefreshing = "true";
+        setCriterionRefreshControlsDisabled(true);
+        button.textContent = "Wird aktualisiert …";
+        const progress = card.querySelector(
+            "[data-criterion-refresh-progress]"
+        );
+
+        if (progress) {
+            progress.hidden = false;
+        }
+        setCriterionRefreshStatus(
+            card,
+            "Dieses Kriterium wird mit einem eigenen Modellaufruf neu analysiert. Bitte lass das Browserfenster geöffnet."
+        );
+
+        try {
+            const response = await fetch(refreshUrl, {
+                method: "POST",
+                body: new FormData(form),
+                headers: {
+                    Accept: "text/html",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            });
+
+            if (
+                response.redirected &&
+                new URL(response.url).pathname === "/login"
+            ) {
+                window.location.assign("/login");
+                return;
+            }
+
+            const responseHtml = await response.text();
+            const responseTemplate = document.createElement("template");
+            responseTemplate.innerHTML = responseHtml.trim();
+            const errorElement = responseTemplate.content.querySelector(
+                "[data-criterion-refresh-error]"
+            );
+            const outcome = response.headers.get(
+                "X-Criterion-Refresh-Outcome"
+            );
+
+            if (errorElement || outcome === "error") {
+                setCriterionRefreshStatus(
+                    card,
+                    errorElement?.textContent.trim() ||
+                        "Das Kriterium konnte nicht aktualisiert werden.",
+                    "error"
+                );
+                return;
+            }
+
+            const replacement = responseTemplate.content.querySelector(
+                "[data-criterion-feedback-card]"
+            );
+
+            if (!replacement) {
+                throw new Error(
+                    "Der Server hat keinen aktualisierten Kriterienbefund zurückgegeben."
+                );
+            }
+
+            const overallTemplate = responseTemplate.content.querySelector(
+                "[data-criterion-refresh-overall]"
+            );
+            const refreshedOverall = overallTemplate?.content.querySelector(
+                "p"
+            );
+            const currentOverall = analysisResponse.querySelector(
+                "[data-overall-feedback-text]"
+            );
+
+            if (refreshedOverall && currentOverall) {
+                currentOverall.innerHTML = refreshedOverall.innerHTML;
+            }
+
+            const refreshCountElement = responseTemplate.content.querySelector(
+                "[data-criterion-refresh-count]"
+            );
+            const refreshSummary = analysisResponse.querySelector(
+                "[data-criterion-refresh-summary]"
+            );
+            const refreshCount = Number(
+                refreshCountElement?.dataset.criterionRefreshCount
+            );
+
+            if (
+                refreshSummary &&
+                Number.isInteger(refreshCount) &&
+                refreshCount > 0
+            ) {
+                refreshSummary.textContent =
+                    refreshCount === 1
+                        ? "Bisher wurde eine Kriterienkarte einzeln aktualisiert."
+                        : `Bisher wurden ${refreshCount} Kriterienkarten einzeln aktualisiert.`;
+                refreshSummary.hidden = false;
+            }
+
+            card.replaceWith(replacement);
+            replacement.tabIndex = -1;
+            replacement.focus({preventScroll: true});
+            replacement.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+            });
+        } catch (error) {
+            console.error(
+                "Einzelnes Kriterienfeedback konnte nicht aktualisiert werden.",
+                error
+            );
+            setCriterionRefreshStatus(
+                card,
+                error instanceof Error
+                    ? error.message
+                    : "Die Einzelaktualisierung konnte nicht abgeschlossen werden.",
+                "error"
+            );
+        } finally {
+            criterionRefreshInFlight = false;
+            delete form.dataset.criterionRefreshing;
+            setCriterionRefreshControlsDisabled(false);
+
+            if (button.isConnected) {
+                button.textContent = "Aktualisieren";
+            }
+
+            if (progress?.isConnected) {
+                progress.hidden = true;
+            }
+
+            if (providerSelect.value === "runpod") {
+                void loadRunpodStatus();
+                void loadRunpodJobs();
+            }
+        }
     }
 
     function localizeResultTimes(root = document) {
@@ -1605,6 +1948,9 @@
         if (form.dataset.submitting === "true") {
             return;
         }
+        if (form.dataset.criterionRefreshing === "true") {
+            return;
+        }
 
         const runpodSelected =
             providerSelect.value === "runpod";
@@ -1630,26 +1976,20 @@
                 return;
             }
 
-            if (!response.ok) {
+            const responseHtml = await response.text();
+            const responseOutcome = response.headers.get(
+                "X-Analysis-Outcome"
+            );
+
+            if (!response.ok && !responseHtml.trim()) {
                 throw new Error(
                     "Die Anfrage konnte nicht abgeschlossen werden. Bitte lade die Seite neu und versuche es erneut."
                 );
             }
 
-            analysisResponse.innerHTML = await response.text();
-            localizeResultTimes(analysisResponse);
-
-            const resultOrError = analysisResponse.querySelector(
-                "[data-analysis-result], [data-analysis-error]"
-            );
-
-            if (resultOrError) {
-                resultOrError.scrollIntoView({
-                    behavior: "smooth",
-                    block: "start",
-                });
-            }
+            renderAnalysisResponse(responseHtml, responseOutcome);
         } catch (error) {
+            console.error("Feedbackanfrage fehlgeschlagen.", error);
             const message =
                 error instanceof Error
                     ? error.message
@@ -1668,10 +2008,7 @@
         taskSelect.addEventListener("change", updateTaskPreview);
     }
 
-    providerSelect.addEventListener(
-        "change",
-        updateProviderPanels
-    );
+    providerSelect.addEventListener("change", updateProviderPanels);
 
     modelSelects.forEach((modelSelect) => {
         modelSelect.addEventListener("change", () => {
@@ -1749,6 +2086,16 @@
             }
         );
     }
+
+    analysisResponse.addEventListener("click", (event) => {
+        const button = event.target.closest(
+            "[data-refresh-criterion]"
+        );
+
+        if (button && analysisResponse.contains(button)) {
+            void refreshCriterion(button);
+        }
+    });
 
     form.addEventListener("submit", submitAnalysis);
 

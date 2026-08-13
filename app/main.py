@@ -76,6 +76,10 @@ from app.services.automatic_feedback_evaluation_service import (
     AUTOMATIC_EVALUATION_PROMPT_VERSION,
     AutomaticFeedbackEvaluationService,
 )
+from app.services.criterion_wise_rubric_feedback_service import (
+    CRITERION_REFRESH_OVERALL_FEEDBACK,
+    CriterionWiseRubricFeedbackService,
+)
 from app.services.feedback_service import (
     FeedbackResult,
     FeedbackService,
@@ -104,10 +108,14 @@ from app.services.runpod_job_store import (
 from app.services.runpod_status_service import RunPodStatusService
 from app.services.task_store import (
     FeedbackEvaluationDeleteConflictError,
+    FeedbackRunRefreshError,
     MAX_MATERIAL_CHARS,
     TaskNotFoundError,
     TaskStore,
     TaskStoreError,
+)
+from app.services.two_pass_rubric_feedback_service import (
+    TwoPassRubricFeedbackService,
 )
 
 
@@ -115,6 +123,14 @@ BASE_DIR = Path(__file__).resolve().parent
 CUSTOM_MODEL_VALUE = "__custom__"
 OLLAMA_FALLBACK_BASE_URL = "http://localhost:11434"
 MAX_MODEL_NAME_CHARS = 200
+RUBRIC_ANALYSIS_MODE_JOINT = "joint"
+RUBRIC_ANALYSIS_MODE_CRITERION_WISE = "criterion_wise"
+RUBRIC_ANALYSIS_MODE_TWO_PASS = "two_pass"
+VALID_RUBRIC_ANALYSIS_MODES = {
+    RUBRIC_ANALYSIS_MODE_JOINT,
+    RUBRIC_ANALYSIS_MODE_CRITERION_WISE,
+    RUBRIC_ANALYSIS_MODE_TWO_PASS,
+}
 SESSION_COOKIE_NAME = "ki-schreibfeedback-session"
 RUNPOD_JOB_STATUS_REFRESH_TIMEOUT_SECONDS = 3.0
 logger = logging.getLogger(__name__)
@@ -313,6 +329,9 @@ feedback_service = FeedbackService(
         "ollama": OllamaProvider(
             base_url=settings.ollama_base_url,
             model_name=settings.ollama_model,
+            request_timeout_seconds=(
+                settings.ollama_request_timeout_seconds
+            ),
         ),
         "openai": OpenAIProvider(
             api_key=settings.openai_api_key,
@@ -340,6 +359,18 @@ feedback_service = FeedbackService(
 rubric_feedback_service = RubricFeedbackService(
     providers=feedback_service.providers,
     max_input_chars=settings.max_input_chars,
+)
+
+two_pass_rubric_feedback_service = TwoPassRubricFeedbackService(
+    providers=feedback_service.providers,
+    max_input_chars=settings.max_input_chars,
+)
+
+criterion_wise_rubric_feedback_service = (
+    CriterionWiseRubricFeedbackService(
+        providers=feedback_service.providers,
+        max_input_chars=settings.max_input_chars,
+    )
 )
 
 automatic_evaluation_provider = OpenAIAutomaticEvaluationProvider(
@@ -539,6 +570,7 @@ def _template_context(
     task_options: list[FeedbackTask] | None = None,
     selected_task_id: str = "",
     original_text: str = "",
+    selected_rubric_analysis_mode: str = RUBRIC_ANALYSIS_MODE_JOINT,
     result: FeedbackResult | RubricFeedbackResult | None = None,
     feedback_run_id: str | None = None,
     runpod_warm_window: dict[str, object] | None = None,
@@ -596,6 +628,12 @@ def _template_context(
         "task_options": task_options or [],
         "selected_task_id": selected_task_id,
         "original_text": original_text,
+        "selected_rubric_analysis_mode": (
+            selected_rubric_analysis_mode
+            if selected_rubric_analysis_mode
+            in VALID_RUBRIC_ANALYSIS_MODES
+            else RUBRIC_ANALYSIS_MODE_JOINT
+        ),
         "result": result,
         "feedback_run_id": feedback_run_id,
         "error": error,
@@ -1088,6 +1126,28 @@ def _validate_ollama_base_url(
     return base_url
 
 
+def _rubric_analysis_mode(
+    raw_mode: str,
+    *,
+    legacy_two_pass: bool = False,
+) -> str:
+    """Validiert den Modus und unterstützt den bisherigen Checkbox-POST."""
+    normalized_mode = raw_mode.strip().lower()
+
+    if not normalized_mode:
+        return (
+            RUBRIC_ANALYSIS_MODE_TWO_PASS
+            if legacy_two_pass
+            else RUBRIC_ANALYSIS_MODE_JOINT
+        )
+    if normalized_mode not in VALID_RUBRIC_ANALYSIS_MODES:
+        raise ValueError(
+            "Das ausgewählte Analyseverfahren ist nicht gültig."
+        )
+
+    return normalized_mode
+
+
 def _provider_for_request(
     *,
     provider_key: str,
@@ -1124,6 +1184,9 @@ def _provider_for_request(
                 ollama_model,
                 ollama_custom_model,
                 settings.ollama_model,
+            ),
+            request_timeout_seconds=(
+                settings.ollama_request_timeout_seconds
             ),
         )
 
@@ -1416,6 +1479,180 @@ async def feedback_evaluations_page(
             "error": error,
         },
     )
+
+
+@app.post(
+    "/feedback-runs/{feedback_run_id}/criteria/"
+    "{criterion_id}/refresh",
+    response_class=HTMLResponse,
+)
+async def refresh_feedback_run_criterion(
+    request: Request,
+    feedback_run_id: UUID,
+    criterion_id: str,
+    student_text: str = Form(
+        ...,
+        max_length=settings.max_input_chars,
+    ),
+    provider: str = Form(..., max_length=32),
+    csrf_token: str = Form("", max_length=256),
+    ollama_base_url: str = Form(""),
+    ollama_model: str = Form(""),
+    ollama_custom_model: str = Form(""),
+    openai_model: str = Form(""),
+    openai_custom_model: str = Form(""),
+    openai_reasoning_effort: str = Form("", max_length=16),
+    openai_api_key: str = Form(""),
+    mistral_model: str = Form(""),
+    mistral_custom_model: str = Form(""),
+    mistral_api_key: str = Form(""),
+    runpod_endpoint: str = Form("", max_length=64),
+    runpod_tracking_id: str = Form("", max_length=64),
+) -> Response:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    refreshed_item = None
+    criterion_position = 0
+    refresh_count = 0
+    error: str | None = None
+
+    try:
+        if not criterion_id or len(criterion_id) > 100:
+            raise FeedbackRunRefreshError(
+                "Das ausgewählte Feedback-Kriterium ist ungültig."
+            )
+
+        stored_run = await task_store.get_feedback_run_for_refresh(
+            feedback_run_id=str(feedback_run_id),
+            student_text=student_text,
+        )
+
+        if provider != stored_run.provider:
+            raise FeedbackRunRefreshError(
+                "Für die Einzelaktualisierung muss derselbe Anbieter wie "
+                "beim ursprünglichen Feedbacklauf ausgewählt bleiben."
+            )
+
+        if provider == "runpod" and not runpod_tracking_id.strip():
+            runpod_tracking_id = str(uuid4())
+
+        provider_override = _provider_for_request(
+            provider_key=provider,
+            ollama_base_url=ollama_base_url,
+            ollama_model=ollama_model,
+            ollama_custom_model=ollama_custom_model,
+            openai_model=openai_model,
+            openai_custom_model=openai_custom_model,
+            openai_reasoning_effort=openai_reasoning_effort,
+            openai_api_key=openai_api_key,
+            mistral_model=mistral_model,
+            mistral_custom_model=mistral_custom_model,
+            mistral_api_key=mistral_api_key,
+            runpod_endpoint=runpod_endpoint,
+            runpod_tracking_id=runpod_tracking_id,
+        )
+        selected_model = getattr(provider_override, "model_name", "")
+        selected_reasoning_effort = getattr(
+            provider_override,
+            "reasoning_effort",
+            None,
+        )
+
+        if (
+            selected_model != stored_run.model
+            or selected_reasoning_effort
+            != stored_run.reasoning_effort
+        ):
+            raise FeedbackRunRefreshError(
+                "Modell und Denktiefe müssen für die "
+                "Einzelaktualisierung unverändert bleiben."
+            )
+
+        single_result = (
+            await criterion_wise_rubric_feedback_service.analyze_criterion(
+                student_text=student_text,
+                task=stored_run.task,
+                criterion_id=criterion_id,
+                original_text=stored_run.original_text,
+                provider_key=provider,
+                provider_override=provider_override,
+            )
+        )
+        refreshed_item = single_result.criteria_feedback[0]
+        refresh_count = await task_store.update_feedback_run_criterion(
+            feedback_run_id=str(feedback_run_id),
+            student_text=student_text,
+            provider=single_result.provider,
+            model=single_result.model,
+            reasoning_effort=single_result.reasoning_effort,
+            criterion_payload=refreshed_item.payload(),
+            overall_feedback=CRITERION_REFRESH_OVERALL_FEEDBACK,
+            prompt_version=single_result.prompt_version,
+            evidence_validation_version=(
+                single_result.evidence_validation_version
+            ),
+            duration_ms=single_result.duration_ms,
+            queue_duration_ms=single_result.queue_duration_ms,
+            execution_duration_ms=(
+                single_result.execution_duration_ms
+            ),
+            provider_request_id=single_result.provider_request_id,
+        )
+        criterion_position = next(
+            position
+            for position, criterion in enumerate(
+                stored_run.task.rubric.criteria,
+                start=1,
+            )
+            if criterion.criterion_id == criterion_id
+        )
+
+        if single_result.provider == "runpod":
+            endpoint_key = (
+                runpod_endpoint.strip().lower()
+                or RUNPOD_DEFAULT_ENDPOINT_KEY
+            )
+            runpod_status_service.mark_success(endpoint_key)
+
+    except Exception as exc:
+        logger.error(
+            "Einzelnes Kriterienfeedback konnte nicht aktualisiert werden "
+            "(feedback_run_id=%s, criterion_id=%s, provider=%s, "
+            "error_type=%s).",
+            feedback_run_id,
+            criterion_id,
+            provider,
+            type(exc).__name__,
+        )
+        error = str(exc).strip() or (
+            "Das einzelne Kriterium konnte nicht aktualisiert werden."
+        )
+
+    response = templates.TemplateResponse(
+        name="criterion_refresh_response.html",
+        request=request,
+        context={
+            "item": refreshed_item,
+            "criterion_position": criterion_position,
+            "feedback_run_id": str(feedback_run_id),
+            "refresh_count": refresh_count,
+            "overall_feedback": CRITERION_REFRESH_OVERALL_FEEDBACK,
+            "refresh_notice": (
+                "Dieses Kriterium wurde einzeln neu analysiert und im "
+                "aktuellen Feedbacklauf ersetzt."
+                if refreshed_item is not None
+                else None
+            ),
+            "error": error,
+        },
+    )
+    response.headers["X-Criterion-Refresh-Outcome"] = (
+        "error" if error is not None else "success"
+    )
+    return response
 
 
 @app.post("/feedback-runs/{feedback_run_id}/save")
@@ -2252,6 +2489,9 @@ async def ollama_models(
     provider = OllamaProvider(
         base_url=validated_base_url,
         model_name=settings.ollama_model,
+        request_timeout_seconds=(
+            settings.ollama_request_timeout_seconds
+        ),
     )
 
     try:
@@ -2563,6 +2803,8 @@ async def analyze(
         "",
         max_length=MAX_MATERIAL_CHARS,
     ),
+    rubric_analysis_mode: str = Form("", max_length=32),
+    two_pass_feedback: bool = Form(False),
     csrf_token: str = Form("", max_length=256),
     ollama_base_url: str = Form(""),
     ollama_model: str = Form(""),
@@ -2589,6 +2831,11 @@ async def analyze(
     error: str | None = None
     storage_warning: str | None = None
     runpod_warm_window: dict[str, object] | None = None
+    selected_rubric_analysis_mode = (
+        RUBRIC_ANALYSIS_MODE_TWO_PASS
+        if two_pass_feedback
+        else RUBRIC_ANALYSIS_MODE_JOINT
+    )
 
     openai_override_used = (
         settings.browser_overrides_allowed
@@ -2602,6 +2849,11 @@ async def analyze(
     )
 
     try:
+        selected_rubric_analysis_mode = _rubric_analysis_mode(
+            rubric_analysis_mode,
+            legacy_two_pass=two_pass_feedback,
+        )
+
         if provider == "runpod" and not runpod_tracking_id.strip():
             runpod_tracking_id = str(uuid4())
 
@@ -2634,7 +2886,16 @@ async def analyze(
                     "ist nicht mehr verfügbar."
                 )
 
-            result = await rubric_feedback_service.analyze_text(
+            selected_feedback_service = {
+                RUBRIC_ANALYSIS_MODE_JOINT: rubric_feedback_service,
+                RUBRIC_ANALYSIS_MODE_CRITERION_WISE: (
+                    criterion_wise_rubric_feedback_service
+                ),
+                RUBRIC_ANALYSIS_MODE_TWO_PASS: (
+                    two_pass_rubric_feedback_service
+                ),
+            }[selected_rubric_analysis_mode]
+            result = await selected_feedback_service.analyze_text(
                 student_text=student_text,
                 task=selected_task,
                 original_text=original_text,
@@ -2668,6 +2929,15 @@ async def analyze(
                     "aber nicht dauerhaft gespeichert werden."
                 )
         else:
+            if (
+                selected_rubric_analysis_mode
+                != RUBRIC_ANALYSIS_MODE_JOINT
+            ):
+                raise ValueError(
+                    "Das ausgewählte Kriterien-Analyseverfahren benötigt "
+                    "eine Aufgabe mit Feedback-Vorlage."
+                )
+
             result = await feedback_service.analyze_text(
                 student_text=student_text,
                 provider_key=provider,
@@ -2705,7 +2975,19 @@ async def analyze(
                 runpod_status_service.mark_success(endpoint_key)
             )
     except Exception as exc:
-        error = str(exc)
+        logger.error(
+            "Feedbackanalyse fehlgeschlagen "
+            "(provider=%s, task_selected=%s, rubric_mode=%s, "
+            "error_type=%s).",
+            provider,
+            bool(task_id.strip()),
+            selected_rubric_analysis_mode,
+            type(exc).__name__,
+        )
+        error = str(exc).strip() or (
+            "Die Feedbackanalyse ist mit einem internen Fehler "
+            f"abgebrochen ({type(exc).__name__})."
+        )
 
     try:
         task_options = await task_store.list_tasks()
@@ -2724,6 +3006,14 @@ async def analyze(
         else "index.html"
     )
 
+    analysis_outcome = (
+        "error"
+        if error is not None
+        else "success"
+        if result is not None
+        else "empty"
+    )
+
     return templates.TemplateResponse(
         name=template_name,
         request=request,
@@ -2737,6 +3027,9 @@ async def analyze(
             task_options=task_options,
             selected_task_id=task_id.strip(),
             original_text=original_text,
+            selected_rubric_analysis_mode=(
+                selected_rubric_analysis_mode
+            ),
             ollama_base_url=ollama_base_url,
             selected_ollama_model=ollama_model,
             ollama_custom_model=ollama_custom_model,
@@ -2756,4 +3049,7 @@ async def analyze(
             storage_warning=storage_warning,
             error=error,
         ),
+        headers={
+            "X-Analysis-Outcome": analysis_outcome,
+        },
     )

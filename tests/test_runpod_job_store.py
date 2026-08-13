@@ -91,3 +91,32 @@ class RunPodJobStoreTests(unittest.IsolatedAsyncioTestCase):
                 endpoint_id="endpoint-standard",
                 status="IN_QUEUE",
             )
+
+    async def test_tracking_id_advances_after_terminal_job(self) -> None:
+        tracking_id = "8d659c48-16e3-4624-9a44-f5728bc6333c"
+        await self.store.record_status(
+            tracking_id=tracking_id,
+            job_id="first-job-e1",
+            endpoint_key="standard",
+            endpoint_id="endpoint-standard",
+            status="IN_PROGRESS",
+        )
+        await self.store.update_known_job(
+            endpoint_id="endpoint-standard",
+            job_id="first-job-e1",
+            status="COMPLETED",
+        )
+
+        await self.store.record_status(
+            tracking_id=tracking_id,
+            job_id="second-job-e1",
+            endpoint_key="standard",
+            endpoint_id="endpoint-standard",
+            status="IN_QUEUE",
+        )
+        jobs = await self.store.list_active(endpoint_key="standard")
+
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0].tracking_id, tracking_id)
+        self.assertEqual(jobs[0].job_id, "second-job-e1")
+        self.assertEqual(jobs[0].status, "IN_QUEUE")

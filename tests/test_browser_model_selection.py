@@ -129,6 +129,36 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertNotIn("Warmhaltefenster", response.text)
         self.assertNotIn("Technische Workerdetails", response.text)
         self.assertIn('id="analysis-response"', response.text)
+        self.assertIn(
+            'data-analysis-pipeline-option',
+            response.text,
+        )
+        self.assertIn(
+            'name="rubric_analysis_mode"',
+            response.text,
+        )
+        self.assertIn(
+            'data-rubric-analysis-mode',
+            response.text,
+        )
+        self.assertIn(
+            "Analyseverfahren für Kriterienfeedback",
+            response.text,
+        )
+        self.assertIn(
+            "Kriterienweise Analyse",
+            response.text,
+        )
+        self.assertIn(
+            "Zwei-Pass bleibt eine bewusst",
+            response.text,
+        )
+        self.assertRegex(
+            response.text,
+            r'value="joint"[\s\S]{0,120}checked',
+        )
+        self.assertIn('value="criterion_wise"', response.text)
+        self.assertIn('value="two_pass"', response.text)
         self.assertIn('value="runpod"', response.text)
         self.assertIn('value="standard"', response.text)
         self.assertIn('value="rtx4090_24gb"', response.text)
@@ -189,6 +219,46 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('setRunpodLoadingTone("success")', script)
         self.assertIn("RUNPOD_JOBS_REQUEST_TIMEOUT_MS", script)
         self.assertIn("controller.abort()", script)
+        self.assertIn(
+            'providerSelect.value !== "runpod"',
+            script,
+        )
+        self.assertNotIn("TWO_PASS_DEFAULT_PROVIDERS", script)
+        self.assertNotIn("twoPassChoicesByProvider", script)
+        self.assertIn("selectedRubricAnalysisMode", script)
+        self.assertIn('rubricAnalysisMode === "criterion_wise"', script)
+        self.assertIn(
+            "analysiert die Kriterien nacheinander",
+            script,
+        )
+        self.assertNotIn(
+            'const providerSupported = providerSelect.value !== "runpod";',
+            script,
+        )
+        self.assertIn(
+            "Das lokale Modell führt Befund- und Prüfphase aus",
+            script,
+        )
+        self.assertIn(
+            "Der erste Aufruf sammelt belegte Kandidaten",
+            script,
+        )
+        self.assertIn("renderAnalysisResponse", script)
+        self.assertIn("X-Analysis-Outcome", script)
+        self.assertIn("refreshCriterion", script)
+        self.assertIn("X-Criterion-Refresh-Outcome", script)
+        self.assertIn(
+            "Dieses Kriterium wird mit einem eigenen Modellaufruf",
+            script,
+        )
+        self.assertIn(
+            'querySelectorAll("button")',
+            script,
+        )
+        self.assertIn(
+            "darstellbares Ergebnis noch eine Fehlermeldung",
+            script,
+        )
 
     def test_production_page_hides_ollama_and_override_fields(self) -> None:
         production_settings = replace(

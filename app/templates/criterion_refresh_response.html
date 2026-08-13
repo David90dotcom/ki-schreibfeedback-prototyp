@@ -1,0 +1,20 @@
+{% if error %}
+    <div
+        class="criterion-refresh-response-error"
+        data-criterion-refresh-error
+        role="alert"
+    >
+        {{ error }}
+    </div>
+{% elif item %}
+    {% include "criterion_feedback_card.html" %}
+
+    <template data-criterion-refresh-overall>
+        <p>{{ overall_feedback | feedback_inline_markdown }}</p>
+    </template>
+
+    <span
+        data-criterion-refresh-count="{{ refresh_count }}"
+        hidden
+    ></span>
+{% endif %}

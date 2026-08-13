@@ -142,18 +142,51 @@
                         <dt>Feedbackdauer</dt>
                         <dd>{{ feedback_run.duration_ms | duration_ms }}</dd>
                     </div>
-                    {% if feedback_run.is_standard_feedback %}
+                    {% if feedback_run.generation_prompt_version %}
                         <div>
                             <dt>Erzeugungsprompt</dt>
                             <dd>
-                                {{ feedback_run.generation_prompt_version or "Nicht gespeichert" }}
+                                {{ feedback_run.generation_prompt_version }}
                             </dd>
                         </div>
-                    {% else %}
+                    {% endif %}
+                    {% if not feedback_run.is_standard_feedback %}
                         <div>
                             <dt>Einzelkriterien</dt>
                             <dd>{{ feedback_run.criterion_count }}</dd>
                         </div>
+                        {% if feedback_run.generation_context.finding_counts %}
+                            <div>
+                                <dt>Zwei-Pass-Befunde</dt>
+                                <dd>
+                                    {{ feedback_run.generation_context.finding_counts.candidate }} Kandidaten ·
+                                    {{ feedback_run.generation_context.finding_counts.accepted }} übernommen ·
+                                    {{ feedback_run.generation_context.finding_counts.rejected }} verworfen
+                                </dd>
+                            </div>
+                        {% endif %}
+                        {% if feedback_run.generation_context.criterion_requests %}
+                            <div>
+                                <dt>Getrennte Modellaufrufe</dt>
+                                <dd>
+                                    {{ feedback_run.generation_context.criterion_requests.count }}
+                                    (je ein Aufruf pro Kriterium)
+                                </dd>
+                            </div>
+                        {% endif %}
+                        {% if feedback_run.generation_context.criterion_refreshes %}
+                            <div>
+                                <dt>Einzelaktualisierungen</dt>
+                                <dd>
+                                    {{ feedback_run.generation_context.criterion_refreshes.count }}
+                                    {% if feedback_run.generation_context.criterion_refreshes.count == 1 %}
+                                        zusätzlicher Modellaufruf
+                                    {% else %}
+                                        zusätzliche Modellaufrufe
+                                    {% endif %}
+                                </dd>
+                            </div>
+                        {% endif %}
                     {% endif %}
                     <div>
                         <dt>Erzeugt</dt>
@@ -281,13 +314,16 @@
                                             <h4>
                                                 {{ item.criterion_title or ("Kriterium " ~ loop.index) }}
                                             </h4>
-                                            <p>
-                                                {{ item.feedback | feedback_inline_markdown }}
-                                            </p>
-                                            <p class="meta-feedback-next-step">
-                                                <strong>Überarbeitung:</strong>
-                                                {{ item.next_step | feedback_inline_markdown }}
-                                            </p>
+                                            <div class="meta-feedback-copy">
+                                                <p>
+                                                    {{ item.feedback | feedback_inline_markdown }}
+                                                </p>
+                                                {% if item.next_step %}
+                                                    <p class="meta-feedback-next-step">
+                                                        {{ item.next_step | feedback_inline_markdown }}
+                                                    </p>
+                                                {% endif %}
+                                            </div>
                                         </section>
                                     {% endfor %}
                                 </div>

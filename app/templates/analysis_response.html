@@ -48,6 +48,11 @@
 
         {% if result.criteria_feedback is defined %}
             <div>
+                <dt>Analysemodus</dt>
+                <dd>{{ result.pipeline_label }}</dd>
+            </div>
+
+            <div>
                 <dt>Aufgabe</dt>
                 <dd>{{ result.task_title }}</dd>
             </div>
@@ -82,6 +87,119 @@
     </dl>
 
     {% if result.criteria_feedback is defined %}
+        {% if result.criterion_request_count %}
+            <section
+                class="analysis-pipeline-result"
+                data-criterion-wise-result
+            >
+                <div class="analysis-pipeline-result-heading">
+                    <span class="focus-mode-badge">
+                        Fokusmodus
+                    </span>
+                    <h3>Kriterienweise Analyse abgeschlossen</h3>
+                </div>
+
+                <p>
+                    Jedes Kriterium wurde in einem getrennten Modellaufruf
+                    mit dem vollständigen Schülertext analysiert. Dadurch
+                    werden Befunde verschiedener Kriterien weniger leicht
+                    miteinander vermischt.
+                </p>
+
+                <dl class="analysis-pipeline-metrics">
+                    <div>
+                        <dt>Modellaufrufe</dt>
+                        <dd>{{ result.criterion_request_count }}</dd>
+                    </div>
+                    <div>
+                        <dt>Prompt-Version</dt>
+                        <dd>{{ result.criterion_prompt_version }}</dd>
+                    </div>
+                </dl>
+
+                {% if result.criterion_request_durations_ms %}
+                    <details class="analysis-pipeline-warnings">
+                        <summary>Einzellaufzeiten anzeigen</summary>
+                        <ol>
+                            {% for duration in result.criterion_request_durations_ms %}
+                                <li>
+                                    Kriterium {{ loop.index }}:
+                                    {{ duration | duration_ms }}
+                                </li>
+                            {% endfor %}
+                        </ol>
+                    </details>
+                {% endif %}
+            </section>
+        {% endif %}
+
+        {% if result.analysis_prompt_version %}
+            <section
+                class="analysis-pipeline-result"
+                data-two-pass-result
+            >
+                <div class="analysis-pipeline-result-heading">
+                    <span class="experimental-badge">
+                        Experiment
+                    </span>
+                    <h3>Zwei-Pass-Prüfung abgeschlossen</h3>
+                </div>
+
+                <p>
+                    Dasselbe ausgewählte Modell hat zunächst
+                    Kandidatenbefunde erzeugt und anschließend nur diese
+                    Befunde bestätigt oder verworfen. Das abschließende
+                    Schülerfeedback enthält ausschließlich bestätigte und
+                    technisch belegte Kandidaten.
+                </p>
+
+                <dl class="analysis-pipeline-metrics">
+                    <div>
+                        <dt>Befundphase</dt>
+                        <dd>
+                            {{ result.analysis_duration_ms | duration_ms }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt>Zweitprüfung</dt>
+                        <dd>
+                            {{ result.review_duration_ms | duration_ms }}
+                        </dd>
+                    </div>
+                    <div>
+                        <dt>Kandidaten</dt>
+                        <dd>{{ result.candidate_finding_count }}</dd>
+                    </div>
+                    <div>
+                        <dt>Technisch gültig</dt>
+                        <dd>{{ result.validated_candidate_count }}</dd>
+                    </div>
+                    <div>
+                        <dt>Übernommen</dt>
+                        <dd>{{ result.accepted_finding_count }}</dd>
+                    </div>
+                    <div>
+                        <dt>Verworfen</dt>
+                        <dd>{{ result.rejected_finding_count }}</dd>
+                    </div>
+                </dl>
+
+                {% if result.pipeline_warnings %}
+                    <details class="analysis-pipeline-warnings">
+                        <summary>
+                            Technische Eingriffe anzeigen
+                            ({{ result.pipeline_warnings | length }})
+                        </summary>
+                        <ul>
+                            {% for warning in result.pipeline_warnings %}
+                                <li>{{ warning }}</li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                {% endif %}
+            </section>
+        {% endif %}
+
         {% if result.evidence_warnings %}
             <section
                 class="analysis-evidence-warning"
@@ -110,35 +228,37 @@
             </section>
         {% endif %}
 
+        {% if feedback_run_id %}
+            <section class="criterion-refresh-help">
+                <h3>Einzelne Rückmeldung neu erzeugen</h3>
+                <p>
+                    Mit „Aktualisieren“ wird ausschließlich das jeweilige
+                    Kriterium erneut geprüft. Schülertext, Aufgabe, Material
+                    und Originaltext werden dabei erneut an dasselbe Modell
+                    übermittelt. Jeder Klick ist ein zusätzlicher
+                    Modellaufruf und kann bei Cloud-Anbietern Kosten
+                    verursachen.
+                </p>
+                <p
+                    class="criterion-refresh-summary"
+                    data-criterion-refresh-summary
+                    hidden
+                ></p>
+            </section>
+        {% endif %}
+
         <div class="criterion-feedback-list">
             {% for item in result.criteria_feedback %}
-                <article
-                    class="criterion-feedback-card criterion-status-{{ item.status }}"
-                >
-                    <div class="criterion-feedback-header">
-                        <h3>
-                            {{ item.criterion_title or ("Kriterium " ~ loop.index) }}
-                        </h3>
-
-                        <span class="criterion-status-badge">
-                            {{ item.status_label }}
-                        </span>
-                    </div>
-
-                    <div class="criterion-feedback-body">
-                        <h4>Feedback</h4>
-                        <p>{{ item.feedback | feedback_inline_markdown }}</p>
-
-                        <h4>Überarbeitung</h4>
-                        <p>{{ item.next_step | feedback_inline_markdown }}</p>
-                    </div>
-                </article>
+                {% set criterion_position = loop.index %}
+                {% include "criterion_feedback_card.html" %}
             {% endfor %}
         </div>
 
         <section class="overall-feedback">
             <h3>Zusammenfassung</h3>
-            <p>{{ result.overall_feedback | feedback_inline_markdown }}</p>
+            <p data-overall-feedback-text>
+                {{- result.overall_feedback | feedback_inline_markdown -}}
+            </p>
         </section>
 
     {% else %}

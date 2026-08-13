@@ -18,7 +18,10 @@ TRUNCATION_FINISH_REASONS = {
     "max_tokens",
 }
 RUBRIC_FEEDBACK_MODE = "rubric_feedback"
-RUBRIC_FEEDBACK_PROMPT_VERSION = "rubric-feedback-v2-grounded"
+RUBRIC_FEEDBACK_LABEL = "Kriterienfeedback mit Belegprüfung"
+RUBRIC_FEEDBACK_PROMPT_VERSION = (
+    "rubric-feedback-v4-grounded-complete-criteria"
+)
 EVIDENCE_VALIDATION_VERSION = "safe-partial-word-sequence-v3"
 MAX_EVIDENCE_QUOTES = 3
 MAX_EVIDENCE_QUOTE_CHARS = 500
@@ -45,6 +48,10 @@ PARTIAL_RESULT_OVERALL_FEEDBACK = (
     "Schülertext belegt werden. Nutze die übrigen geprüften "
     "Einzelrückmeldungen und kontrolliere die als „Nicht "
     "beurteilbar“ markierten Kriterien zusätzlich."
+)
+MISSING_NEXT_STEP_FALLBACK = (
+    "Für dieses Kriterium wurde kein sicherer zusätzlicher "
+    "Überarbeitungsschritt ermittelt."
 )
 
 
@@ -96,28 +103,87 @@ class RubricFeedbackResult:
     worker_id: str | None = None
     reasoning_effort: str | None = None
     evidence_warnings: tuple[str, ...] = ()
+    pipeline_mode: str = RUBRIC_FEEDBACK_MODE
+    pipeline_label: str = RUBRIC_FEEDBACK_LABEL
+    prompt_version: str = RUBRIC_FEEDBACK_PROMPT_VERSION
+    evidence_validation_version: str = EVIDENCE_VALIDATION_VERSION
+    analysis_prompt_version: str | None = None
+    review_prompt_version: str | None = None
+    analysis_duration_ms: int | None = None
+    review_duration_ms: int | None = None
+    candidate_finding_count: int | None = None
+    validated_candidate_count: int | None = None
+    accepted_finding_count: int | None = None
+    rejected_finding_count: int | None = None
+    analysis_provider_request_id: str | None = None
+    review_provider_request_id: str | None = None
+    pipeline_warnings: tuple[str, ...] = ()
+    criterion_prompt_version: str | None = None
+    criterion_request_count: int | None = None
+    criterion_request_durations_ms: tuple[int, ...] = ()
+    criterion_provider_request_ids: tuple[str | None, ...] = ()
 
     def payload(self) -> dict[str, object]:
+        generation_context: dict[str, object] = {
+            "mode": self.pipeline_mode,
+            "label": self.pipeline_label,
+            "prompt_version": self.prompt_version,
+            "evidence_validation": (
+                self.evidence_validation_version
+            ),
+            "validated_quote_count": sum(
+                len(item.evidence_quotes)
+                for item in self.criteria_feedback
+            ),
+            "unverified_criterion_count": sum(
+                not item.evidence_verified
+                for item in self.criteria_feedback
+            ),
+        }
+
+        if self.analysis_prompt_version is not None:
+            generation_context["phase_prompt_versions"] = {
+                "candidate_analysis": self.analysis_prompt_version,
+                "restricted_review": self.review_prompt_version,
+            }
+            generation_context["phase_durations_ms"] = {
+                "candidate_analysis": self.analysis_duration_ms,
+                "restricted_review": self.review_duration_ms,
+            }
+            generation_context["finding_counts"] = {
+                "candidate": self.candidate_finding_count,
+                "technically_validated": (
+                    self.validated_candidate_count
+                ),
+                "accepted": self.accepted_finding_count,
+                "rejected": self.rejected_finding_count,
+            }
+            generation_context["phase_request_ids"] = {
+                "candidate_analysis": (
+                    self.analysis_provider_request_id
+                ),
+                "restricted_review": self.review_provider_request_id,
+            }
+
+        if self.criterion_request_count is not None:
+            generation_context["criterion_requests"] = {
+                "count": self.criterion_request_count,
+                "prompt_version": self.criterion_prompt_version,
+                "durations_ms": list(
+                    self.criterion_request_durations_ms
+                ),
+                "provider_request_ids": list(
+                    self.criterion_provider_request_ids
+                ),
+            }
+
         return {
             "criteria": [
                 item.payload()
                 for item in self.criteria_feedback
             ],
             "overall_feedback": self.overall_feedback,
-            "generation_context": {
-                "mode": RUBRIC_FEEDBACK_MODE,
-                "label": "Kriterienfeedback mit Belegprüfung",
-                "prompt_version": RUBRIC_FEEDBACK_PROMPT_VERSION,
-                "evidence_validation": EVIDENCE_VALIDATION_VERSION,
-                "validated_quote_count": sum(
-                    len(item.evidence_quotes)
-                    for item in self.criteria_feedback
-                ),
-                "unverified_criterion_count": sum(
-                    not item.evidence_verified
-                    for item in self.criteria_feedback
-                ),
-            },
+            "generation_context": generation_context,
         }
 
 
@@ -326,6 +392,12 @@ dass keine zuverlässige Bewertung möglich war. Gib in next_step nur die
 Empfehlung zur eigenen Kontrolle anhand des Kriteriums und keinen konkreten
 inhaltlichen Überarbeitungshinweis aus.
 
+Das Feld next_step muss immer einen nicht leeren Klartext enthalten. Kannst du
+aus den sicheren Befunden keinen konkreten zusätzlichen Überarbeitungsschritt
+ableiten, verwende exakt diesen neutralen Satz: „Für dieses Kriterium wurde kein
+sicherer zusätzlicher Überarbeitungsschritt ermittelt.“ Erfinde niemals einen
+inhaltlichen Schritt, nur um das Feld zu füllen.
+
 Begründe Feedback und Status ausschließlich mit diesen Textbelegen oder mit
 einem präzise benannten, nach vollständiger Prüfung wirklich fehlenden
 Bestandteil. Behandle die Belege nur als interne Prüfgrundlage und schreibe
@@ -340,6 +412,19 @@ den folgenden Statuswerten zu:
 - partially_met = teilweise erfüllt
 - not_met = nicht erfüllt
 - not_assessable = nicht beurteilbar
+
+Bei einem Kriterium mit mehreren verlangten Teilaspekten ist met nur zulässig,
+wenn der vollständige student_text alle Teilaspekte nachweisbar erfüllt. Eine
+einzelne passende Stärke reicht nicht für met. Enthält dein Feedback eine
+konkrete noch notwendige Verbesserung, darf der Status ebenfalls nicht met
+sein. Wenn die vollständige Erfüllung nicht sicher geprüft werden kann,
+verwende not_assessable statt sie zu unterstellen.
+
+Bei mostly_met, partially_met oder not_met muss next_step einen konkreten,
+sicheren und aus dem belegten Befund folgenden Arbeitsschritt enthalten. Kannst
+du für eine behauptete Schwäche keinen solchen Schritt formulieren, behaupte
+diese Schwäche nicht. Verwende niemals den neutralen Ersatzsatz, wenn du im
+Feedback zugleich eine konkrete notwendige Verbesserung nennst.
 
 Verwende not_assessable, wenn die notwendige Bewertungsgrundlage fehlt oder du
 trotz vollständiger Prüfung keinen sicheren beleggestützten Befund bilden
@@ -494,10 +579,7 @@ Eingabe:
                     raw_item,
                     "feedback",
                 ),
-                next_step=self._required_string(
-                    raw_item,
-                    "next_step",
-                ),
+                next_step=self._next_step_or_fallback(raw_item),
                 evidence_quotes=evidence_quotes,
             )
 
@@ -559,6 +641,7 @@ Eingabe:
                 },
                 "next_step": {
                     "type": "string",
+                    "minLength": 1,
                 },
             },
             "required": [
@@ -765,6 +848,31 @@ Eingabe:
         if len(cleaned) > 10000:
             raise RubricFeedbackError(
                 f"Das Feld '{key}' in der KI-Antwort ist zu lang."
+            )
+
+        return cleaned
+
+    @staticmethod
+    def _next_step_or_fallback(
+        payload: dict[str, object],
+    ) -> str:
+        value = payload.get("next_step")
+
+        if value is None:
+            return MISSING_NEXT_STEP_FALLBACK
+        if not isinstance(value, str):
+            raise RubricFeedbackError(
+                "Das Feld 'next_step' in der KI-Antwort besitzt ein "
+                "ungültiges Format."
+            )
+
+        cleaned = value.strip()
+
+        if not cleaned:
+            return MISSING_NEXT_STEP_FALLBACK
+        if len(cleaned) > 10000:
+            raise RubricFeedbackError(
+                "Das Feld 'next_step' in der KI-Antwort ist zu lang."
             )
 
         return cleaned

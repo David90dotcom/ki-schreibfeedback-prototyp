@@ -6,6 +6,7 @@ import hmac
 import json
 import sqlite3
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
@@ -34,6 +35,7 @@ MAX_CRITERION_CHARS = 10000
 MAX_CRITERION_TITLE_CHARS = 120
 MAX_MATERIAL_CHARS = 30000
 MAX_TASK_INSTRUCTIONS_CHARS = 12000
+MAX_CRITERION_REFRESH_HISTORY = 1000
 STANDARD_FEEDBACK_TASK_ID = "__system_standard_feedback_task__"
 STANDARD_FEEDBACK_RUBRIC_ID = "__system_standard_feedback_rubric__"
 STANDARD_FEEDBACK_TASK_TITLE = "Kontextarmes Standardfeedback"
@@ -93,6 +95,10 @@ class FeedbackRunSelectionError(TaskStoreError):
     """Der Feedbacklauf kann nicht zur Bewertung ausgewählt werden."""
 
 
+class FeedbackRunRefreshError(TaskStoreError):
+    """Ein einzelner Kriterienbefund kann nicht aktualisiert werden."""
+
+
 class FeedbackEvaluationValidationError(TaskStoreError):
     """Die übermittelte Meta-Bewertung ist nicht vollständig gültig."""
 
@@ -103,6 +109,18 @@ class FeedbackEvaluationNotFoundError(TaskStoreError):
 
 class FeedbackEvaluationDeleteConflictError(TaskStoreError):
     """Eine verknüpfte Bewertung darf nicht unbemerkt gelöscht werden."""
+
+
+@dataclass(frozen=True)
+class RefreshableFeedbackRun:
+    """Unveränderlicher Kontext eines noch nicht ausgewählten Laufs."""
+
+    feedback_run_id: str
+    provider: str
+    model: str
+    reasoning_effort: str | None
+    original_text: str
+    task: FeedbackTask
 
 
 class TaskStore:
@@ -352,6 +370,70 @@ class TaskStore:
         )
 
         return feedback_run_id
+
+    async def get_feedback_run_for_refresh(
+        self,
+        *,
+        feedback_run_id: str,
+        student_text: str,
+    ) -> RefreshableFeedbackRun:
+        """Lädt den ursprünglichen Kontext ohne den Text zu speichern."""
+
+        normalized_student_text = _normalize_student_text(student_text)
+
+        if not normalized_student_text:
+            raise FeedbackRunRefreshError(
+                "Der Schülertext des Feedbacklaufs fehlt."
+            )
+
+        return await asyncio.to_thread(
+            self._get_feedback_run_for_refresh_sync,
+            feedback_run_id,
+            normalized_student_text,
+        )
+
+    async def update_feedback_run_criterion(
+        self,
+        *,
+        feedback_run_id: str,
+        student_text: str,
+        provider: str,
+        model: str,
+        reasoning_effort: str | None,
+        criterion_payload: dict[str, object],
+        overall_feedback: str,
+        prompt_version: str,
+        evidence_validation_version: str,
+        duration_ms: int,
+        queue_duration_ms: float | None,
+        execution_duration_ms: float | None,
+        provider_request_id: str | None,
+    ) -> int:
+        """Ersetzt genau einen Befund eines noch veränderbaren Laufs."""
+
+        normalized_student_text = _normalize_student_text(student_text)
+
+        if not normalized_student_text:
+            raise FeedbackRunRefreshError(
+                "Der Schülertext des Feedbacklaufs fehlt."
+            )
+
+        return await asyncio.to_thread(
+            self._update_feedback_run_criterion_sync,
+            feedback_run_id,
+            normalized_student_text,
+            provider,
+            model,
+            reasoning_effort,
+            criterion_payload,
+            overall_feedback,
+            prompt_version,
+            evidence_validation_version,
+            duration_ms,
+            queue_duration_ms,
+            execution_duration_ms,
+            provider_request_id,
+        )
 
     async def count_feedback_runs(
         self,
@@ -993,6 +1075,437 @@ class TaskStore:
                     "Das kriterienspezifische Feedback konnte nicht "
                     "gespeichert werden."
                 ) from exc
+
+    def _get_feedback_run_for_refresh_sync(
+        self,
+        feedback_run_id: str,
+        student_text: str,
+    ) -> RefreshableFeedbackRun:
+        student_text_hash = hashlib.sha256(
+            student_text.encode("utf-8")
+        ).hexdigest()
+
+        try:
+            with self._connect() as connection:
+                self._create_schema(connection)
+                row = connection.execute(
+                    """
+                    SELECT feedback_run_id,
+                           created_at,
+                           selected_for_evaluation_at,
+                           provider,
+                           model,
+                           reasoning_effort,
+                           student_text_hash,
+                           original_text,
+                           task_snapshot_json
+                    FROM rubric_feedback_runs
+                    WHERE feedback_run_id = ?
+                    """,
+                    (feedback_run_id,),
+                ).fetchone()
+
+            if row is None:
+                raise FeedbackRunNotFoundError(
+                    "Der Feedbacklauf wurde nicht gefunden."
+                )
+            if row["selected_for_evaluation_at"] is not None:
+                raise FeedbackRunRefreshError(
+                    "Ein bereits für die Feedback-Bewertung gespeicherter "
+                    "Lauf ist unveränderlich. Erzeuge für weitere "
+                    "Aktualisierungen bitte einen neuen Feedbacklauf."
+                )
+            if not hmac.compare_digest(
+                row["student_text_hash"],
+                student_text_hash,
+            ):
+                raise FeedbackRunRefreshError(
+                    "Der aktuelle Schülertext passt nicht mehr zu diesem "
+                    "Feedbacklauf."
+                )
+
+            task_snapshot = json.loads(row["task_snapshot_json"])
+
+            if not isinstance(task_snapshot, dict):
+                raise TypeError("task_snapshot_json ist kein Objekt.")
+
+            return RefreshableFeedbackRun(
+                feedback_run_id=row["feedback_run_id"],
+                provider=row["provider"],
+                model=row["model"],
+                reasoning_effort=row["reasoning_effort"],
+                original_text=row["original_text"] or "",
+                task=self._task_from_snapshot(
+                    task_snapshot,
+                    captured_at=datetime.fromisoformat(
+                        row["created_at"]
+                    ),
+                ),
+            )
+
+        except (
+            FeedbackRunNotFoundError,
+            FeedbackRunRefreshError,
+        ):
+            raise
+        except (json.JSONDecodeError, TypeError, ValueError) as exc:
+            raise TaskStoreError(
+                "Der Feedbacklauf besitzt ein ungültiges Datenformat."
+            ) from exc
+        except sqlite3.Error as exc:
+            raise TaskStoreError(
+                "Der Feedbacklauf konnte nicht für die "
+                "Einzelaktualisierung geladen werden."
+            ) from exc
+
+    def _update_feedback_run_criterion_sync(
+        self,
+        feedback_run_id: str,
+        student_text: str,
+        provider: str,
+        model: str,
+        reasoning_effort: str | None,
+        criterion_payload: dict[str, object],
+        overall_feedback: str,
+        prompt_version: str,
+        evidence_validation_version: str,
+        duration_ms: int,
+        queue_duration_ms: float | None,
+        execution_duration_ms: float | None,
+        provider_request_id: str | None,
+    ) -> int:
+        criterion_id = criterion_payload.get("criterion_id")
+
+        if not isinstance(criterion_id, str) or not criterion_id.strip():
+            raise FeedbackRunRefreshError(
+                "Der aktualisierte Kriterienbefund besitzt keine gültige "
+                "Kennung."
+            )
+
+        normalized_provider = provider.strip()
+        normalized_model = model.strip()
+        normalized_reasoning_effort = (
+            reasoning_effort.strip()
+            if isinstance(reasoning_effort, str)
+            and reasoning_effort.strip()
+            else None
+        )
+        student_text_hash = hashlib.sha256(
+            student_text.encode("utf-8")
+        ).hexdigest()
+
+        with self._write_lock:
+            try:
+                with self._connect() as connection:
+                    self._create_schema(connection)
+                    row = connection.execute(
+                        """
+                        SELECT selected_for_evaluation_at,
+                               provider,
+                               model,
+                               reasoning_effort,
+                               duration_ms,
+                               queue_duration_ms,
+                               execution_duration_ms,
+                               provider_request_id,
+                               student_text_hash,
+                               feedback_json
+                        FROM rubric_feedback_runs
+                        WHERE feedback_run_id = ?
+                        """,
+                        (feedback_run_id,),
+                    ).fetchone()
+
+                    if row is None:
+                        raise FeedbackRunNotFoundError(
+                            "Der Feedbacklauf wurde nicht gefunden."
+                        )
+                    if row["selected_for_evaluation_at"] is not None:
+                        raise FeedbackRunRefreshError(
+                            "Der Feedbacklauf wurde inzwischen für die "
+                            "Feedback-Bewertung gespeichert und ist daher "
+                            "unveränderlich."
+                        )
+                    if not hmac.compare_digest(
+                        row["student_text_hash"],
+                        student_text_hash,
+                    ):
+                        raise FeedbackRunRefreshError(
+                            "Der aktuelle Schülertext passt nicht mehr zu "
+                            "diesem Feedbacklauf."
+                        )
+                    if (
+                        row["provider"] != normalized_provider
+                        or row["model"] != normalized_model
+                        or row["reasoning_effort"]
+                        != normalized_reasoning_effort
+                    ):
+                        raise FeedbackRunRefreshError(
+                            "Anbieter, Modell oder Denktiefe stimmen nicht "
+                            "mehr mit dem ursprünglichen Feedbacklauf "
+                            "überein."
+                        )
+
+                    feedback_payload = json.loads(row["feedback_json"])
+
+                    if not isinstance(feedback_payload, dict):
+                        raise TypeError("feedback_json ist kein Objekt.")
+
+                    raw_criteria = feedback_payload.get("criteria")
+
+                    if not isinstance(raw_criteria, list):
+                        raise FeedbackRunRefreshError(
+                            "Der Feedbacklauf enthält keine aktualisierbaren "
+                            "Einzelkriterien."
+                        )
+
+                    matched_positions = [
+                        position
+                        for position, item in enumerate(raw_criteria)
+                        if isinstance(item, dict)
+                        and item.get("criterion_id") == criterion_id
+                    ]
+
+                    if len(matched_positions) != 1:
+                        raise FeedbackRunRefreshError(
+                            "Das zu aktualisierende Kriterium ist im "
+                            "Feedbacklauf nicht eindeutig vorhanden."
+                        )
+
+                    raw_criteria[matched_positions[0]] = dict(
+                        criterion_payload
+                    )
+                    generation_context = feedback_payload.get(
+                        "generation_context"
+                    )
+
+                    if not isinstance(generation_context, dict):
+                        generation_context = {}
+
+                    refresh_context = generation_context.get(
+                        "criterion_refreshes"
+                    )
+
+                    if refresh_context is None:
+                        refresh_items: list[object] = []
+                    elif (
+                        isinstance(refresh_context, dict)
+                        and isinstance(refresh_context.get("items"), list)
+                    ):
+                        refresh_items = list(refresh_context["items"])
+                    else:
+                        raise FeedbackRunRefreshError(
+                            "Die bisherige Aktualisierungshistorie besitzt "
+                            "ein ungültiges Format."
+                        )
+
+                    if (
+                        len(refresh_items)
+                        >= MAX_CRITERION_REFRESH_HISTORY
+                    ):
+                        raise FeedbackRunRefreshError(
+                            "Für diesen Feedbacklauf wurden bereits zu viele "
+                            "Einzelaktualisierungen gespeichert."
+                        )
+
+                    refresh_items.append(
+                        {
+                            "criterion_id": criterion_id,
+                            "prompt_version": prompt_version,
+                            "evidence_validation": (
+                                evidence_validation_version
+                            ),
+                            "duration_ms": max(0, int(duration_ms)),
+                            "queue_duration_ms": queue_duration_ms,
+                            "execution_duration_ms": (
+                                execution_duration_ms
+                            ),
+                            "provider_request_id": provider_request_id,
+                            "evidence_verified": criterion_payload.get(
+                                "evidence_verified"
+                            ),
+                            "refreshed_at": datetime.now(
+                                timezone.utc
+                            ).isoformat(),
+                        }
+                    )
+                    generation_context["criterion_refreshes"] = {
+                        "count": len(refresh_items),
+                        "items": refresh_items,
+                    }
+                    generation_context[
+                        "unverified_criterion_count"
+                    ] = sum(
+                        isinstance(item, dict)
+                        and item.get("evidence_verified") is False
+                        for item in raw_criteria
+                    )
+                    feedback_payload["criteria"] = raw_criteria
+                    feedback_payload["overall_feedback"] = (
+                        overall_feedback
+                    )
+                    feedback_payload["generation_context"] = (
+                        generation_context
+                    )
+
+                    new_queue_duration_ms = self._sum_optional_metrics(
+                        row["queue_duration_ms"],
+                        queue_duration_ms,
+                    )
+                    new_execution_duration_ms = (
+                        self._sum_optional_metrics(
+                            row["execution_duration_ms"],
+                            execution_duration_ms,
+                        )
+                    )
+                    update_cursor = connection.execute(
+                        """
+                        UPDATE rubric_feedback_runs
+                        SET duration_ms = ?,
+                            queue_duration_ms = ?,
+                            execution_duration_ms = ?,
+                            provider_request_id = ?,
+                            feedback_json = ?
+                        WHERE feedback_run_id = ?
+                          AND selected_for_evaluation_at IS NULL
+                        """,
+                        (
+                            max(0, int(row["duration_ms"]))
+                            + max(0, int(duration_ms)),
+                            new_queue_duration_ms,
+                            new_execution_duration_ms,
+                            (
+                                provider_request_id
+                                or row["provider_request_id"]
+                            ),
+                            json.dumps(
+                                feedback_payload,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            ),
+                            feedback_run_id,
+                        ),
+                    )
+
+                    if update_cursor.rowcount != 1:
+                        raise FeedbackRunRefreshError(
+                            "Der Feedbacklauf wurde inzwischen verändert "
+                            "und konnte nicht aktualisiert werden."
+                        )
+
+                return len(refresh_items)
+
+            except (
+                FeedbackRunNotFoundError,
+                FeedbackRunRefreshError,
+            ):
+                raise
+            except (json.JSONDecodeError, TypeError, ValueError) as exc:
+                raise TaskStoreError(
+                    "Der Feedbacklauf besitzt ein ungültiges Datenformat."
+                ) from exc
+            except sqlite3.Error as exc:
+                raise TaskStoreError(
+                    "Der einzelne Kriterienbefund konnte nicht "
+                    "gespeichert werden."
+                ) from exc
+
+    @staticmethod
+    def _sum_optional_metrics(
+        first: float | None,
+        second: float | None,
+    ) -> float | None:
+        values = [value for value in (first, second) if value is not None]
+        return sum(values) if values else None
+
+    @staticmethod
+    def _task_from_snapshot(
+        payload: dict[str, object],
+        *,
+        captured_at: datetime,
+    ) -> FeedbackTask:
+        rubric_payload = payload.get("rubric")
+
+        if not isinstance(rubric_payload, dict):
+            raise TypeError("Der Aufgaben-Snapshot enthält keinen Bogen.")
+
+        raw_criteria = rubric_payload.get("criteria")
+
+        if not isinstance(raw_criteria, list):
+            raise TypeError("Der Aufgaben-Snapshot enthält keine Kriterien.")
+
+        criteria: list[RubricCriterion] = []
+
+        for raw_criterion in raw_criteria:
+            if not isinstance(raw_criterion, dict):
+                raise TypeError("Ein Kriterien-Snapshot ist ungültig.")
+
+            criterion_id = raw_criterion.get("criterion_id")
+            title = raw_criterion.get("title")
+            text = raw_criterion.get("text")
+            position = raw_criterion.get("position")
+
+            if (
+                not isinstance(criterion_id, str)
+                or not criterion_id
+                or not isinstance(title, str)
+                or not isinstance(text, str)
+                or not isinstance(position, int)
+                or isinstance(position, bool)
+                or position < 0
+            ):
+                raise TypeError("Ein Kriterien-Snapshot ist ungültig.")
+
+            criteria.append(
+                RubricCriterion(
+                    criterion_id=criterion_id,
+                    title=title,
+                    text=text,
+                    position=position,
+                )
+            )
+
+        required_task_fields = (
+            "task_id",
+            "title",
+            "subject",
+            "grade_level",
+            "instructions",
+            "material",
+        )
+        task_fields = {
+            key: payload.get(key)
+            for key in required_task_fields
+        }
+        rubric_id = rubric_payload.get("rubric_id")
+        rubric_title = rubric_payload.get("title")
+
+        if (
+            any(
+                not isinstance(value, str)
+                for value in task_fields.values()
+            )
+            or not isinstance(rubric_id, str)
+            or not rubric_id
+            or not isinstance(rubric_title, str)
+        ):
+            raise TypeError("Der Aufgaben-Snapshot ist ungültig.")
+
+        return FeedbackTask(
+            task_id=task_fields["task_id"],
+            title=task_fields["title"],
+            subject=task_fields["subject"],
+            grade_level=task_fields["grade_level"],
+            instructions=task_fields["instructions"],
+            material=task_fields["material"],
+            rubric=Rubric(
+                rubric_id=rubric_id,
+                title=rubric_title,
+                criteria=tuple(criteria),
+            ),
+            created_at=captured_at,
+            updated_at=captured_at,
+        )
 
     def _count_feedback_runs_sync(
         self,

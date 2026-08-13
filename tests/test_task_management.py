@@ -17,6 +17,12 @@ from app.services.automatic_feedback_evaluation_service import (
     AUTOMATIC_EVALUATION_PROMPT_VERSION,
     AutomaticFeedbackEvaluationResult,
 )
+from app.services.criterion_wise_rubric_feedback_service import (
+    CRITERION_REFRESH_OVERALL_FEEDBACK,
+    CRITERION_WISE_FEEDBACK_LABEL,
+    CRITERION_WISE_FEEDBACK_MODE,
+    CRITERION_WISE_PIPELINE_VERSION,
+)
 from app.services.feedback_service import (
     STANDARD_FEEDBACK_MODE,
     STANDARD_FEEDBACK_PROMPT_VERSION,
@@ -24,10 +30,19 @@ from app.services.feedback_service import (
     FeedbackResult,
 )
 from app.services.rubric_feedback_service import (
+    RUBRIC_FEEDBACK_PROMPT_VERSION,
     CriterionFeedbackResult,
     RubricFeedbackResult,
 )
 from app.services.task_store import TaskStore, TaskStoreError
+from app.services.two_pass_rubric_feedback_service import (
+    TWO_PASS_ANALYSIS_PROMPT_VERSION,
+    TWO_PASS_EVIDENCE_VALIDATION_VERSION,
+    TWO_PASS_FEEDBACK_LABEL,
+    TWO_PASS_FEEDBACK_MODE,
+    TWO_PASS_PIPELINE_VERSION,
+    TWO_PASS_REVIEW_PROMPT_VERSION,
+)
 
 
 def _csrf_token_from(response: Response) -> str:
@@ -368,6 +383,10 @@ class TaskManagementTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["x-analysis-outcome"],
+            "success",
+        )
         rubric_analysis.assert_awaited_once()
         old_analysis.assert_not_awaited()
         analyzed_task = rubric_analysis.await_args.kwargs["task"]
@@ -401,7 +420,27 @@ class TaskManagementTests(unittest.TestCase):
             response.text,
         )
         self.assertIn("<h4>Feedback</h4>", response.text)
-        self.assertIn("<h4>Überarbeitung</h4>", response.text)
+        self.assertIn(
+            'class="criterion-feedback-copy"',
+            response.text,
+        )
+        self.assertIn(
+            'class="criterion-feedback-next-step"',
+            response.text,
+        )
+        self.assertNotIn("<h4>Überarbeitung</h4>", response.text)
+        self.assertEqual(
+            response.text.count("data-refresh-criterion"),
+            2,
+        )
+        self.assertIn(
+            "Einzelne Rückmeldung neu erzeugen",
+            response.text,
+        )
+        self.assertIn(
+            "Jeder Klick ist ein zusätzlicher",
+            response.text,
+        )
         self.assertNotIn("Nächster Schritt", response.text)
         self.assertIn(
             "Konkretes <strong>Feedback</strong>.",
@@ -517,6 +556,18 @@ class TaskManagementTests(unittest.TestCase):
         )
         self.assertIn(
             "Konkreter <em>nächster Schritt</em>.",
+            overview.text,
+        )
+        self.assertIn(
+            'class="meta-feedback-copy"',
+            overview.text,
+        )
+        self.assertIn(
+            'class="meta-feedback-next-step"',
+            overview.text,
+        )
+        self.assertNotIn(
+            "<strong>Überarbeitung:</strong>",
             overview.text,
         )
         self.assertIn(
@@ -664,6 +715,528 @@ class TaskManagementTests(unittest.TestCase):
             "00000000-0000-0000-0000-000000000001/pdf"
         )
         self.assertEqual(missing_pdf_response.status_code, 404)
+
+    def test_single_criterion_can_be_refreshed_and_persisted(
+        self,
+    ) -> None:
+        task = self._create_task()
+        student_text = "Anonymisierter Schülertext"
+        original_text = "Laufbezogener Originaltext"
+        first_criterion = task.rubric.criteria[0]
+        second_criterion = task.rubric.criteria[1]
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                original_text=original_text,
+                provider="openai",
+                model=main.settings.openai_model,
+                reasoning_effort="high",
+                duration_ms=300,
+                feedback_payload={
+                    "criteria": [
+                        {
+                            "criterion_id": first_criterion.criterion_id,
+                            "criterion_title": first_criterion.title,
+                            "criterion_text": first_criterion.text,
+                            "status": "partially_met",
+                            "feedback": "Altes erstes Feedback.",
+                            "next_step": "Alter Schritt.",
+                            "evidence_verified": True,
+                        },
+                        {
+                            "criterion_id": second_criterion.criterion_id,
+                            "criterion_title": second_criterion.title,
+                            "criterion_text": second_criterion.text,
+                            "status": "met",
+                            "feedback": "Unverändertes zweites Feedback.",
+                            "next_step": "",
+                            "evidence_verified": True,
+                        },
+                    ],
+                    "overall_feedback": "Alte Zusammenfassung.",
+                    "generation_context": {
+                        "mode": "rubric_feedback",
+                        "label": "Gemeinsame Analyse",
+                    },
+                },
+            )
+        )
+        refreshed_result = RubricFeedbackResult(
+            provider="openai",
+            model=main.settings.openai_model,
+            task_id=task.task_id,
+            task_title=task.title,
+            rubric_title=task.rubric.title,
+            criteria_feedback=(
+                CriterionFeedbackResult(
+                    criterion_id=first_criterion.criterion_id,
+                    criterion_title=first_criterion.title,
+                    criterion_text=first_criterion.text,
+                    status="mostly_met",
+                    status_label="Überwiegend erfüllt",
+                    feedback="Neu und gezielt geprüft.",
+                    next_step="Ergänze den fehlenden Autor.",
+                    evidence_quotes=(student_text,),
+                ),
+            ),
+            overall_feedback="Einzelbefund.",
+            duration_ms=210,
+            queue_duration_ms=5.0,
+            execution_duration_ms=180.0,
+            provider_request_id="refresh-request",
+            reasoning_effort="high",
+        )
+
+        with patch.object(
+            main.criterion_wise_rubric_feedback_service,
+            "analyze_criterion",
+            new=AsyncMock(return_value=refreshed_result),
+        ) as refresh_analysis:
+            response = self.client.post(
+                f"/feedback-runs/{feedback_run_id}/criteria/"
+                f"{first_criterion.criterion_id}/refresh",
+                data={
+                    "csrf_token": self.csrf_token,
+                    "student_text": student_text,
+                    "provider": "openai",
+                    "openai_model": main.settings.openai_model,
+                    "openai_reasoning_effort": "high",
+                    "openai_api_key": "test-api-key",
+                },
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["x-criterion-refresh-outcome"],
+            "success",
+        )
+        refresh_analysis.assert_awaited_once()
+        refresh_arguments = refresh_analysis.await_args.kwargs
+        self.assertEqual(
+            refresh_arguments["criterion_id"],
+            first_criterion.criterion_id,
+        )
+        self.assertEqual(
+            refresh_arguments["original_text"],
+            original_text,
+        )
+        self.assertEqual(
+            refresh_arguments["task"].snapshot(),
+            task.snapshot(),
+        )
+        self.assertIn("Neu und gezielt geprüft.", response.text)
+        self.assertIn("Überwiegend erfüllt", response.text)
+        self.assertIn("data-refresh-criterion", response.text)
+        self.assertIn(
+            "einzeln neu analysiert und im",
+            response.text,
+        )
+        self.assertNotIn(
+            "Unverändertes zweites Feedback.",
+            response.text,
+        )
+
+        selected = asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+        self.assertEqual(
+            selected.feedback_payload["criteria"][0]["feedback"],
+            "Neu und gezielt geprüft.",
+        )
+        self.assertEqual(
+            selected.feedback_payload["criteria"][1]["feedback"],
+            "Unverändertes zweites Feedback.",
+        )
+        self.assertEqual(
+            selected.feedback_payload["overall_feedback"],
+            CRITERION_REFRESH_OVERALL_FEEDBACK,
+        )
+        self.assertEqual(
+            selected.generation_context["criterion_refreshes"]["count"],
+            1,
+        )
+
+        overview = self.client.get("/feedback-evaluations")
+        self.assertIn("Einzelaktualisierungen", overview.text)
+        self.assertIn("zusätzlicher Modellaufruf", overview.text)
+
+    def test_criterion_wise_feedback_is_selectable_and_persisted(
+        self,
+    ) -> None:
+        task = self._create_task()
+        result = RubricFeedbackResult(
+            provider="ollama",
+            model="mistral-small3.2:24b-instruct-2506-q8_0",
+            task_id=task.task_id,
+            task_title=task.title,
+            rubric_title=task.rubric.title,
+            criteria_feedback=tuple(
+                CriterionFeedbackResult(
+                    criterion_id=criterion.criterion_id,
+                    criterion_title=criterion.title,
+                    criterion_text=criterion.text,
+                    status="mostly_met",
+                    status_label="Überwiegend erfüllt",
+                    feedback="Dieser Einzelbefund ist belegt.",
+                    next_step="Prüfe diesen Aspekt gezielt.",
+                    evidence_quotes=("Anonymisierter Schülertext",),
+                )
+                for criterion in task.rubric.criteria
+            ),
+            overall_feedback=(
+                "Die Kriterien wurden getrennt analysiert."
+            ),
+            duration_ms=420,
+            pipeline_mode=CRITERION_WISE_FEEDBACK_MODE,
+            pipeline_label=CRITERION_WISE_FEEDBACK_LABEL,
+            prompt_version=CRITERION_WISE_PIPELINE_VERSION,
+            criterion_prompt_version=RUBRIC_FEEDBACK_PROMPT_VERSION,
+            criterion_request_count=2,
+            criterion_request_durations_ms=(180, 240),
+            criterion_provider_request_ids=("request-1", "request-2"),
+        )
+
+        with (
+            patch.object(
+                main.criterion_wise_rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(return_value=result),
+            ) as criterion_wise_analysis,
+            patch.object(
+                main.rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(),
+            ) as joint_analysis,
+            patch.object(
+                main.two_pass_rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(),
+            ) as two_pass_analysis,
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "csrf_token": self.csrf_token,
+                    "task_id": task.task_id,
+                    "student_text": "Anonymisierter Schülertext",
+                    "provider": "ollama",
+                    "ollama_base_url": main.settings.ollama_base_url,
+                    "ollama_model": main.settings.ollama_model,
+                    "rubric_analysis_mode": "criterion_wise",
+                },
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["x-analysis-outcome"],
+            "success",
+        )
+        criterion_wise_analysis.assert_awaited_once()
+        joint_analysis.assert_not_awaited()
+        two_pass_analysis.assert_not_awaited()
+        self.assertIn("data-criterion-wise-result", response.text)
+        self.assertIn(
+            "Kriterienweise Analyse abgeschlossen",
+            response.text,
+        )
+        self.assertIn("180 ms", response.text)
+        self.assertIn("240 ms", response.text)
+
+        run_match = re.search(
+            r'action="/feedback-runs/([^/]+)/save"',
+            response.text,
+        )
+        self.assertIsNotNone(run_match)
+        feedback_run_id = (
+            run_match.group(1) if run_match is not None else ""
+        )
+        save_response = self.client.post(
+            f"/feedback-runs/{feedback_run_id}/save",
+            data={
+                "csrf_token": self.csrf_token,
+                "student_text": "Anonymisierter Schülertext",
+            },
+            follow_redirects=False,
+        )
+        self.assertEqual(save_response.status_code, 303)
+
+        selected = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertEqual(
+            selected.feedback_mode,
+            CRITERION_WISE_FEEDBACK_MODE,
+        )
+        self.assertEqual(
+            selected.feedback_mode_label,
+            CRITERION_WISE_FEEDBACK_LABEL,
+        )
+        self.assertEqual(
+            selected.generation_context["criterion_requests"]["count"],
+            2,
+        )
+        self.assertEqual(
+            selected.generation_context["criterion_requests"][
+                "durations_ms"
+            ],
+            [180, 240],
+        )
+
+        overview = self.client.get("/feedback-evaluations")
+        self.assertIn(CRITERION_WISE_FEEDBACK_LABEL, overview.text)
+        self.assertIn(CRITERION_WISE_PIPELINE_VERSION, overview.text)
+        self.assertIn("Getrennte Modellaufrufe", overview.text)
+        self.assertIn("je ein Aufruf pro Kriterium", overview.text)
+
+    def test_two_pass_feedback_is_opt_in_visible_and_persisted(
+        self,
+    ) -> None:
+        task = self._create_task()
+        result = RubricFeedbackResult(
+            provider="openai",
+            model="gpt-5.6-sol",
+            task_id=task.task_id,
+            task_title=task.title,
+            rubric_title=task.rubric.title,
+            criteria_feedback=tuple(
+                CriterionFeedbackResult(
+                    criterion_id=criterion.criterion_id,
+                    criterion_title=criterion.title,
+                    criterion_text=criterion.text,
+                    status="mostly_met",
+                    status_label="Überwiegend erfüllt",
+                    feedback=(
+                        "Stärke: Der Befund ist belegt. "
+                        "Verbesserung: Ergänze einen wichtigen Punkt."
+                    ),
+                    next_step="Prüfe den genannten Punkt am Text.",
+                    evidence_quotes=("Anonymisierter Schülertext",),
+                    evidence_verified=True,
+                )
+                for criterion in task.rubric.criteria
+            ),
+            overall_feedback=(
+                "Nutze nur die in zwei Schritten geprüften Hinweise."
+            ),
+            duration_ms=330,
+            reasoning_effort="max",
+            pipeline_mode=TWO_PASS_FEEDBACK_MODE,
+            pipeline_label=TWO_PASS_FEEDBACK_LABEL,
+            prompt_version=TWO_PASS_PIPELINE_VERSION,
+            evidence_validation_version=(
+                TWO_PASS_EVIDENCE_VALIDATION_VERSION
+            ),
+            analysis_prompt_version=(
+                TWO_PASS_ANALYSIS_PROMPT_VERSION
+            ),
+            review_prompt_version=TWO_PASS_REVIEW_PROMPT_VERSION,
+            analysis_duration_ms=120,
+            review_duration_ms=180,
+            candidate_finding_count=4,
+            validated_candidate_count=3,
+            accepted_finding_count=2,
+            rejected_finding_count=2,
+            analysis_provider_request_id="analysis-request",
+            review_provider_request_id="review-request",
+            pipeline_warnings=(
+                "Ein unbelegter Kandidat wurde technisch verworfen.",
+            ),
+        )
+
+        with (
+            patch.object(
+                main.two_pass_rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(return_value=result),
+            ) as two_pass_analysis,
+            patch.object(
+                main.rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(),
+            ) as one_pass_analysis,
+            patch.object(
+                main.feedback_service,
+                "analyze_text",
+                new=AsyncMock(),
+            ) as standard_analysis,
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "csrf_token": self.csrf_token,
+                    "task_id": task.task_id,
+                    "student_text": "Anonymisierter Schülertext",
+                    "provider": "openai",
+                    "openai_model": "gpt-5.6-sol",
+                    "openai_reasoning_effort": "max",
+                    "openai_api_key": "test-api-key",
+                    "rubric_analysis_mode": "two_pass",
+                },
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["x-analysis-outcome"],
+            "success",
+        )
+        two_pass_analysis.assert_awaited_once()
+        one_pass_analysis.assert_not_awaited()
+        standard_analysis.assert_not_awaited()
+        self.assertIn("data-two-pass-result", response.text)
+        self.assertIn(
+            "Zwei-Pass-Prüfung abgeschlossen",
+            response.text,
+        )
+        self.assertIn(TWO_PASS_FEEDBACK_LABEL, response.text)
+        self.assertIn("120 ms", response.text)
+        self.assertIn("180 ms", response.text)
+        self.assertIn("Technische Eingriffe anzeigen", response.text)
+
+        run_match = re.search(
+            r'action="/feedback-runs/([^/]+)/save"',
+            response.text,
+        )
+        self.assertIsNotNone(run_match)
+        feedback_run_id = (
+            run_match.group(1) if run_match is not None else ""
+        )
+        save_response = self.client.post(
+            f"/feedback-runs/{feedback_run_id}/save",
+            data={
+                "csrf_token": self.csrf_token,
+                "student_text": "Anonymisierter Schülertext",
+            },
+            follow_redirects=False,
+        )
+
+        self.assertEqual(save_response.status_code, 303)
+        selected = asyncio.run(
+            self.store.get_feedback_run_for_evaluation(feedback_run_id)
+        )
+        self.assertEqual(selected.feedback_mode, TWO_PASS_FEEDBACK_MODE)
+        self.assertEqual(
+            selected.feedback_mode_label,
+            TWO_PASS_FEEDBACK_LABEL,
+        )
+        self.assertEqual(
+            selected.generation_prompt_version,
+            TWO_PASS_PIPELINE_VERSION,
+        )
+        self.assertEqual(
+            selected.generation_context["phase_prompt_versions"],
+            {
+                "candidate_analysis": (
+                    TWO_PASS_ANALYSIS_PROMPT_VERSION
+                ),
+                "restricted_review": TWO_PASS_REVIEW_PROMPT_VERSION,
+            },
+        )
+        self.assertEqual(
+            selected.generation_context["finding_counts"],
+            {
+                "candidate": 4,
+                "technically_validated": 3,
+                "accepted": 2,
+                "rejected": 2,
+            },
+        )
+
+        overview = self.client.get("/feedback-evaluations")
+        self.assertIn(TWO_PASS_FEEDBACK_LABEL, overview.text)
+        self.assertIn(TWO_PASS_PIPELINE_VERSION, overview.text)
+        self.assertIn("4 Kandidaten", overview.text)
+        self.assertIn("2 übernommen", overview.text)
+        self.assertIn("2 verworfen", overview.text)
+
+    def test_two_pass_feedback_supports_runpod_provider(
+        self,
+    ) -> None:
+        task = self._create_task()
+        provider_override = object()
+        result = RubricFeedbackResult(
+            provider="runpod",
+            model=main.settings.runpod_model,
+            task_id=task.task_id,
+            task_title=task.title,
+            rubric_title=task.rubric.title,
+            criteria_feedback=tuple(
+                CriterionFeedbackResult(
+                    criterion_id=criterion.criterion_id,
+                    criterion_title=criterion.title,
+                    criterion_text=criterion.text,
+                    status="mostly_met",
+                    status_label="Überwiegend erfüllt",
+                    feedback="Der Befund wurde in zwei Phasen geprüft.",
+                    next_step="Prüfe den genannten Aspekt.",
+                    evidence_quotes=("Anonymisierter Schülertext",),
+                )
+                for criterion in task.rubric.criteria
+            ),
+            overall_feedback="Zwei-Pass-Prüfung über RunPod.",
+            duration_ms=450,
+            pipeline_mode=TWO_PASS_FEEDBACK_MODE,
+            pipeline_label=TWO_PASS_FEEDBACK_LABEL,
+            prompt_version=TWO_PASS_PIPELINE_VERSION,
+        )
+
+        with (
+            patch.object(
+                main,
+                "_provider_for_request",
+                return_value=provider_override,
+            ) as provider_factory,
+            patch.object(
+                main.two_pass_rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(return_value=result),
+            ) as two_pass_analysis,
+            patch.object(
+                main.rubric_feedback_service,
+                "analyze_text",
+                new=AsyncMock(),
+            ) as one_pass_analysis,
+        ):
+            response = self.client.post(
+                "/analyze",
+                data={
+                    "csrf_token": self.csrf_token,
+                    "task_id": task.task_id,
+                    "student_text": "Anonymisierter Schülertext",
+                    "provider": "runpod",
+                    "runpod_endpoint": "standard",
+                    "runpod_tracking_id": (
+                        "265d345e-1843-49af-b5aa-d875807fa504"
+                    ),
+                    "two_pass_feedback": "true",
+                },
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["x-analysis-outcome"],
+            "success",
+        )
+        provider_factory.assert_called_once()
+        two_pass_analysis.assert_awaited_once()
+        one_pass_analysis.assert_not_awaited()
+        analysis_arguments = two_pass_analysis.await_args.kwargs
+        self.assertEqual(analysis_arguments["provider_key"], "runpod")
+        self.assertIs(
+            analysis_arguments["provider_override"],
+            provider_override,
+        )
+        self.assertIn(
+            "Zwei-Pass-Prüfung über RunPod",
+            response.text,
+        )
 
     def test_empty_task_selection_can_be_saved_for_meta_evaluation(
         self,

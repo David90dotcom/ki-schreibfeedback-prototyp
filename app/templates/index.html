@@ -32,6 +32,7 @@
                 {% for task in task_options %}
                     <option
                         value="{{ task.task_id }}"
+                        data-criterion-count="{{ task.rubric.criteria | length }}"
                         {% if task.task_id == selected_task_id %}selected{% endif %}
                     >
                         {{ task.title }} – {{ task.rubric.title }}
@@ -181,6 +182,90 @@
                 </p>
             </div>
         </details>
+
+        <section
+            class="analysis-pipeline-option"
+            data-analysis-pipeline-option
+            {% if not selected_task_id %}hidden{% endif %}
+        >
+            <div class="analysis-pipeline-option-heading">
+                <h3>Analyseverfahren für Kriterienfeedback</h3>
+            </div>
+
+            <fieldset class="analysis-mode-options">
+                <legend class="visually-hidden">
+                    Analyseverfahren auswählen
+                </legend>
+
+                <label class="analysis-mode-option">
+                    <input
+                        name="rubric_analysis_mode"
+                        type="radio"
+                        value="joint"
+                        data-rubric-analysis-mode
+                        {% if selected_rubric_analysis_mode == "joint" %}checked{% endif %}
+                        {% if not selected_task_id %}disabled{% endif %}
+                    >
+                    <span>
+                        <strong>Gemeinsame Analyse</strong>
+                        <small>
+                            Ein Modellaufruf verarbeitet alle Kriterien
+                            gemeinsam. Schnellste und günstigste Variante.
+                        </small>
+                    </span>
+                </label>
+
+                <label class="analysis-mode-option">
+                    <input
+                        name="rubric_analysis_mode"
+                        type="radio"
+                        value="criterion_wise"
+                        data-rubric-analysis-mode
+                        {% if selected_rubric_analysis_mode == "criterion_wise" %}checked{% endif %}
+                        {% if not selected_task_id %}disabled{% endif %}
+                    >
+                    <span>
+                        <strong>Kriterienweise Analyse</strong>
+                        <small>
+                            Für jedes Kriterium wird nacheinander ein eigener
+                            fokussierter Modellaufruf mit dem vollständigen
+                            Schülertext durchgeführt.
+                        </small>
+                    </span>
+                </label>
+
+                <label class="analysis-mode-option">
+                    <input
+                        name="rubric_analysis_mode"
+                        type="radio"
+                        value="two_pass"
+                        data-rubric-analysis-mode
+                        {% if selected_rubric_analysis_mode == "two_pass" %}checked{% endif %}
+                        {% if not selected_task_id %}disabled{% endif %}
+                    >
+                    <span>
+                        <strong>
+                            Zwei-Pass-Prüfung
+                            <span class="experimental-badge">
+                                Experiment
+                            </span>
+                        </strong>
+                        <small>
+                            Zwei umfangreiche Aufrufe: Befundphase und
+                            eingeschränkte Zweitprüfung.
+                        </small>
+                    </span>
+                </label>
+            </fieldset>
+
+            <p class="hint">
+                Alle Provider starten mit „Gemeinsame Analyse“. Die
+                kriterienweise Variante erzeugt so viele Modellaufrufe wie
+                die Vorlage Kriterien enthält; bei Cloud-APIs können dadurch
+                zusätzliche Kosten entstehen. Zwei-Pass bleibt eine bewusst
+                auswählbare Forschungsoption und ist nicht vorausgewählt.
+            </p>
+        </section>
 
         <label for="provider">Modellanbieter</label>
 

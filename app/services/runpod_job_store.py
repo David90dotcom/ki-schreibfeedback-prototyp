@@ -32,7 +32,7 @@ class RunPodJobStoreError(RuntimeError):
 
 @dataclass(frozen=True)
 class RunPodTrackedJob:
-    """Technische Zuordnung eines Browserlaufs zu einem RunPod-Job."""
+    """Aktueller RunPod-Job eines technischen Browserlaufs."""
 
     tracking_id: str
     job_id: str
@@ -63,7 +63,7 @@ class RunPodJobStore:
         endpoint_id: str,
         status: str,
     ) -> None:
-        """Registriert einen neuen Job oder aktualisiert seinen Status."""
+        """Registriert den aktuellen Job oder aktualisiert seinen Status."""
 
         await asyncio.to_thread(
             self._record_status_sync,
@@ -116,6 +116,7 @@ class RunPodJobStore:
         status: str,
     ) -> None:
         now = datetime.now(timezone.utc).isoformat()
+        normalized_status = self._normalized_status(status)
 
         with self._write_lock:
             try:
@@ -135,14 +136,52 @@ class RunPodJobStore:
                         (tracking_id,),
                     ).fetchone()
 
-                    if existing is not None and (
-                        existing["job_id"] != job_id
-                        or existing["endpoint_id"] != endpoint_id
+                    if (
+                        existing is not None
+                        and existing["endpoint_id"] != endpoint_id
                     ):
                         raise RunPodJobStoreError(
                             "Die Tracking-ID ist bereits einem "
-                            "anderen Job zugeordnet."
+                            "anderen Endpoint zugeordnet."
                         )
+
+                    if (
+                        existing is not None
+                        and existing["job_id"] != job_id
+                    ):
+                        if (
+                            existing["status"]
+                            not in TERMINAL_RUNPOD_JOB_STATUSES
+                        ):
+                            raise RunPodJobStoreError(
+                                "Die Tracking-ID ist bereits einem "
+                                "aktiven Job zugeordnet."
+                            )
+
+                        connection.execute(
+                            """
+                            UPDATE runpod_jobs
+                            SET
+                                job_id = ?,
+                                endpoint_key = ?,
+                                endpoint_id = ?,
+                                status = ?,
+                                created_at = ?,
+                                updated_at = ?
+                            WHERE tracking_id = ?
+                            """,
+                            (
+                                job_id,
+                                endpoint_key,
+                                endpoint_id,
+                                normalized_status,
+                                now,
+                                now,
+                                tracking_id,
+                            ),
+                        )
+                        connection.commit()
+                        return
 
                     if (
                         existing is not None
@@ -172,7 +211,7 @@ class RunPodJobStore:
                             job_id,
                             endpoint_key,
                             endpoint_id,
-                            self._normalized_status(status),
+                            normalized_status,
                             now,
                             now,
                         ),

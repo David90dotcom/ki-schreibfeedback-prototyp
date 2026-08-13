@@ -18,6 +18,7 @@ from app.services.task_store import (
     FeedbackEvaluationDeleteConflictError,
     FeedbackEvaluationValidationError,
     FeedbackRunNotFoundError,
+    FeedbackRunRefreshError,
     FeedbackRunSelectionError,
     STANDARD_FEEDBACK_RUBRIC_ID,
     STANDARD_FEEDBACK_TASK_ID,
@@ -355,6 +356,167 @@ class TaskStoreTests(unittest.TestCase):
             ),
             [],
         )
+
+    def test_unselected_feedback_run_can_refresh_one_criterion(
+        self,
+    ) -> None:
+        task = self._create_task()
+        student_text = "Anonymisierter Schülertext."
+        original_text = "Laufbezogener Originaltext."
+        first_criterion = task.rubric.criteria[0]
+        second_criterion = task.rubric.criteria[1]
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                original_text=original_text,
+                provider="openai",
+                model="gpt-test",
+                reasoning_effort="high",
+                duration_ms=500,
+                queue_duration_ms=10.0,
+                execution_duration_ms=400.0,
+                provider_request_id="request-initial",
+                feedback_payload={
+                    "criteria": [
+                        {
+                            "criterion_id": first_criterion.criterion_id,
+                            "status": "partially_met",
+                            "feedback": "Altes erstes Feedback.",
+                            "next_step": "Alter erster Schritt.",
+                        },
+                        {
+                            "criterion_id": second_criterion.criterion_id,
+                            "status": "met",
+                            "feedback": "Zweites Feedback bleibt.",
+                            "next_step": "",
+                        },
+                    ],
+                    "overall_feedback": "Alte Zusammenfassung.",
+                    "generation_context": {
+                        "mode": "rubric_feedback",
+                    },
+                },
+            )
+        )
+
+        refreshable = asyncio.run(
+            self.store.get_feedback_run_for_refresh(
+                feedback_run_id=feedback_run_id,
+                student_text="  Anonymisierter Schülertext.\r\n",
+            )
+        )
+        refresh_count = asyncio.run(
+            self.store.update_feedback_run_criterion(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+                provider="openai",
+                model="gpt-test",
+                reasoning_effort="high",
+                criterion_payload={
+                    "criterion_id": first_criterion.criterion_id,
+                    "criterion_title": first_criterion.title,
+                    "criterion_text": first_criterion.text,
+                    "status": "mostly_met",
+                    "feedback": "Neues erstes Feedback.",
+                    "next_step": "Neuer erster Schritt.",
+                    "evidence_verified": True,
+                },
+                overall_feedback="Neutral aktualisiert.",
+                prompt_version="criterion-refresh-v1",
+                evidence_validation_version="evidence-v1",
+                duration_ms=200,
+                queue_duration_ms=5.0,
+                execution_duration_ms=170.0,
+                provider_request_id="request-refresh",
+            )
+        )
+
+        self.assertEqual(refreshable.task.snapshot(), task.snapshot())
+        self.assertEqual(refreshable.original_text, original_text)
+        self.assertEqual(refreshable.provider, "openai")
+        self.assertEqual(refreshable.model, "gpt-test")
+        self.assertEqual(refresh_count, 1)
+
+        selected = asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+        self.assertEqual(selected.duration_ms, 700)
+        self.assertEqual(selected.queue_duration_ms, 15.0)
+        self.assertEqual(selected.execution_duration_ms, 570.0)
+        self.assertEqual(
+            selected.provider_request_id,
+            "request-refresh",
+        )
+        self.assertEqual(
+            selected.feedback_payload["criteria"][0]["feedback"],
+            "Neues erstes Feedback.",
+        )
+        self.assertEqual(
+            selected.feedback_payload["criteria"][1]["feedback"],
+            "Zweites Feedback bleibt.",
+        )
+        self.assertEqual(
+            selected.feedback_payload["overall_feedback"],
+            "Neutral aktualisiert.",
+        )
+        refresh_context = selected.generation_context[
+            "criterion_refreshes"
+        ]
+        self.assertEqual(refresh_context["count"], 1)
+        self.assertEqual(
+            refresh_context["items"][0]["criterion_id"],
+            first_criterion.criterion_id,
+        )
+        self.assertEqual(
+            refresh_context["items"][0]["provider_request_id"],
+            "request-refresh",
+        )
+
+    def test_feedback_run_refresh_rejects_changed_or_selected_run(
+        self,
+    ) -> None:
+        task = self._create_task()
+        student_text = "Unveränderter Schülertext."
+        feedback_run_id = asyncio.run(
+            self.store.save_feedback_run(
+                task=task,
+                student_text=student_text,
+                provider="ollama",
+                model="lokales-modell",
+                duration_ms=100,
+                feedback_payload={
+                    "criteria": [],
+                    "overall_feedback": "Test.",
+                },
+            )
+        )
+
+        with self.assertRaises(FeedbackRunRefreshError):
+            asyncio.run(
+                self.store.get_feedback_run_for_refresh(
+                    feedback_run_id=feedback_run_id,
+                    student_text="Veränderter Schülertext.",
+                )
+            )
+
+        asyncio.run(
+            self.store.select_feedback_run_for_evaluation(
+                feedback_run_id=feedback_run_id,
+                student_text=student_text,
+            )
+        )
+
+        with self.assertRaises(FeedbackRunRefreshError):
+            asyncio.run(
+                self.store.get_feedback_run_for_refresh(
+                    feedback_run_id=feedback_run_id,
+                    student_text=student_text,
+                )
+            )
 
     def test_feedback_run_is_selected_explicitly_for_evaluation(self) -> None:
         task = self._create_task()
