@@ -1027,22 +1027,34 @@ def _feedback_evaluation_notice(
     if (
         notice == "evaluation-imported"
         and imported_run_count > 0
-        and imported_evaluation_count > 0
     ):
         run_label = (
             "Feedbacklauf"
             if imported_run_count == 1
             else "Feedbackläufe"
         )
-        evaluation_label = (
-            "Meta-Bewertung"
-            if imported_evaluation_count == 1
-            else "Meta-Bewertungen"
+        if imported_evaluation_count > 0:
+            evaluation_label = (
+                "Meta-Bewertung"
+                if imported_evaluation_count == 1
+                else "Meta-Bewertungen"
+            )
+            evaluation_summary = (
+                f"mit {imported_evaluation_count} {evaluation_label}"
+            )
+        else:
+            evaluation_summary = "ohne vorhandene Meta-Bewertung"
+
+        verb = "wurde" if imported_run_count == 1 else "wurden"
+        copy_label = (
+            "neue Kopie"
+            if imported_run_count == 1
+            else "neue Kopien"
         )
+
         return (
-            f"{imported_run_count} {run_label} mit "
-            f"{imported_evaluation_count} {evaluation_label} wurden als "
-            "neue Kopien importiert.",
+            f"{imported_run_count} {run_label} {evaluation_summary} "
+            f"{verb} als {copy_label} importiert.",
             "success",
         )
 

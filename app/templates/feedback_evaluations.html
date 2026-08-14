@@ -833,9 +833,10 @@
 
     <div class="meta-exchange-content">
         <p class="hint">
-            Sichere vollständige Meta-Bewertungen als JSON oder exportiere
-            ausschließlich Kennzahlen als CSV. Ein JSON-Export kann hier
-            später wieder eingelesen werden.
+            Sichere gespeicherte Feedback-Blöcke zusammen mit vorhandenen
+            Meta-Bewertungen als JSON oder exportiere ausschließlich
+            Bewertungskennzahlen als CSV. Ein JSON-Export kann hier später
+            wieder eingelesen werden.
         </p>
 
         <div
@@ -888,12 +889,15 @@
         </form>
 
         <p class="hint exchange-note">
-            JSON enthält den anonymisierten Schülertext, das erzeugte Feedback
-            und die vollständigen Meta-Bewertungen, aber keine API-Keys. CSV
-            enthält nur Zuordnungen, Modelle, Laufzeiten und numerische
-            Bewertungen – keine Schülertexte, Feedbacktexte oder Begründungen.
-            Beim Import werden neue Kopien ergänzt; vorhandene Daten bleiben
-            unverändert.
+            JSON enthält alle für die Meta-Ebene gespeicherten Feedbackläufe:
+            Aufgaben-Snapshot, anonymisierten Schülertext, vollständige
+            Feedback-Blöcke mit Status und Überarbeitungsschritten sowie alle
+            bereits vorhandenen Meta-Bewertungen. Feedbackläufe ohne bisherige
+            Meta-Bewertung werden ebenfalls übertragen; API-Keys sind nicht
+            enthalten. CSV enthält nur Zuordnungen, Modelle, Laufzeiten und
+            numerische Bewertungen – keine Schülertexte, Feedbacktexte oder
+            Begründungen. Beim Import werden neue Kopien ergänzt; vorhandene
+            Daten bleiben unverändert.
         </p>
     </div>
 </details>

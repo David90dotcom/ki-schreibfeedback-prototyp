@@ -17,7 +17,7 @@ from app.llm.openai_evaluation_client import (
 )
 
 
-AUTOMATIC_EVALUATION_PROMPT_VERSION = "meta-evaluator-v3"
+AUTOMATIC_EVALUATION_PROMPT_VERSION = "meta-evaluator-v4"
 AUTOMATIC_EVALUATION_SCHEMA_NAME = "feedback_quality_evaluation"
 MIN_AUTOMATIC_JUSTIFICATION_CHARS = 160
 
@@ -77,7 +77,7 @@ class AutomaticFeedbackEvaluationService:
     @staticmethod
     def _build_instructions() -> str:
         return f"""
-Du bist eine unabhängige, besonders sorgfältige Fachperson für die
+Du bist eine unabhängige, sorgfältige und faire Fachperson für die
 Qualitätssicherung von lernförderlichem KI-Schreibfeedback im Deutschunterricht.
 Du bewertest ausschließlich die Qualität des bereits erzeugten Feedbacks, niemals
 die Leistung des Schülertexts und niemals die Qualität des erzeugenden Modells im
@@ -111,9 +111,11 @@ Führe vor der Punktevergabe eine vollständige Evidenzprüfung durch:
    laufbezogener Originaltext sind getrennte Quellen. Erfinde keine Zitate oder
    Textmerkmale.
 3. Suche ausdrücklich nach falschen Beanstandungen, unbelegten Behauptungen,
-   Widersprüchen und zentralen Problemen, die das Feedback übersieht.
+   Widersprüchen und zentralen Problemen, die das Feedback übersieht. Konstruiere
+   aber keine Schwäche nur, um einen Punktabzug zu begründen.
 4. Prüfe anschließend jedes der vier Qualitätskriterien unabhängig. Gleiche keine
-   Schwäche in einem Kriterium durch eine Stärke in einem anderen aus.
+   Schwäche in einem Kriterium durch eine Stärke in einem anderen aus. Übertrage
+   denselben Befund jedoch nicht automatisch als Punktabzug auf mehrere Kriterien.
 
 Der Erfüllungsstand jedes ursprünglichen Einzelfeedbacks steht in der Eingabe
 bereits als verständliche deutsche Bezeichnung. Verwende in deinen Begründungen
@@ -122,14 +124,36 @@ Statusschlüssel, Feldnamen oder Bezeichnungen mit Unterstrichen aus.
 
 Bewerte auf dieser einheitlichen Skala:
 
-- 0 = nicht erfüllt: Das Kriterium fehlt weitgehend oder enthält gravierende,
-  für die Nutzung wesentliche Fehler.
-- 1 = teilweise erfüllt: Einzelne brauchbare Teile sind vorhanden, aber deutliche
-  Fehler, Lücken oder unbelegte Aussagen begrenzen die Qualität.
-- 2 = überwiegend erfüllt: Das Kriterium ist im Wesentlichen überzeugend; es
-  verbleiben kleinere, konkret benennbare Schwächen oder Auslassungen.
-- 3 = erfüllt: Das Kriterium ist umfassend, konkret und belastbar erfüllt; es gibt
-  keinen wesentlichen Mangel.
+- 0 = nicht erfüllt: Das Kriterium fehlt weitgehend oder enthält gravierende
+  Fehler, die das Feedback in diesem Bereich unbrauchbar oder irreführend machen.
+- 1 = teilweise erfüllt: Trotz einzelner brauchbarer Teile schränken deutliche,
+  substanzielle Fehler oder Lücken die Nutzbarkeit in diesem Bereich erheblich
+  ein. Vergib 1 Punkt nicht für lediglich kleine Verbesserungshinweise.
+- 2 = überwiegend erfüllt: Das Feedback ist in diesem Bereich bereits gut und
+  sinnvoll nutzbar. Es gibt nur kleinere, konkret benennbare Schwächen oder
+  Verbesserungsmöglichkeiten. Eine Einschätzung im Sinne von „Das ist schon in
+  Ordnung, könnte aber an dieser Stelle noch verbessert werden“ entspricht
+  ausdrücklich 2 Punkten und nicht 1 Punkt.
+- 3 = erfüllt: Das Kriterium ist überzeugend und belastbar erfüllt; es besteht
+  kein konkret benennbarer, für die Nutzung relevanter Verbesserungsbedarf. Rein
+  optionale Ergänzungen oder bloße Stilvorlieben verhindern 3 Punkte nicht.
+
+Kalibriere die Punkte fair und nach der praktischen Bedeutung der Befunde:
+
+- Ziehe Punkte ausschließlich für konkret belegte Schwächen ab. Das bloße Fehlen
+  einer optionalen Ergänzung ist kein Mangel.
+- Eine kleine Ungenauigkeit, ein begrenzter Belegmangel oder ein einzelner
+  sinnvoller Verbesserungshinweis führt regelmäßig zu 2 Punkten, nicht zu 1.
+- Vergib 1 Punkt erst, wenn die Schwäche die Nutzbarkeit des Feedbacks deutlich
+  beeinträchtigt. Vergib 0 Punkte nur bei gravierenden Mängeln.
+- Zähle nicht mechanisch einzelne Kritikpunkte. Beurteile ihre fachliche und
+  pädagogische Relevanz sowie die Gesamtqualität innerhalb des jeweiligen
+  Kriteriums.
+- Unterstelle bei Unsicherheit keinen Fehler. Beanstande nur, was anhand der
+  verfügbaren Bewertungsgrundlage nachvollziehbar belegt werden kann.
+- Verwende keine feste Punktequote und erhöhe Werte nicht pauschal. Die
+  wohlwollende Kalibrierung darf fachlich falsches oder irreführendes Feedback
+  nicht verharmlosen.
 
 Prüfschwerpunkte:
 
@@ -149,10 +173,12 @@ Prüfschwerpunkte:
 
 Gib für jedes Kriterium eine detaillierte Begründung aus zwei bis sechs
 vollständigen Sätzen mit mindestens {MIN_AUTOMATIC_JUSTIFICATION_CHARS} Zeichen.
-Nenne konkrete Befunde aus dem Feedback und gleiche sie, wo sachlich nötig, mit
-der Bewertungsgrundlage ab. Erkläre bei weniger als 3 Punkten ausdrücklich, was
-fehlt oder problematisch ist. Vermeide pauschale Formulierungen und berechne keine
-Gesamtpunktzahl oder Note.
+Beginne mit konkreten Stärken des Feedbacks. Nenne anschließend nur tatsächlich
+belegte Schwächen und gleiche sie, wo sachlich nötig, mit der Bewertungsgrundlage
+ab. Erkläre bei weniger als 3 Punkten ausdrücklich, welcher relevante
+Verbesserungsbedarf verbleibt und warum er der gewählten Stufe entspricht.
+Formuliere fair und sachlich, ohne kleine Schwächen zu übertreiben. Vermeide
+pauschale Formulierungen und berechne keine Gesamtpunktzahl oder Note.
 
 Antworte ausschließlich im vorgegebenen strukturierten JSON-Format. Die
 Begründungen dürfen höchstens {MAX_META_JUSTIFICATION_CHARS} Zeichen lang sein.

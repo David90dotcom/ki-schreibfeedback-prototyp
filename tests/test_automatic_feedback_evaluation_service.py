@@ -127,6 +127,26 @@ class AutomaticFeedbackEvaluationServiceTests(
             "falsch-positive und falsch-negative",
             request["instructions"],
         )
+        self.assertEqual(
+            AUTOMATIC_EVALUATION_PROMPT_VERSION,
+            "meta-evaluator-v4",
+        )
+        self.assertIn(
+            "ausdrücklich 2 Punkten und nicht 1 Punkt",
+            request["instructions"],
+        )
+        self.assertIn(
+            "Vergib 1 Punkt erst",
+            request["instructions"],
+        )
+        self.assertIn(
+            "Beginne mit konkreten Stärken",
+            request["instructions"],
+        )
+        self.assertIn(
+            "ohne kleine Schwächen zu übertreiben",
+            request["instructions"],
+        )
         self.assertIn(
             AUTOMATIC_EVALUATION_PROMPT_VERSION,
             request["instructions"],

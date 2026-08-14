@@ -31,18 +31,14 @@ class FeedbackEvaluationExchangeError(ValueError):
 
 
 class FeedbackEvaluationExchangeService:
-    """Exportiert Meta-Bewertungen portabel oder als Zahlentabelle."""
+    """Tauscht Feedbackläufe samt Meta-Bewertungen portabel aus."""
 
     @classmethod
     def export_json(
         cls,
         feedback_runs: Sequence[StoredFeedbackRun],
     ) -> bytes:
-        runs = tuple(
-            feedback_run
-            for feedback_run in feedback_runs
-            if feedback_run.evaluations
-        )
+        runs = tuple(feedback_runs)
 
         document = {
             "format": FEEDBACK_EVALUATION_EXPORT_FORMAT,
@@ -288,9 +284,10 @@ class FeedbackEvaluationExchangeService:
         )
         raw_evaluations = data.get("evaluations")
 
-        if not isinstance(raw_evaluations, list) or not raw_evaluations:
+        if not isinstance(raw_evaluations, list):
             raise FeedbackEvaluationExchangeError(
-                f"Feedbacklauf {position} enthält keine Meta-Bewertung."
+                f"Feedbacklauf {position} enthält keine gültige "
+                "Bewertungsliste."
             )
         if len(raw_evaluations) > MAX_EVALUATIONS_PER_RUN:
             raise FeedbackEvaluationExchangeError(

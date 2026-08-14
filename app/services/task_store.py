@@ -551,7 +551,7 @@ class TaskStore:
 
         if not feedback_runs:
             raise ValueError(
-                "Die Importdatei enthält keine Meta-Bewertungen."
+                "Die Importdatei enthält keine Feedbackläufe."
             )
 
         source_runs = tuple(feedback_runs)

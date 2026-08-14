@@ -7,6 +7,7 @@ import json
 import re
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -64,7 +65,12 @@ async def _create_evaluated_feedback_run(store: TaskStore):
             "criteria": [
                 {
                     "criterion_id": task.rubric.criteria[0].criterion_id,
+                    "criterion_title": "Einleitung",
+                    "status": "partially_met",
                     "feedback": "Ausführlicher Feedbacktext nur im JSON.",
+                    "next_step": (
+                        "Ergänze Titel und Autor in einem vollständigen Satz."
+                    ),
                 }
             ],
             "overall_feedback": "Zusammenfassung des Feedbacks.",
@@ -120,7 +126,7 @@ class FeedbackEvaluationExchangeServiceTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_json_round_trip_preserves_complete_meta_records(self) -> None:
+    def test_json_round_trip_preserves_feedback_and_meta_records(self) -> None:
         content = FeedbackEvaluationExchangeService.export_json(
             (self.feedback_run,)
         )
@@ -134,8 +140,22 @@ class FeedbackEvaluationExchangeServiceTests(unittest.TestCase):
         )
         self.assertEqual(len(imported_runs), 1)
         imported = imported_runs[0]
-        self.assertEqual(imported.student_text, self.feedback_run.student_text)
-        self.assertEqual(imported.feedback_payload, self.feedback_run.feedback_payload)
+        self.assertEqual(
+            imported.student_text,
+            self.feedback_run.student_text,
+        )
+        self.assertEqual(
+            imported.feedback_payload,
+            self.feedback_run.feedback_payload,
+        )
+        self.assertEqual(
+            imported.feedback_payload["criteria"][0]["status"],
+            "partially_met",
+        )
+        self.assertEqual(
+            imported.feedback_payload["criteria"][0]["next_step"],
+            "Ergänze Titel und Autor in einem vollständigen Satz.",
+        )
         self.assertEqual(len(imported.evaluations), 2)
         self.assertEqual(
             {item.evaluation_type for item in imported.evaluations},
@@ -214,7 +234,18 @@ class FeedbackEvaluationExchangeServiceTests(unittest.TestCase):
             imported.feedback_run_id,
             self.feedback_run.feedback_run_id,
         )
-        self.assertEqual(imported.student_text, self.feedback_run.student_text)
+        self.assertEqual(
+            imported.student_text,
+            self.feedback_run.student_text,
+        )
+        self.assertEqual(
+            imported.feedback_payload,
+            self.feedback_run.feedback_payload,
+        )
+        self.assertEqual(
+            imported.task_snapshot,
+            self.feedback_run.task_snapshot,
+        )
         self.assertEqual(imported.provider, "ollama")
         self.assertEqual(imported.duration_ms, 12_345)
         self.assertEqual(len(imported.evaluations), 2)
@@ -251,6 +282,48 @@ class FeedbackEvaluationExchangeServiceTests(unittest.TestCase):
                 )
             ),
             1,
+        )
+
+    def test_json_also_round_trips_feedback_without_meta_evaluation(
+        self,
+    ) -> None:
+        feedback_without_evaluation = replace(
+            self.feedback_run,
+            feedback_run_id="feedback-without-meta-evaluation",
+            evaluations=(),
+        )
+        content = FeedbackEvaluationExchangeService.export_json(
+            (feedback_without_evaluation,)
+        )
+        document = json.loads(content.decode("utf-8"))
+        parsed = FeedbackEvaluationExchangeService.parse_import(content)
+        target_store = TaskStore(
+            Path(self.temporary_directory.name) / "feedback-only.sqlite3"
+        )
+
+        imported_counts = asyncio.run(
+            target_store.import_feedback_evaluation_runs(parsed)
+        )
+        imported_runs = asyncio.run(
+            target_store.list_feedback_runs_for_evaluation()
+        )
+
+        self.assertEqual(document["feedback_run_count"], 1)
+        self.assertEqual(document["evaluation_count"], 0)
+        self.assertEqual(
+            document["feedback_runs"][0]["feedback_payload"],
+            self.feedback_run.feedback_payload,
+        )
+        self.assertEqual(imported_counts, (1, 0))
+        self.assertEqual(len(imported_runs), 1)
+        self.assertEqual(imported_runs[0].evaluations, ())
+        self.assertEqual(
+            imported_runs[0].feedback_payload,
+            self.feedback_run.feedback_payload,
+        )
+        self.assertEqual(
+            imported_runs[0].student_text,
+            self.feedback_run.student_text,
         )
 
     def test_wrong_file_format_is_rejected(self) -> None:
@@ -292,6 +365,24 @@ class FeedbackEvaluationExchangeRouteTests(unittest.TestCase):
         self.client.close()
         self.store_patcher.stop()
         self.temporary_directory.cleanup()
+
+    def test_import_notice_supports_feedback_without_meta_evaluation(
+        self,
+    ) -> None:
+        message, tone = main._feedback_evaluation_notice(
+            "evaluation-imported",
+            1,
+            0,
+        )
+
+        self.assertEqual(tone, "success")
+        self.assertEqual(
+            message,
+            (
+                "1 Feedbacklauf ohne vorhandene Meta-Bewertung wurde als "
+                "neue Kopie importiert."
+            ),
+        )
 
     def test_page_exports_and_reimports_meta_evaluations(self) -> None:
         page = self.client.get("/feedback-evaluations")
