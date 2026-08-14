@@ -24,8 +24,9 @@
             >{{ student_link }}</a>
         </p>
         <p class="hint">
-            Schüleranalysen verwenden serverseitig {{ student_provider_label }}.
-            Provider-, Modell- und Forschungsoptionen bleiben verborgen.
+            Schüleranalysen verwenden serverseitig die unten festgelegte
+            Konfiguration. Provider-, Modell- und Forschungsoptionen bleiben
+            für Schüler verborgen.
             Verwende zum Testen des Codes ein privates Browserfenster, damit
             die bestehende Prüfersitzung erhalten bleibt.
         </p>
@@ -68,6 +69,46 @@
     <p>{{ error }}</p>
 </section>
 {% endif %}
+
+<section class="card">
+    <h2>Feedbackmodell für Schüler</h2>
+    <p>
+        Aktuell: <strong>{{ student_feedback_configuration_label }}</strong>
+    </p>
+    <p class="hint">
+        Diese Auswahl gilt zentral für alle Schülerzugänge. Angeboten
+        werden ausschließlich freigegebene Cloudmodelle; ein fehlender
+        API-Key deaktiviert den betreffenden Anbieter. RunPod und lokale
+        Ollama-Modelle sind hier aus Kosten- und Betriebsschutzgründen nicht
+        auswählbar.
+    </p>
+
+    <form method="post" action="/schuelerzugange/feedback-target">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <label for="student-feedback-target">Provider und Modell</label>
+        <select
+            id="student-feedback-target"
+            name="student_feedback_target"
+            required
+        >
+            {% for option in student_feedback_options %}
+                <option
+                    value="{{ option.value }}"
+                    {% if option.value == selected_student_feedback_target %}selected{% endif %}
+                    {% if not option.configured %}disabled{% endif %}
+                >
+                    {{ option.label }}{% if not option.configured %} – API-Key fehlt{% endif %}
+                </option>
+            {% endfor %}
+        </select>
+
+        <button
+            type="submit"
+            {% if not student_feedback_has_configured_option %}disabled{% endif %}
+        >Auswahl speichern</button>
+    </form>
+</section>
 
 <section class="card">
     <h2>Neues Konto erstellen</h2>

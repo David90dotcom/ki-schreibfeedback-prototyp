@@ -43,6 +43,7 @@ async def run_checks() -> None:
     from app.services.analysis_service import AnalysisService
     from app.services.metrics_service import MetricsService
     from app.services.student_account_store import StudentAccountStore
+    from app.services.task_store import TaskStore
 
     _ = AnalysisService
     _ = MetricsService
@@ -218,6 +219,17 @@ async def run_checks() -> None:
         authenticated_account = await student_store.authenticate_code(
             issued_code.access_code
         )
+        task_store = TaskStore(database_path)
+        await task_store.set_student_feedback_configuration(
+            provider="mistral",
+            model="mistral-small-latest",
+        )
+        student_feedback_configuration = (
+            await task_store.get_student_feedback_configuration(
+                fallback_provider="openai",
+                fallback_model="gpt-5.6-luna",
+            )
+        )
 
         if (
             authenticated_account is None
@@ -226,6 +238,15 @@ async def run_checks() -> None:
         ):
             raise RuntimeError(
                 "Der rollengetrennte Schülerzugang ist nicht funktionsfähig."
+            )
+        if (
+            student_feedback_configuration.provider != "mistral"
+            or student_feedback_configuration.model
+            != "mistral-small-latest"
+        ):
+            raise RuntimeError(
+                "Die persistente Schülerfeedback-Konfiguration ist nicht "
+                "funktionsfähig."
             )
 
     print("      OK")

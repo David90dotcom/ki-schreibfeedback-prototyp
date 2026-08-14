@@ -31,3 +31,11 @@ class IssuedStudentAccessCode:
 
     account: StudentAccount
     access_code: str
+
+
+@dataclass(frozen=True)
+class StudentFeedbackConfiguration:
+    """Serverseitig festgelegtes Feedbackmodell der Schüleransicht."""
+
+    provider: str
+    model: str

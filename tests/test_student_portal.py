@@ -164,9 +164,113 @@ class StudentPortalTests(unittest.TestCase):
             "/schuelerzugange/new",
             data={"label": "Ohne CSRF"},
         )
+        configuration_response = self.client.post(
+            "/schuelerzugange/feedback-target",
+            data={
+                "student_feedback_target": (
+                    "openai::gpt-5.6-luna"
+                )
+            },
+        )
 
         self.assertEqual(create_response.status_code, 403)
+        self.assertEqual(configuration_response.status_code, 403)
         self.assertEqual(asyncio.run(self.student_store.list_accounts()), [])
+
+    def test_admin_selects_persistent_student_feedback_model(self) -> None:
+        self._admin_login()
+
+        with patch.object(
+            main,
+            "_student_provider_is_configured",
+            return_value=True,
+        ):
+            page = self.client.get("/schuelerzugange")
+            csrf_token = _csrf_token_from(page)
+            response = self.client.post(
+                "/schuelerzugange/feedback-target",
+                data={
+                    "student_feedback_target": (
+                        "openai::gpt-5.6-luna"
+                    ),
+                    "csrf_token": csrf_token,
+                },
+                follow_redirects=False,
+            )
+
+        self.assertEqual(response.status_code, 303)
+        self.assertIn(
+            "notice=feedback-target-updated",
+            response.headers["location"],
+        )
+        stored = asyncio.run(
+            self.task_store.get_student_feedback_configuration(
+                fallback_provider="mistral",
+                fallback_model="mistral-small-latest",
+            )
+        )
+        self.assertEqual(stored.provider, "openai")
+        self.assertEqual(stored.model, "gpt-5.6-luna")
+
+        with patch.object(
+            main,
+            "_student_provider_is_configured",
+            return_value=True,
+        ):
+            overview = self.client.get("/schuelerzugange")
+
+        self.assertIn("OpenAI-Cloud-API", overview.text)
+        self.assertIn("GPT-5.6 Luna", overview.text)
+        self.assertIn(
+            'value="openai::gpt-5.6-luna"',
+            overview.text,
+        )
+
+    def test_admin_cannot_enable_unapproved_student_provider(self) -> None:
+        self._admin_login()
+        page = self.client.get("/schuelerzugange")
+        csrf_token = _csrf_token_from(page)
+        response = self.client.post(
+            "/schuelerzugange/feedback-target",
+            data={
+                "student_feedback_target": (
+                    "runpod::RedHatAI/Mistral-Small-3.2"
+                ),
+                "csrf_token": csrf_token,
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("freigegebene Kombination", response.text)
+        stored = asyncio.run(
+            self.task_store.get_student_feedback_configuration(
+                fallback_provider="mistral",
+                fallback_model="mistral-small-latest",
+            )
+        )
+        self.assertEqual(stored.provider, "mistral")
+
+    def test_admin_cannot_select_provider_without_api_key(self) -> None:
+        self._admin_login()
+
+        with patch.object(
+            main,
+            "_student_provider_is_configured",
+            return_value=False,
+        ):
+            page = self.client.get("/schuelerzugange")
+            response = self.client.post(
+                "/schuelerzugange/feedback-target",
+                data={
+                    "student_feedback_target": (
+                        "openai::gpt-5.6-luna"
+                    ),
+                    "csrf_token": _csrf_token_from(page),
+                },
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("API-Key", response.text)
 
     def test_admin_can_deactivate_reactivate_and_delete_account(self) -> None:
         issued = self._create_account()
@@ -283,15 +387,21 @@ class StudentPortalTests(unittest.TestCase):
         self.assertIn("Sechsstelliger Zugangscode", response.text)
         self.assertNotIn("Dein Schreibfeedback", response.text)
 
-    def test_student_analysis_uses_only_server_configured_provider(self) -> None:
+    def test_student_analysis_uses_only_admin_configured_target(self) -> None:
         issued = self._create_account()
         task = self._create_task()
+        asyncio.run(
+            self.task_store.set_student_feedback_configuration(
+                provider="openai",
+                model="gpt-5.6-luna",
+            )
+        )
         self._student_login(issued.access_code)
         portal = self.client.get("/schueler")
         csrf_token = _csrf_token_from(portal)
         result = RubricFeedbackResult(
-            provider=main.settings.student_feedback_provider,
-            model="serverseitiges-modell",
+            provider="openai",
+            model="gpt-5.6-luna",
             task_id=task.task_id,
             task_title=task.title,
             rubric_title=task.rubric.title,
@@ -321,6 +431,7 @@ class StudentPortalTests(unittest.TestCase):
                     "student_text": "Mein anonymisierter Schülertext.",
                     "task_id": task.task_id,
                     "provider": "runpod",
+                    "openai_model": "gpt-5.6-sol",
                     "csrf_token": csrf_token,
                 },
                 headers={"X-Requested-With": "XMLHttpRequest"},
@@ -331,14 +442,24 @@ class StudentPortalTests(unittest.TestCase):
         self.assertIn("Dein Feedback", response.text)
         self.assertIn("Du hast den Titel genannt.", response.text)
         self.assertIn("Ergänze Autor und Thema.", response.text)
-        self.assertNotIn("serverseitiges-modell", response.text)
+        self.assertNotIn("gpt-5.6-luna", response.text)
         self.assertNotIn("Anbieter", response.text)
         analyze_mock.assert_awaited_once()
         self.assertEqual(
             analyze_mock.await_args.kwargs["provider_key"],
-            main.settings.student_feedback_provider,
+            "openai",
         )
-        self.assertNotIn("provider_override", analyze_mock.await_args.kwargs)
+        provider_override = (
+            analyze_mock.await_args.kwargs["provider_override"]
+        )
+        self.assertEqual(
+            provider_override.provider_name,
+            "openai",
+        )
+        self.assertEqual(
+            provider_override.model_name,
+            "gpt-5.6-luna",
+        )
 
         with sqlite3.connect(self.database_path) as connection:
             stored = connection.execute(

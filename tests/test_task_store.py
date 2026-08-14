@@ -159,6 +159,66 @@ class TaskStoreTests(unittest.TestCase):
 
         self.assertEqual(setting_count, 1)
 
+    def test_student_feedback_configuration_uses_fallback_and_persists(
+        self,
+    ) -> None:
+        fallback = asyncio.run(
+            self.store.get_student_feedback_configuration(
+                fallback_provider="mistral",
+                fallback_model="mistral-small-latest",
+            )
+        )
+
+        self.assertEqual(fallback.provider, "mistral")
+        self.assertEqual(fallback.model, "mistral-small-latest")
+
+        stored = asyncio.run(
+            self.store.set_student_feedback_configuration(
+                provider="openai",
+                model="gpt-5.6-luna",
+            )
+        )
+        reopened_store = TaskStore(self.store.database_path)
+        reloaded = asyncio.run(
+            reopened_store.get_student_feedback_configuration(
+                fallback_provider="mistral",
+                fallback_model="mistral-small-latest",
+            )
+        )
+
+        self.assertEqual(stored.provider, "openai")
+        self.assertEqual(stored.model, "gpt-5.6-luna")
+        self.assertEqual(reloaded, stored)
+
+        with sqlite3.connect(self.store.database_path) as connection:
+            rows = connection.execute(
+                """
+                SELECT setting_key, setting_value
+                FROM application_settings
+                WHERE setting_key LIKE 'student_feedback_%'
+                ORDER BY setting_key
+                """
+            ).fetchall()
+
+        self.assertEqual(
+            rows,
+            [
+                ("student_feedback_model", "gpt-5.6-luna"),
+                ("student_feedback_provider", "openai"),
+            ],
+        )
+
+    def test_student_feedback_configuration_rejects_empty_values(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(ValueError, "dürfen nicht leer"):
+            asyncio.run(
+                self.store.set_student_feedback_configuration(
+                    provider="openai",
+                    model=" ",
+                )
+            )
+
     def test_duplicate_does_not_replace_default_feedback_task(self) -> None:
         source = self._create_task()
         asyncio.run(

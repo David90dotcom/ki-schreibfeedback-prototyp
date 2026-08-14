@@ -21,6 +21,7 @@ from app.domain.feedback_evaluation import (
     StoredFeedbackEvaluation,
     StoredFeedbackRun,
 )
+from app.domain.student_account import StudentFeedbackConfiguration
 from app.domain.rubric import (
     FeedbackTask,
     FeedbackTaskDraft,
@@ -49,6 +50,8 @@ STANDARD_FEEDBACK_TASK_INSTRUCTIONS = (
     "Standardprompt und der anonymisierte Schülertext."
 )
 DEFAULT_FEEDBACK_TASK_SETTING_KEY = "default_feedback_task_id"
+STUDENT_FEEDBACK_PROVIDER_SETTING_KEY = "student_feedback_provider"
+STUDENT_FEEDBACK_MODEL_SETTING_KEY = "student_feedback_model"
 
 
 def _normalize_student_text(value: str) -> str:
@@ -202,6 +205,43 @@ class TaskStore:
         return await asyncio.to_thread(
             self._set_default_feedback_task_sync,
             task_id,
+        )
+
+    async def get_student_feedback_configuration(
+        self,
+        *,
+        fallback_provider: str,
+        fallback_model: str,
+    ) -> StudentFeedbackConfiguration:
+        """Liest die persistente Schülerkonfiguration oder den Fallback."""
+
+        return await asyncio.to_thread(
+            self._get_student_feedback_configuration_sync,
+            fallback_provider,
+            fallback_model,
+        )
+
+    async def set_student_feedback_configuration(
+        self,
+        *,
+        provider: str,
+        model: str,
+    ) -> StudentFeedbackConfiguration:
+        """Speichert Provider und Modell atomar in den App-Einstellungen."""
+
+        normalized_provider = provider.strip().lower()
+        normalized_model = model.strip()
+
+        if not normalized_provider or not normalized_model:
+            raise ValueError(
+                "Provider und Modell der Schülerkonfiguration dürfen "
+                "nicht leer sein."
+            )
+
+        return await asyncio.to_thread(
+            self._set_student_feedback_configuration_sync,
+            normalized_provider,
+            normalized_model,
         )
 
     async def get_or_create_standard_feedback_task(self) -> FeedbackTask:
@@ -871,6 +911,110 @@ class TaskStore:
                     "Die Standard-Kriterienvorlage konnte nicht gespeichert "
                     "werden."
                 ) from exc
+
+    def _get_student_feedback_configuration_sync(
+        self,
+        fallback_provider: str,
+        fallback_model: str,
+    ) -> StudentFeedbackConfiguration:
+        normalized_fallback_provider = fallback_provider.strip().lower()
+        normalized_fallback_model = fallback_model.strip()
+
+        if not normalized_fallback_provider or not normalized_fallback_model:
+            raise ValueError(
+                "Die Fallback-Konfiguration für Schülerfeedback ist "
+                "unvollständig."
+            )
+
+        try:
+            with self._connect() as connection:
+                self._create_schema(connection)
+                rows = connection.execute(
+                    """
+                    SELECT setting_key, setting_value
+                    FROM application_settings
+                    WHERE setting_key IN (?, ?)
+                    """,
+                    (
+                        STUDENT_FEEDBACK_PROVIDER_SETTING_KEY,
+                        STUDENT_FEEDBACK_MODEL_SETTING_KEY,
+                    ),
+                ).fetchall()
+        except sqlite3.Error as exc:
+            raise TaskStoreError(
+                "Die Feedbackkonfiguration der Schüleransicht konnte "
+                "nicht geladen werden."
+            ) from exc
+
+        values = {
+            row["setting_key"]: row["setting_value"]
+            for row in rows
+        }
+        provider = values.get(
+            STUDENT_FEEDBACK_PROVIDER_SETTING_KEY,
+            normalized_fallback_provider,
+        ).strip().lower()
+        model = values.get(
+            STUDENT_FEEDBACK_MODEL_SETTING_KEY,
+            normalized_fallback_model,
+        ).strip()
+
+        if not provider or not model:
+            return StudentFeedbackConfiguration(
+                provider=normalized_fallback_provider,
+                model=normalized_fallback_model,
+            )
+
+        return StudentFeedbackConfiguration(
+            provider=provider,
+            model=model,
+        )
+
+    def _set_student_feedback_configuration_sync(
+        self,
+        provider: str,
+        model: str,
+    ) -> StudentFeedbackConfiguration:
+        with self._write_lock:
+            try:
+                with self._connect() as connection:
+                    self._create_schema(connection)
+                    timestamp = datetime.now(timezone.utc).isoformat()
+                    connection.executemany(
+                        """
+                        INSERT INTO application_settings (
+                            setting_key,
+                            setting_value,
+                            updated_at
+                        )
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(setting_key) DO UPDATE SET
+                            setting_value = excluded.setting_value,
+                            updated_at = excluded.updated_at
+                        """,
+                        (
+                            (
+                                STUDENT_FEEDBACK_PROVIDER_SETTING_KEY,
+                                provider,
+                                timestamp,
+                            ),
+                            (
+                                STUDENT_FEEDBACK_MODEL_SETTING_KEY,
+                                model,
+                                timestamp,
+                            ),
+                        ),
+                    )
+            except sqlite3.Error as exc:
+                raise TaskStoreError(
+                    "Die Feedbackkonfiguration der Schüleransicht konnte "
+                    "nicht gespeichert werden."
+                ) from exc
+
+        return StudentFeedbackConfiguration(
+            provider=provider,
+            model=model,
+        )
 
     def _create_task_sync(
         self,

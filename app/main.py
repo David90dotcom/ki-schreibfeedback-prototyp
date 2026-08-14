@@ -35,6 +35,7 @@ from app.domain.student_account import (
     IssuedStudentAccessCode,
     MAX_STUDENT_ACCOUNT_LABEL_CHARS,
     StudentAccount,
+    StudentFeedbackConfiguration,
 )
 from app.domain.feedback_evaluation import (
     MANUAL_META_EVALUATION_RUBRIC,
@@ -204,6 +205,8 @@ STUDENT_PROVIDER_LABELS = {
     "mistral": "Mistral-Cloud-API",
     "openai": "OpenAI-Cloud-API",
 }
+
+STUDENT_FEEDBACK_SELECTION_SEPARATOR = "::"
 
 RUNPOD_DEFAULT_ENDPOINT_KEY = "standard"
 
@@ -476,6 +479,192 @@ def _mistral_model_options() -> list[tuple[str, str]]:
     )
 
     return options
+
+
+def _student_feedback_model_options(
+    provider: str,
+) -> list[tuple[str, str]]:
+    """Liefert die fest freigegebenen Cloudmodelle der Schüleransicht."""
+
+    if provider == "mistral":
+        return _mistral_model_options()
+    if provider == "openai":
+        return _openai_model_options()
+
+    return []
+
+
+def _student_provider_is_configured(provider: str) -> bool:
+    if provider == "mistral":
+        return bool(settings.mistral_api_key)
+    if provider == "openai":
+        return bool(settings.openai_api_key)
+
+    return False
+
+
+def _default_student_feedback_configuration(
+) -> StudentFeedbackConfiguration:
+    provider = settings.student_feedback_provider
+    model = (
+        settings.mistral_model
+        if provider == "mistral"
+        else settings.openai_model
+    )
+    return StudentFeedbackConfiguration(
+        provider=provider,
+        model=model,
+    )
+
+
+def _validated_student_feedback_configuration(
+    *,
+    provider: str,
+    model: str,
+    require_configured_provider: bool,
+) -> StudentFeedbackConfiguration:
+    normalized_provider = provider.strip().lower()
+    normalized_model = model.strip()
+    allowed_models = {
+        model_name
+        for model_name, _label in _student_feedback_model_options(
+            normalized_provider
+        )
+    }
+
+    if normalized_model not in allowed_models:
+        raise ValueError(
+            "Bitte wähle eine freigegebene Kombination aus "
+            "Cloudprovider und Modell."
+        )
+
+    if (
+        require_configured_provider
+        and not _student_provider_is_configured(normalized_provider)
+    ):
+        raise ValueError(
+            f"{STUDENT_PROVIDER_LABELS[normalized_provider]} ist nicht "
+            "vollständig konfiguriert. Prüfe den zugehörigen API-Key."
+        )
+
+    return StudentFeedbackConfiguration(
+        provider=normalized_provider,
+        model=normalized_model,
+    )
+
+
+def _student_feedback_configuration_from_selection(
+    selection: str,
+) -> StudentFeedbackConfiguration:
+    provider, separator, model = selection.strip().partition(
+        STUDENT_FEEDBACK_SELECTION_SEPARATOR
+    )
+
+    if not separator:
+        raise ValueError(
+            "Bitte wähle einen Modellanbieter und ein Modell."
+        )
+
+    return _validated_student_feedback_configuration(
+        provider=provider,
+        model=model,
+        require_configured_provider=True,
+    )
+
+
+def _student_feedback_selection_value(
+    configuration: StudentFeedbackConfiguration,
+) -> str:
+    return (
+        f"{configuration.provider}"
+        f"{STUDENT_FEEDBACK_SELECTION_SEPARATOR}"
+        f"{configuration.model}"
+    )
+
+
+def _student_feedback_configuration_label(
+    configuration: StudentFeedbackConfiguration,
+) -> str:
+    provider_label = STUDENT_PROVIDER_LABELS.get(
+        configuration.provider,
+        configuration.provider,
+    )
+    model_label = dict(
+        _student_feedback_model_options(configuration.provider)
+    ).get(configuration.model, configuration.model)
+    return f"{provider_label} · {model_label}"
+
+
+def _student_feedback_options() -> list[dict[str, object]]:
+    options: list[dict[str, object]] = []
+
+    for provider in ("mistral", "openai"):
+        provider_configured = _student_provider_is_configured(provider)
+
+        for model, model_label in _student_feedback_model_options(provider):
+            configuration = StudentFeedbackConfiguration(
+                provider=provider,
+                model=model,
+            )
+            options.append(
+                {
+                    "value": _student_feedback_selection_value(
+                        configuration
+                    ),
+                    "label": (
+                        f"{STUDENT_PROVIDER_LABELS[provider]} · "
+                        f"{model_label}"
+                    ),
+                    "configured": provider_configured,
+                }
+            )
+
+    return options
+
+
+async def _current_student_feedback_configuration(
+) -> StudentFeedbackConfiguration:
+    fallback = _default_student_feedback_configuration()
+    stored = await task_store.get_student_feedback_configuration(
+        fallback_provider=fallback.provider,
+        fallback_model=fallback.model,
+    )
+
+    try:
+        return _validated_student_feedback_configuration(
+            provider=stored.provider,
+            model=stored.model,
+            require_configured_provider=False,
+        )
+    except ValueError:
+        logger.warning(
+            "Ungültige persistente Schülerfeedback-Konfiguration "
+            "ignoriert (provider=%s, model=%s).",
+            stored.provider,
+            stored.model,
+        )
+        return fallback
+
+
+def _student_provider_for_configuration(
+    configuration: StudentFeedbackConfiguration,
+) -> LLMProvider:
+    validated = _validated_student_feedback_configuration(
+        provider=configuration.provider,
+        model=configuration.model,
+        require_configured_provider=False,
+    )
+
+    if validated.provider == "mistral":
+        return MistralProvider(
+            api_key=settings.mistral_api_key,
+            model_name=validated.model,
+        )
+
+    return OpenAIProvider(
+        api_key=settings.openai_api_key,
+        model_name=validated.model,
+    )
 
 
 def _ollama_available() -> bool:
@@ -991,6 +1180,19 @@ async def _student_accounts_response(
         error = error or str(exc)
         status_code = 500
 
+    try:
+        feedback_configuration = (
+            await _current_student_feedback_configuration()
+        )
+    except TaskStoreError as exc:
+        feedback_configuration = (
+            _default_student_feedback_configuration()
+        )
+        error = error or str(exc)
+        status_code = 500
+
+    feedback_options = _student_feedback_options()
+
     return templates.TemplateResponse(
         name="student_accounts.html",
         request=request,
@@ -1004,9 +1206,21 @@ async def _student_accounts_response(
             "error": error,
             "max_label_chars": MAX_STUDENT_ACCOUNT_LABEL_CHARS,
             "student_link": str(request.url_for("student_portal")),
-            "student_provider_label": STUDENT_PROVIDER_LABELS[
-                settings.student_feedback_provider
-            ],
+            "student_feedback_options": feedback_options,
+            "student_feedback_has_configured_option": any(
+                bool(option["configured"])
+                for option in feedback_options
+            ),
+            "selected_student_feedback_target": (
+                _student_feedback_selection_value(
+                    feedback_configuration
+                )
+            ),
+            "student_feedback_configuration_label": (
+                _student_feedback_configuration_label(
+                    feedback_configuration
+                )
+            ),
         },
         status_code=status_code,
         headers={"Cache-Control": "no-store"},
@@ -1549,11 +1763,59 @@ async def student_accounts_page(
         "activated": "Das Schülerkonto wurde aktiviert.",
         "disabled": "Das Schülerkonto wurde deaktiviert.",
         "deleted": "Das Schülerkonto wurde gelöscht.",
+        "feedback-target-updated": (
+            "Provider und Modell für Schülerfeedback wurden gespeichert."
+        ),
     }
     return await _student_accounts_response(
         request=request,
         authenticated_user=authenticated_user,
         notice=notice_messages.get(notice),
+    )
+
+
+@app.post(
+    "/schuelerzugange/feedback-target",
+    response_class=HTMLResponse,
+)
+async def set_student_feedback_target(
+    request: Request,
+    student_feedback_target: str = Form("", max_length=400),
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        configuration = _student_feedback_configuration_from_selection(
+            student_feedback_target
+        )
+        await task_store.set_student_feedback_configuration(
+            provider=configuration.provider,
+            model=configuration.model,
+        )
+    except ValueError as exc:
+        return await _student_accounts_response(
+            request=request,
+            authenticated_user=authenticated_user,
+            error=str(exc),
+            status_code=422,
+        )
+    except TaskStoreError as exc:
+        return await _student_accounts_response(
+            request=request,
+            authenticated_user=authenticated_user,
+            error=str(exc),
+            status_code=500,
+        )
+
+    return RedirectResponse(
+        url="/schuelerzugange?notice=feedback-target-updated",
+        status_code=303,
     )
 
 
@@ -1831,6 +2093,9 @@ async def analyze_student_text(
     error: str | None = None
     storage_warning: str | None = None
     selected_task_id = task_id.strip()
+    feedback_configuration = (
+        _default_student_feedback_configuration()
+    )
 
     try:
         cleaned_text = student_text.strip()
@@ -1851,11 +2116,19 @@ async def analyze_student_text(
                 "Die ausgewählte Feedback-Vorlage ist nicht verfügbar."
             )
 
+        feedback_configuration = (
+            await _current_student_feedback_configuration()
+        )
+        provider_override = _student_provider_for_configuration(
+            feedback_configuration
+        )
+
         async with student_analysis_gate.reserve(account.account_id):
             result = await criterion_wise_rubric_feedback_service.analyze_text(
                 student_text=cleaned_text,
                 task=selected_task,
-                provider_key=settings.student_feedback_provider,
+                provider_key=feedback_configuration.provider,
+                provider_override=provider_override,
             )
 
             try:
@@ -1883,7 +2156,7 @@ async def analyze_student_text(
             "Schülerfeedback fehlgeschlagen "
             "(account_id=%s, provider=%s, task_id=%s, error_type=%s).",
             account.account_id,
-            settings.student_feedback_provider,
+            feedback_configuration.provider,
             selected_task_id,
             type(exc).__name__,
         )

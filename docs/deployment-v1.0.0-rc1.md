@@ -14,7 +14,7 @@ Dieser Ablauf verwendet ausschließlich den vorhandenen automatischen 48-GB-GPU-
 | Serverless-Endpoint | automatischer Pool kompatibler 48-GB-GPUs |
 | Dedizierte Endpoints | nicht Bestandteil der endgültigen Anwendung |
 | Sicherheitsgrenze | 15 Minuten Job-TTL, 10 Minuten Ausführung, 5 Sekunden Idle, höchstens ein Worker |
-| Schüleransicht | `/schueler`, fester Provider `mistral`, sechsstellige Einmalcodes |
+| Schüleransicht | `/schueler`, Prüferwahl aus freigegebenen Mistral-/OpenAI-Modellen, sechsstellige Einmalcodes |
 
 Die FP8-Variante umfasst ungefähr 25,8 GB Modellgewichte. Das offizielle BF16-/FP16-Modell benötigt ungefähr 55 GB GPU-Speicher und passt deshalb nicht in die vorhandene Einzel-GPU-Strategie mit 32 beziehungsweise 48 GB. Die Quantisierungsform wird in den Versuchsdaten dokumentiert: lokal Q8 über Ollama, Serverless FP8 über vLLM.
 
@@ -90,7 +90,10 @@ RUNPOD_IDLE_TIMEOUT_SECONDS=5
 STUDENT_FEEDBACK_PROVIDER=mistral
 ```
 
-API-Key, Passwort-Hash und Sitzungs-Secret bleiben unverändert. Die `.env` darf weder angezeigt noch eingecheckt werden.
+`STUDENT_FEEDBACK_PROVIDER` legt nur die Erstkonfiguration fest. Eine spätere
+Prüferauswahl von Provider und Modell wird persistent in SQLite gespeichert.
+API-Key, Passwort-Hash und Sitzungs-Secret bleiben unverändert. Die `.env` darf
+weder angezeigt noch eingecheckt werden.
 
 ## 5. Webanwendung aktualisieren
 
@@ -144,8 +147,9 @@ In der produktiven Oberfläche nacheinander prüfen:
 12. Daten und Standardvorlage bleiben nach einem Container-Neustart erhalten.
 13. Unter „Schülerzugänge“ lässt sich ein pseudonymes Konto erstellen; der sechsstellige Code erscheint genau einmal.
 14. Der Code öffnet `/schueler`, dort werden nur aktive Vorlagen, Texteingabe und Schülerfeedback angezeigt.
-15. Eine Schüleranalyse verwendet den fest konfigurierten Mistral-Provider; Provider- und Forschungsoptionen fehlen vollständig.
-16. Nach der Deaktivierung verliert auch eine bereits angemeldete Schülersitzung bei der nächsten Anfrage den Zugriff.
+15. Unter „Schülerzugänge“ lässt sich eine konfigurierte Mistral- oder OpenAI-Modellvariante als zentrale Schülerkonfiguration speichern.
+16. Eine Schüleranalyse verwendet exakt diese Prüferauswahl; Provider-, Modell- und Forschungsoptionen fehlen in der Schüleransicht vollständig.
+17. Nach der Deaktivierung verliert auch eine bereits angemeldete Schülersitzung bei der nächsten Anfrage den Zugriff.
 
 Zusätzlich Modellname, Gesamtdauer, Queue-Zeit und Ausführungszeit für die Bachelorarbeit notieren.
 
