@@ -1740,6 +1740,7 @@ fieldset > label:first-of-type {
 
 .meta-evaluation-entry,
 .meta-overview-header,
+.meta-exchange-panel,
 .meta-run-card,
 .meta-empty-state {
     border-color: var(--meta-border);

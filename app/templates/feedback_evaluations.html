@@ -22,6 +22,23 @@
                 mehrfach getrennt speichern.
             </p>
         </div>
+
+        {% if evaluation_export_available %}
+            <div class="management-actions">
+                <a
+                    class="button-link secondary-link"
+                    href="/feedback-evaluations/export-json"
+                >
+                    JSON zur Übertragung
+                </a>
+                <a
+                    class="button-link secondary-link"
+                    href="/feedback-evaluations/export-csv"
+                >
+                    CSV für Auswertung
+                </a>
+            </div>
+        {% endif %}
     </div>
 </section>
 
@@ -40,6 +57,53 @@
         <p>{{ error }}</p>
     </section>
 {% endif %}
+
+<section class="card exchange-panel meta-exchange-panel">
+    <div>
+        <h2>Meta-Bewertungen übertragen</h2>
+        <p class="hint">
+            Importiere hier einen zuvor lokal erzeugten JSON-Export.
+            Feedbackläufe und Bewertungen werden als neue Kopien ergänzt;
+            vorhandene Daten bleiben unverändert.
+        </p>
+    </div>
+
+    <form
+        class="import-form"
+        method="post"
+        action="/feedback-evaluations/import"
+        enctype="multipart/form-data"
+    >
+        <input
+            type="hidden"
+            name="csrf_token"
+            value="{{ csrf_token }}"
+        >
+
+        <label for="meta-evaluation-import-file">
+            Meta-Bewertungs-Export auswählen
+        </label>
+        <input
+            id="meta-evaluation-import-file"
+            name="import_file"
+            type="file"
+            accept=".json,application/json"
+            required
+        >
+
+        <button class="secondary-button" type="submit">
+            JSON importieren
+        </button>
+    </form>
+
+    <p class="hint exchange-note">
+        Der übertragbare JSON-Export enthält den anonymisierten Schülertext,
+        das erzeugte Feedback und die vollständigen Meta-Bewertungen. API-Keys
+        sind nicht enthalten. Der separate CSV-Export enthält dagegen nur
+        Zuordnungen, Modelle, Laufzeiten und numerische Bewertungen – keine
+        Schülertexte, Feedbacktexte oder Begründungen.
+    </p>
+</section>
 
 {% if feedback_runs %}
     <section class="meta-run-list" aria-label="Gespeicherte Feedbackläufe">

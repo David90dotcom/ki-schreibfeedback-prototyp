@@ -149,6 +149,8 @@ In der produktiven Oberfläche nacheinander prüfen:
 14. Der Code öffnet `/schueler`, dort werden nur aktive Vorlagen, Texteingabe und Schülerfeedback angezeigt.
 15. Unter „Schülerzugänge“ lässt sich eine konfigurierte Mistral- oder OpenAI-Modellvariante als zentrale Schülerkonfiguration speichern.
 16. Eine Schüleranalyse verwendet exakt diese Prüferauswahl; Provider-, Modell- und Forschungsoptionen fehlen in der Schüleransicht vollständig.
+17. Der JSON-Export der Meta-Bewertungen lässt sich in einer zweiten Installation importieren, ohne vorhandene Datensätze zu überschreiben.
+18. Der CSV-Export enthält Laufzeiten und numerische Kriterienwerte, aber keine Schülertexte, Feedbacktexte oder Begründungen.
 17. Nach der Deaktivierung verliert auch eine bereits angemeldete Schülersitzung bei der nächsten Anfrage den Zugriff.
 
 Zusätzlich Modellname, Gesamtdauer, Queue-Zeit und Ausführungszeit für die Bachelorarbeit notieren.

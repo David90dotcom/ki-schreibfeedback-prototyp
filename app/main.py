@@ -93,6 +93,11 @@ from app.services.feedback_service import (
     FeedbackResult,
     FeedbackService,
 )
+from app.services.feedback_evaluation_exchange_service import (
+    MAX_FEEDBACK_EVALUATION_IMPORT_BYTES,
+    FeedbackEvaluationExchangeError,
+    FeedbackEvaluationExchangeService,
+)
 from app.services.feedback_evaluation_pdf_service import (
     FeedbackEvaluationPdfError,
     FeedbackEvaluationPdfService,
@@ -990,6 +995,11 @@ FEEDBACK_EVALUATION_NOTICES = {
         "Die technische Ursache steht im Serverterminal.",
         "error",
     ),
+    "evaluation-import-failed": (
+        "Der Meta-Bewertungs-Import konnte nicht verarbeitet werden. "
+        "Bitte wähle einen unveränderten JSON-Export dieser Anwendung.",
+        "error",
+    ),
 }
 
 
@@ -1007,6 +1017,39 @@ def _task_notice_message(
         )
 
     return TASK_NOTICE_MESSAGES.get(notice)
+
+
+def _feedback_evaluation_notice(
+    notice: str,
+    imported_run_count: int,
+    imported_evaluation_count: int,
+) -> tuple[str | None, str | None]:
+    if (
+        notice == "evaluation-imported"
+        and imported_run_count > 0
+        and imported_evaluation_count > 0
+    ):
+        run_label = (
+            "Feedbacklauf"
+            if imported_run_count == 1
+            else "Feedbackläufe"
+        )
+        evaluation_label = (
+            "Meta-Bewertung"
+            if imported_evaluation_count == 1
+            else "Meta-Bewertungen"
+        )
+        return (
+            f"{imported_run_count} {run_label} mit "
+            f"{imported_evaluation_count} {evaluation_label} wurden als "
+            "neue Kopien importiert.",
+            "success",
+        )
+
+    return FEEDBACK_EVALUATION_NOTICES.get(
+        notice,
+        (None, None),
+    )
 
 
 def _rubric_download_response(
@@ -2196,6 +2239,12 @@ async def analyze_student_text(
 async def feedback_evaluations_page(
     request: Request,
     notice: str = Query(default="", max_length=32),
+    imported_run_count: int = Query(default=0, ge=0, le=1000),
+    imported_evaluation_count: int = Query(
+        default=0,
+        ge=0,
+        le=500_000,
+    ),
     automatic_feedback_run_id: str = Query(
         default="",
         max_length=36,
@@ -2216,16 +2265,22 @@ async def feedback_evaluations_page(
         feedback_runs = (
             await task_store.list_feedback_runs_for_evaluation()
         )
+        evaluation_export_available = any(
+            feedback_run.evaluations
+            for feedback_run in feedback_runs
+        )
     except TaskStoreError:
         feedback_runs = []
+        evaluation_export_available = False
         error = (
             "Die gespeicherten Feedbackläufe konnten momentan nicht "
             "geladen werden."
         )
 
-    notice_message, notice_tone = FEEDBACK_EVALUATION_NOTICES.get(
+    notice_message, notice_tone = _feedback_evaluation_notice(
         notice,
-        (None, None),
+        imported_run_count,
+        imported_evaluation_count,
     )
 
     return templates.TemplateResponse(
@@ -2238,6 +2293,9 @@ async def feedback_evaluations_page(
                 request.session
             ),
             "feedback_runs": feedback_runs,
+            "evaluation_export_available": (
+                evaluation_export_available
+            ),
             "manual_meta_rubric": MANUAL_META_EVALUATION_RUBRIC,
             "meta_evaluation_score_options": (
                 META_EVALUATION_SCORE_OPTIONS
@@ -2275,6 +2333,136 @@ async def feedback_evaluations_page(
             "notice_tone": notice_tone,
             "error": error,
         },
+    )
+
+
+@app.get("/feedback-evaluations/export-json")
+async def export_feedback_evaluations_json(
+    request: Request,
+) -> Response:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    try:
+        feedback_runs = await task_store.list_feedback_runs_for_evaluation(
+            limit=1000
+        )
+        content = FeedbackEvaluationExchangeService.export_json(
+            feedback_runs
+        )
+    except TaskStoreError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+    except FeedbackEvaluationExchangeError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    return _rubric_download_response(
+        content,
+        "meta-bewertungen.json",
+    )
+
+
+@app.get("/feedback-evaluations/export-csv")
+async def export_feedback_evaluations_csv(
+    request: Request,
+) -> Response:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    try:
+        feedback_runs = await task_store.list_feedback_runs_for_evaluation(
+            limit=1000
+        )
+        content = FeedbackEvaluationExchangeService.export_csv(
+            feedback_runs
+        )
+    except TaskStoreError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=str(exc),
+        ) from exc
+    except FeedbackEvaluationExchangeError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    return _rubric_download_response(
+        content,
+        "meta-bewertungen.csv",
+        media_type="text/csv",
+    )
+
+
+@app.post("/feedback-evaluations/import")
+async def import_feedback_evaluations(
+    request: Request,
+    import_file: UploadFile = File(...),
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        content = await import_file.read(
+            MAX_FEEDBACK_EVALUATION_IMPORT_BYTES + 1
+        )
+    except OSError:
+        logger.exception(
+            "Eine Meta-Bewertungs-Importdatei konnte nicht gelesen werden."
+        )
+        return RedirectResponse(
+            url=(
+                "/feedback-evaluations?notice="
+                "evaluation-import-failed"
+            ),
+            status_code=303,
+        )
+    finally:
+        await import_file.close()
+
+    try:
+        feedback_runs = FeedbackEvaluationExchangeService.parse_import(
+            content
+        )
+        imported_run_count, imported_evaluation_count = (
+            await task_store.import_feedback_evaluation_runs(feedback_runs)
+        )
+    except FeedbackEvaluationExchangeError as exc:
+        logger.warning("Meta-Bewertungs-Import abgelehnt: %s", exc)
+        return RedirectResponse(
+            url=(
+                "/feedback-evaluations?notice="
+                "evaluation-import-failed"
+            ),
+            status_code=303,
+        )
+    except (ValueError, TaskStoreError):
+        logger.exception(
+            "Meta-Bewertungen konnten nicht importiert werden."
+        )
+        return RedirectResponse(
+            url=(
+                "/feedback-evaluations?notice="
+                "evaluation-import-failed"
+            ),
+            status_code=303,
+        )
+
+    return RedirectResponse(
+        url=(
+            "/feedback-evaluations?notice=evaluation-imported"
+            f"&imported_run_count={imported_run_count}"
+            f"&imported_evaluation_count={imported_evaluation_count}"
+        ),
+        status_code=303,
     )
 
 

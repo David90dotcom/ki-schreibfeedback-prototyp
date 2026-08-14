@@ -543,6 +543,35 @@ class TaskStore:
             limit,
         )
 
+    async def import_feedback_evaluation_runs(
+        self,
+        feedback_runs: Sequence[StoredFeedbackRun],
+    ) -> tuple[int, int]:
+        """Importiert Feedbackläufe und Meta-Bewertungen als Kopien."""
+
+        if not feedback_runs:
+            raise ValueError(
+                "Die Importdatei enthält keine Meta-Bewertungen."
+            )
+
+        source_runs = tuple(feedback_runs)
+        normalized_tasks = {
+            (feedback_run.task_id, feedback_run.rubric_id): (
+                None
+                if feedback_run.task_id == STANDARD_FEEDBACK_TASK_ID
+                else self._normalize_import_task_snapshot(
+                    feedback_run.task_snapshot
+                )
+            )
+            for feedback_run in source_runs
+        }
+
+        return await asyncio.to_thread(
+            self._import_feedback_evaluation_runs_sync,
+            source_runs,
+            normalized_tasks,
+        )
+
     async def get_feedback_run_for_evaluation(
         self,
         feedback_run_id: str,
@@ -747,51 +776,9 @@ class TaskStore:
                         return task
 
                     timestamp = datetime.now(timezone.utc).isoformat()
-                    connection.execute(
-                        """
-                        INSERT OR IGNORE INTO feedback_tasks (
-                            task_id,
-                            title,
-                            subject,
-                            grade_level,
-                            instructions,
-                            material,
-                            created_at,
-                            updated_at,
-                            archived_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                        """,
-                        (
-                            STANDARD_FEEDBACK_TASK_ID,
-                            STANDARD_FEEDBACK_TASK_TITLE,
-                            "Deutsch",
-                            "",
-                            STANDARD_FEEDBACK_TASK_INSTRUCTIONS,
-                            "",
-                            timestamp,
-                            timestamp,
-                        ),
-                    )
-                    connection.execute(
-                        """
-                        INSERT OR IGNORE INTO rubrics (
-                            rubric_id,
-                            task_id,
-                            title,
-                            created_at,
-                            updated_at,
-                            archived_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, NULL)
-                        """,
-                        (
-                            STANDARD_FEEDBACK_RUBRIC_ID,
-                            STANDARD_FEEDBACK_TASK_ID,
-                            STANDARD_FEEDBACK_RUBRIC_TITLE,
-                            timestamp,
-                            timestamp,
-                        ),
+                    self._ensure_standard_feedback_task_rows(
+                        connection,
+                        timestamp,
                     )
                     created = self._load_task(
                         connection,
@@ -812,6 +799,58 @@ class TaskStore:
                     "Der Standardfeedback-Kontext konnte nicht "
                     "bereitgestellt werden."
                 ) from exc
+
+    @staticmethod
+    def _ensure_standard_feedback_task_rows(
+        connection: sqlite3.Connection,
+        timestamp: str,
+    ) -> None:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO feedback_tasks (
+                task_id,
+                title,
+                subject,
+                grade_level,
+                instructions,
+                material,
+                created_at,
+                updated_at,
+                archived_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                STANDARD_FEEDBACK_TASK_ID,
+                STANDARD_FEEDBACK_TASK_TITLE,
+                "Deutsch",
+                "",
+                STANDARD_FEEDBACK_TASK_INSTRUCTIONS,
+                "",
+                timestamp,
+                timestamp,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO rubrics (
+                rubric_id,
+                task_id,
+                title,
+                created_at,
+                updated_at,
+                archived_at
+            )
+            VALUES (?, ?, ?, ?, ?, NULL)
+            """,
+            (
+                STANDARD_FEEDBACK_RUBRIC_ID,
+                STANDARD_FEEDBACK_TASK_ID,
+                STANDARD_FEEDBACK_RUBRIC_TITLE,
+                timestamp,
+                timestamp,
+            ),
+        )
 
     def _get_task_sync(
         self,
@@ -1943,6 +1982,255 @@ class TaskStore:
                 "Der Feedbacklauf konnte nicht geladen werden."
             ) from exc
 
+    def _import_feedback_evaluation_runs_sync(
+        self,
+        feedback_runs: tuple[StoredFeedbackRun, ...],
+        normalized_tasks: dict[
+            tuple[str, str],
+            dict[str, object] | None,
+        ],
+    ) -> tuple[int, int]:
+        imported_evaluation_count = 0
+
+        with self._write_lock:
+            try:
+                with self._connect() as connection:
+                    self._create_schema(connection)
+                    imported_at = datetime.now(timezone.utc).isoformat()
+                    task_contexts: dict[
+                        tuple[str, str],
+                        tuple[str, str],
+                    ] = {}
+
+                    for feedback_run in feedback_runs:
+                        source_context = (
+                            feedback_run.task_id,
+                            feedback_run.rubric_id,
+                        )
+                        task_context = task_contexts.get(source_context)
+
+                        if task_context is None:
+                            task_context = self._import_task_context(
+                                connection,
+                                source_task_id=feedback_run.task_id,
+                                normalized_task=normalized_tasks[
+                                    source_context
+                                ],
+                                imported_at=imported_at,
+                            )
+                            task_contexts[source_context] = task_context
+
+                        imported_run_id = str(uuid4())
+                        normalized_student_text = _normalize_student_text(
+                            feedback_run.student_text
+                        )
+                        connection.execute(
+                            """
+                            INSERT INTO rubric_feedback_runs (
+                                feedback_run_id,
+                                task_id,
+                                rubric_id,
+                                created_at,
+                                provider,
+                                model,
+                                reasoning_effort,
+                                duration_ms,
+                                queue_duration_ms,
+                                execution_duration_ms,
+                                provider_request_id,
+                                student_text_hash,
+                                original_text,
+                                task_snapshot_json,
+                                feedback_json,
+                                student_text,
+                                selected_for_evaluation_at
+                            )
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                    ?, ?, ?, ?)
+                            """,
+                            (
+                                imported_run_id,
+                                task_context[0],
+                                task_context[1],
+                                feedback_run.created_at.isoformat(),
+                                feedback_run.provider,
+                                feedback_run.model,
+                                feedback_run.reasoning_effort,
+                                feedback_run.duration_ms,
+                                feedback_run.queue_duration_ms,
+                                feedback_run.execution_duration_ms,
+                                feedback_run.provider_request_id,
+                                hashlib.sha256(
+                                    normalized_student_text.encode("utf-8")
+                                ).hexdigest(),
+                                feedback_run.original_text,
+                                json.dumps(
+                                    feedback_run.task_snapshot,
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                ),
+                                json.dumps(
+                                    feedback_run.feedback_payload,
+                                    ensure_ascii=False,
+                                    separators=(",", ":"),
+                                ),
+                                normalized_student_text,
+                                (
+                                    feedback_run
+                                    .selected_for_evaluation_at
+                                    .isoformat()
+                                ),
+                            ),
+                        )
+
+                        evaluation_ids = {
+                            evaluation.evaluation_id: str(uuid4())
+                            for evaluation in feedback_run.evaluations
+                        }
+
+                        for evaluation in feedback_run.evaluations:
+                            imported_evaluation_id = evaluation_ids[
+                                evaluation.evaluation_id
+                            ]
+                            connection.execute(
+                                """
+                                INSERT INTO feedback_evaluations (
+                                    evaluation_id,
+                                    feedback_run_id,
+                                    created_at,
+                                    evaluation_type,
+                                    evaluation_name,
+                                    rubric_version,
+                                    evaluator_provider,
+                                    evaluator_model,
+                                    evaluator_prompt_version,
+                                    source_evaluation_id,
+                                    duration_ms,
+                                    queue_duration_ms,
+                                    execution_duration_ms,
+                                    provider_request_id
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                                        ?, ?)
+                                """,
+                                (
+                                    imported_evaluation_id,
+                                    imported_run_id,
+                                    evaluation.created_at.isoformat(),
+                                    evaluation.evaluation_type,
+                                    evaluation.evaluation_name,
+                                    evaluation.rubric_version,
+                                    evaluation.evaluator_provider,
+                                    evaluation.evaluator_model,
+                                    evaluation.evaluator_prompt_version,
+                                    (
+                                        evaluation_ids.get(
+                                            evaluation.source_evaluation_id
+                                        )
+                                        if evaluation.source_evaluation_id
+                                        else None
+                                    ),
+                                    evaluation.duration_ms,
+                                    evaluation.queue_duration_ms,
+                                    evaluation.execution_duration_ms,
+                                    evaluation.provider_request_id,
+                                ),
+                            )
+                            connection.executemany(
+                                """
+                                INSERT INTO feedback_evaluation_ratings (
+                                    evaluation_id,
+                                    criterion_key,
+                                    position,
+                                    criterion_title,
+                                    criterion_question,
+                                    score,
+                                    rating_label,
+                                    justification
+                                )
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                [
+                                    (
+                                        imported_evaluation_id,
+                                        rating.criterion_key,
+                                        rating.position,
+                                        rating.criterion_title,
+                                        rating.criterion_question,
+                                        rating.score,
+                                        rating.rating_label,
+                                        rating.justification,
+                                    )
+                                    for rating in evaluation.ratings
+                                ],
+                            )
+                            imported_evaluation_count += 1
+
+                return len(feedback_runs), imported_evaluation_count
+
+            except (KeyError, TypeError, ValueError) as exc:
+                raise TaskStoreError(
+                    "Der Meta-Bewertungs-Import besitzt ungültige Daten."
+                ) from exc
+            except sqlite3.Error as exc:
+                raise TaskStoreError(
+                    "Die Meta-Bewertungen konnten nicht importiert werden."
+                ) from exc
+
+    def _import_task_context(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        source_task_id: str,
+        normalized_task: dict[str, object] | None,
+        imported_at: str,
+    ) -> tuple[str, str]:
+        existing = connection.execute(
+            """
+            SELECT task.task_id, rubric.rubric_id
+            FROM feedback_tasks AS task
+            JOIN rubrics AS rubric ON rubric.task_id = task.task_id
+            WHERE task.task_id = ?
+            """,
+            (source_task_id,),
+        ).fetchone()
+
+        if existing is not None:
+            return existing["task_id"], existing["rubric_id"]
+
+        if source_task_id == STANDARD_FEEDBACK_TASK_ID:
+            self._ensure_standard_feedback_task_rows(
+                connection,
+                imported_at,
+            )
+            return STANDARD_FEEDBACK_TASK_ID, STANDARD_FEEDBACK_RUBRIC_ID
+
+        if normalized_task is None:
+            raise ValueError("Die Aufgabenansicht des Imports fehlt.")
+
+        imported_task = self._insert_normalized_task(
+            connection,
+            normalized_task,
+            imported_at,
+        )
+        connection.execute(
+            """
+            UPDATE feedback_tasks
+            SET archived_at = ?
+            WHERE task_id = ?
+            """,
+            (imported_at, imported_task.task_id),
+        )
+        connection.execute(
+            """
+            UPDATE rubrics
+            SET archived_at = ?
+            WHERE rubric_id = ?
+            """,
+            (imported_at, imported_task.rubric.rubric_id),
+        )
+        return imported_task.task_id, imported_task.rubric.rubric_id
+
     def _create_manual_feedback_evaluation_sync(
         self,
         evaluation_id: str,
@@ -2920,6 +3208,58 @@ class TaskStore:
                 else None
             ),
         )
+
+    def _normalize_import_task_snapshot(
+        self,
+        snapshot: dict[str, object],
+    ) -> dict[str, object]:
+        rubric = snapshot.get("rubric")
+
+        if not isinstance(rubric, dict):
+            raise ValueError(
+                "Die importierte Aufgabenansicht enthält keine "
+                "Feedback-Vorlage."
+            )
+
+        raw_criteria = rubric.get("criteria")
+
+        if not isinstance(raw_criteria, list) or not raw_criteria:
+            raise ValueError(
+                "Die importierte Feedback-Vorlage enthält keine Kriterien."
+            )
+        if not all(isinstance(item, dict) for item in raw_criteria):
+            raise ValueError(
+                "Die importierten Feedback-Kriterien sind ungültig."
+            )
+
+        criteria = sorted(
+            raw_criteria,
+            key=lambda item: (
+                item.get("position")
+                if type(item.get("position")) is int
+                else len(raw_criteria)
+            ),
+        )
+
+        try:
+            return self._validate_input(
+                title=snapshot["title"],
+                subject=snapshot.get("subject", ""),
+                grade_level=snapshot.get("grade_level", ""),
+                instructions=snapshot["instructions"],
+                material=snapshot.get("material", ""),
+                rubric_title=rubric["title"],
+                criteria=tuple(item["text"] for item in criteria),
+                criterion_titles=tuple(
+                    item.get("title")
+                    or f"Kriterium {position}"
+                    for position, item in enumerate(criteria, start=1)
+                ),
+            )
+        except (KeyError, TypeError, AttributeError) as exc:
+            raise ValueError(
+                "Die importierte Aufgabenansicht ist unvollständig."
+            ) from exc
 
     def _validate_input(
         self,
