@@ -31,6 +31,11 @@ from app.config import (
     APP_MODE_PRODUCTION,
     settings,
 )
+from app.domain.student_account import (
+    IssuedStudentAccessCode,
+    MAX_STUDENT_ACCOUNT_LABEL_CHARS,
+    StudentAccount,
+)
 from app.domain.feedback_evaluation import (
     MANUAL_META_EVALUATION_RUBRIC,
     MAX_EVALUATION_NAME_CHARS,
@@ -64,12 +69,15 @@ from app.llm.runpod_client import (
 )
 from app.security import (
     LoginRateLimiter,
+    authenticated_student_account_id,
+    authenticated_student_access_version,
     authenticated_username,
     end_authenticated_session,
     get_or_create_csrf_token,
     is_valid_csrf_token,
     is_authenticated,
     start_authenticated_session,
+    start_student_session,
     verify_credentials,
 )
 from app.services.automatic_feedback_evaluation_service import (
@@ -106,6 +114,16 @@ from app.services.runpod_job_store import (
     RunPodTrackedJob,
 )
 from app.services.runpod_status_service import RunPodStatusService
+from app.services.student_account_store import (
+    StudentAccountConflictError,
+    StudentAccountNotFoundError,
+    StudentAccountStore,
+    StudentAccountStoreError,
+)
+from app.services.student_analysis_gate import (
+    StudentAnalysisGate,
+    StudentAnalysisInProgressError,
+)
 from app.services.task_store import (
     FeedbackEvaluationDeleteConflictError,
     FeedbackRunRefreshError,
@@ -145,6 +163,8 @@ def _static_asset_version() -> str:
         "app.js",
         "feedback_evaluations.js",
         "rubrics.js",
+        "student_accounts.js",
+        "student.js",
         "style.css",
     ):
         digest.update((BASE_DIR / "static" / filename).read_bytes())
@@ -179,6 +199,11 @@ MISTRAL_MODEL_CATALOG = (
     ("mistral-medium-latest", "Mistral Medium – ausgewogen"),
     ("mistral-large-latest", "Mistral Large – höchste Leistung"),
 )
+
+STUDENT_PROVIDER_LABELS = {
+    "mistral": "Mistral-Cloud-API",
+    "openai": "OpenAI-Cloud-API",
+}
 
 RUNPOD_DEFAULT_ENDPOINT_KEY = "standard"
 
@@ -270,9 +295,12 @@ app = FastAPI(
     ),
 )
 
+runtime_session_secret = _runtime_session_secret()
+
+
 app.add_middleware(
     SessionMiddleware,
-    secret_key=_runtime_session_secret(),
+    secret_key=runtime_session_secret,
     session_cookie=SESSION_COOKIE_NAME,
     max_age=settings.session_max_age_seconds,
     same_site="lax",
@@ -371,6 +399,13 @@ task_store = TaskStore(
     max_criterion_chars=settings.max_criterion_chars,
 )
 
+student_account_store = StudentAccountStore(
+    settings.analysis_database_path,
+    code_secret=runtime_session_secret,
+)
+
+student_analysis_gate = StudentAnalysisGate()
+
 runpod_status_service = RunPodStatusService(
     api_key=settings.runpod_api_key,
     idle_timeout_seconds=settings.runpod_idle_timeout_seconds,
@@ -381,6 +416,13 @@ runpod_job_store = RunPodJobStore(
 )
 
 login_rate_limiter = LoginRateLimiter(
+    max_attempts=settings.login_rate_limit_attempts,
+    window_seconds=(
+        settings.login_rate_limit_window_seconds
+    ),
+)
+
+student_login_rate_limiter = LoginRateLimiter(
     max_attempts=settings.login_rate_limit_attempts,
     window_seconds=(
         settings.login_rate_limit_window_seconds
@@ -906,6 +948,110 @@ def _redirect_to_login() -> RedirectResponse:
     )
 
 
+def _redirect_to_student_portal() -> RedirectResponse:
+    return RedirectResponse(
+        url="/schueler",
+        status_code=303,
+    )
+
+
+async def _authenticated_student_account(
+    request: Request,
+) -> StudentAccount | None:
+    """Prüft Konto-ID und aktuellen Aktivstatus jeder Schülersitzung."""
+
+    account_id = authenticated_student_account_id(request.session)
+    access_version = authenticated_student_access_version(request.session)
+
+    if account_id is None or access_version is None:
+        return None
+
+    account = await student_account_store.get_active_account(account_id)
+
+    if account is None or account.access_version != access_version:
+        request.session.clear()
+        return None
+
+    return account
+
+
+async def _student_accounts_response(
+    *,
+    request: Request,
+    authenticated_user: str,
+    issued_code: IssuedStudentAccessCode | None = None,
+    notice: str | None = None,
+    error: str | None = None,
+    status_code: int = 200,
+) -> Response:
+    try:
+        accounts = await student_account_store.list_accounts()
+    except StudentAccountStoreError as exc:
+        accounts = []
+        error = error or str(exc)
+        status_code = 500
+
+    return templates.TemplateResponse(
+        name="student_accounts.html",
+        request=request,
+        context={
+            "app_name": settings.app_name,
+            "authenticated_user": authenticated_user,
+            "csrf_token": get_or_create_csrf_token(request.session),
+            "accounts": accounts,
+            "issued_code": issued_code,
+            "notice": notice,
+            "error": error,
+            "max_label_chars": MAX_STUDENT_ACCOUNT_LABEL_CHARS,
+            "student_link": str(request.url_for("student_portal")),
+            "student_provider_label": STUDENT_PROVIDER_LABELS[
+                settings.student_feedback_provider
+            ],
+        },
+        status_code=status_code,
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+def _student_login_context(
+    request: Request,
+    *,
+    error: str | None = None,
+) -> dict[str, object]:
+    return {
+        "app_name": settings.app_name,
+        "authenticated_user": None,
+        "csrf_token": get_or_create_csrf_token(request.session),
+        "error": error,
+    }
+
+
+def _student_portal_context(
+    *,
+    request: Request,
+    account: StudentAccount,
+    tasks: list[FeedbackTask],
+    selected_task_id: str = "",
+    student_text: str = "",
+    result: RubricFeedbackResult | None = None,
+    error: str | None = None,
+    storage_warning: str | None = None,
+) -> dict[str, object]:
+    return {
+        "app_name": settings.app_name,
+        "authenticated_user": None,
+        "student_account": account,
+        "csrf_token": get_or_create_csrf_token(request.session),
+        "task_options": tasks,
+        "selected_task_id": selected_task_id,
+        "student_text": student_text,
+        "result": result,
+        "error": error,
+        "storage_warning": storage_warning,
+        "max_input_chars": settings.max_input_chars,
+    }
+
+
 def _login_client_key(request: Request) -> str:
     """Verwendet die von ASGI ermittelte Client-Adresse."""
     if request.client is None:
@@ -1387,6 +1533,394 @@ async def logout(
     end_authenticated_session(request.session)
 
     return _redirect_to_login()
+
+
+@app.get("/schuelerzugange", response_class=HTMLResponse)
+async def student_accounts_page(
+    request: Request,
+    notice: str = Query(default="", max_length=32),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    notice_messages = {
+        "activated": "Das Schülerkonto wurde aktiviert.",
+        "disabled": "Das Schülerkonto wurde deaktiviert.",
+        "deleted": "Das Schülerkonto wurde gelöscht.",
+    }
+    return await _student_accounts_response(
+        request=request,
+        authenticated_user=authenticated_user,
+        notice=notice_messages.get(notice),
+    )
+
+
+@app.post("/schuelerzugange/new", response_class=HTMLResponse)
+async def create_student_account(
+    request: Request,
+    label: str = Form("", max_length=MAX_STUDENT_ACCOUNT_LABEL_CHARS),
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        issued_code = await student_account_store.create_account(label)
+    except (ValueError, StudentAccountConflictError) as exc:
+        return await _student_accounts_response(
+            request=request,
+            authenticated_user=authenticated_user,
+            error=str(exc),
+            status_code=422,
+        )
+    except StudentAccountStoreError as exc:
+        return await _student_accounts_response(
+            request=request,
+            authenticated_user=authenticated_user,
+            error=str(exc),
+            status_code=500,
+        )
+
+    return await _student_accounts_response(
+        request=request,
+        authenticated_user=authenticated_user,
+        issued_code=issued_code,
+        notice=(
+            "Das Schülerkonto wurde erstellt. Kopiere den Code jetzt; "
+            "er wird nicht im Klartext gespeichert."
+        ),
+    )
+
+
+@app.post(
+    "/schuelerzugange/{account_id}/new-code",
+    response_class=HTMLResponse,
+)
+async def issue_new_student_access_code(
+    request: Request,
+    account_id: str,
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    authenticated_user = _authenticated_user(request)
+
+    if authenticated_user is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        issued_code = await student_account_store.issue_new_code(account_id)
+    except StudentAccountNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except StudentAccountStoreError as exc:
+        return await _student_accounts_response(
+            request=request,
+            authenticated_user=authenticated_user,
+            error=str(exc),
+            status_code=500,
+        )
+
+    return await _student_accounts_response(
+        request=request,
+        authenticated_user=authenticated_user,
+        issued_code=issued_code,
+        notice=(
+            "Der bisherige Code ist ab sofort ungültig. Kopiere den neuen "
+            "Code jetzt; er wird nicht im Klartext gespeichert."
+        ),
+    )
+
+
+@app.post("/schuelerzugange/{account_id}/status")
+async def set_student_account_status(
+    request: Request,
+    account_id: str,
+    active: bool = Form(...),
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        await student_account_store.set_account_active(
+            account_id,
+            active=active,
+        )
+    except StudentAccountNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return RedirectResponse(
+        url=(
+            "/schuelerzugange?notice="
+            f"{'activated' if active else 'disabled'}"
+        ),
+        status_code=303,
+    )
+
+
+@app.post("/schuelerzugange/{account_id}/delete")
+async def delete_student_account(
+    request: Request,
+    account_id: str,
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    if _authenticated_user(request) is None:
+        return _redirect_to_login()
+
+    _require_valid_csrf_token(request, csrf_token)
+
+    try:
+        await student_account_store.delete_account(account_id)
+    except StudentAccountNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return RedirectResponse(
+        url="/schuelerzugange?notice=deleted",
+        status_code=303,
+    )
+
+
+@app.get("/schueler", response_class=HTMLResponse)
+async def student_portal(request: Request) -> Response:
+    try:
+        account = await _authenticated_student_account(request)
+    except StudentAccountStoreError:
+        account = None
+
+    if account is None:
+        return templates.TemplateResponse(
+            name="student_login.html",
+            request=request,
+            context=_student_login_context(request),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    try:
+        tasks = await task_store.list_tasks()
+        default_task_id = await task_store.get_default_feedback_task_id()
+    except TaskStoreError:
+        tasks = []
+        default_task_id = None
+
+    active_task_ids = {task.task_id for task in tasks}
+    selected_task_id = (
+        default_task_id
+        if default_task_id in active_task_ids
+        else tasks[0].task_id if tasks else ""
+    )
+    return templates.TemplateResponse(
+        name="student_portal.html",
+        request=request,
+        context=_student_portal_context(
+            request=request,
+            account=account,
+            tasks=tasks,
+            selected_task_id=selected_task_id,
+            error=(
+                None
+                if tasks
+                else "Momentan ist keine Feedback-Vorlage verfügbar."
+            ),
+        ),
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/schueler/login", response_class=HTMLResponse)
+async def student_login(
+    request: Request,
+    access_code: str = Form("", max_length=6),
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    _require_valid_csrf_token(request, csrf_token)
+    client_key = _login_client_key(request)
+    retry_after = student_login_rate_limiter.retry_after_seconds(client_key)
+
+    if retry_after is not None:
+        return templates.TemplateResponse(
+            name="student_login.html",
+            request=request,
+            context=_student_login_context(
+                request,
+                error=(
+                    "Zu viele fehlgeschlagene Anmeldeversuche. Bitte "
+                    "versuche es später erneut."
+                ),
+            ),
+            status_code=429,
+            headers={
+                "Retry-After": str(retry_after),
+                "Cache-Control": "no-store",
+            },
+        )
+
+    try:
+        account = await student_account_store.authenticate_code(access_code)
+    except StudentAccountStoreError:
+        return templates.TemplateResponse(
+            name="student_login.html",
+            request=request,
+            context=_student_login_context(
+                request,
+                error=(
+                    "Der Schülerzugang kann momentan nicht geprüft werden. "
+                    "Bitte versuche es später erneut."
+                ),
+            ),
+            status_code=503,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    if account is None:
+        student_login_rate_limiter.record_failure(client_key)
+        return templates.TemplateResponse(
+            name="student_login.html",
+            request=request,
+            context=_student_login_context(
+                request,
+                error="Der sechsstellige Zugangscode ist ungültig.",
+            ),
+            status_code=401,
+            headers={"Cache-Control": "no-store"},
+        )
+
+    student_login_rate_limiter.reset(client_key)
+    start_student_session(
+        request.session,
+        account.account_id,
+        account.access_version,
+    )
+    return _redirect_to_student_portal()
+
+
+@app.post("/schueler/logout")
+async def student_logout(
+    request: Request,
+    csrf_token: str = Form("", max_length=256),
+) -> RedirectResponse:
+    _require_valid_csrf_token(request, csrf_token)
+    end_authenticated_session(request.session)
+    return _redirect_to_student_portal()
+
+
+@app.post("/schueler/analyze", response_class=HTMLResponse)
+async def analyze_student_text(
+    request: Request,
+    student_text: str = Form(...),
+    task_id: str = Form(..., max_length=100),
+    csrf_token: str = Form("", max_length=256),
+) -> Response:
+    try:
+        account = await _authenticated_student_account(request)
+    except StudentAccountStoreError:
+        account = None
+
+    if account is None:
+        return _redirect_to_student_portal()
+
+    _require_valid_csrf_token(request, csrf_token)
+    result: RubricFeedbackResult | None = None
+    error: str | None = None
+    storage_warning: str | None = None
+    selected_task_id = task_id.strip()
+
+    try:
+        cleaned_text = student_text.strip()
+
+        if not cleaned_text:
+            raise ValueError("Bitte gib deinen Text ein.")
+
+        if len(cleaned_text) > settings.max_input_chars:
+            raise ValueError(
+                "Dein Text ist zu lang. Erlaubt sind maximal "
+                f"{settings.max_input_chars} Zeichen."
+            )
+
+        selected_task = await task_store.get_task(selected_task_id)
+
+        if selected_task is None:
+            raise ValueError(
+                "Die ausgewählte Feedback-Vorlage ist nicht verfügbar."
+            )
+
+        async with student_analysis_gate.reserve(account.account_id):
+            result = await criterion_wise_rubric_feedback_service.analyze_text(
+                student_text=cleaned_text,
+                task=selected_task,
+                provider_key=settings.student_feedback_provider,
+            )
+
+            try:
+                await task_store.save_feedback_run(
+                    task=selected_task,
+                    student_text=cleaned_text,
+                    provider=result.provider,
+                    model=result.model,
+                    duration_ms=result.duration_ms,
+                    feedback_payload=result.payload(),
+                    provider_request_id=result.provider_request_id,
+                    queue_duration_ms=result.queue_duration_ms,
+                    execution_duration_ms=result.execution_duration_ms,
+                    reasoning_effort=result.reasoning_effort,
+                )
+            except TaskStoreError:
+                storage_warning = (
+                    "Dein Feedback wurde erstellt, aber die technischen "
+                    "Laufdaten konnten nicht gespeichert werden."
+                )
+    except (ValueError, StudentAnalysisInProgressError) as exc:
+        error = str(exc)
+    except Exception as exc:
+        logger.error(
+            "Schülerfeedback fehlgeschlagen "
+            "(account_id=%s, provider=%s, task_id=%s, error_type=%s).",
+            account.account_id,
+            settings.student_feedback_provider,
+            selected_task_id,
+            type(exc).__name__,
+        )
+        error = (
+            "Das Feedback konnte momentan nicht erstellt werden. Bitte "
+            "versuche es später erneut oder wende dich an deine Lehrkraft."
+        )
+
+    try:
+        tasks = await task_store.list_tasks()
+    except TaskStoreError:
+        tasks = []
+
+    context = _student_portal_context(
+        request=request,
+        account=account,
+        tasks=tasks,
+        selected_task_id=selected_task_id,
+        student_text=student_text,
+        result=result,
+        error=error,
+        storage_warning=storage_warning,
+    )
+    template_name = (
+        "student_analysis_response.html"
+        if request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        else "student_portal.html"
+    )
+    return templates.TemplateResponse(
+        name=template_name,
+        request=request,
+        context=context,
+        headers={
+            "Cache-Control": "no-store",
+            "X-Analysis-Outcome": "error" if error else "success",
+        },
+    )
 
 
 @app.get("/feedback-evaluations", response_class=HTMLResponse)

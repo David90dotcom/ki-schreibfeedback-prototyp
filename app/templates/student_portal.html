@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+
+{% block scripts %}
+<script
+    src="{{ url_for('static', path='/student.js') }}?v={{ static_asset_version }}"
+    defer
+></script>
+{% endblock %}
+
+{% block header_description %}
+    Wähle deine Aufgabe aus und erhalte Hinweise zur Überarbeitung deines Textes.
+{% endblock %}
+
+{% block content %}
+
+<section class="card student-workspace">
+    <h2>Dein Schreibfeedback</h2>
+    <p>
+        Wähle die passende Aufgabe aus und füge deinen Text ein. Verwende
+        keine Namen oder anderen persönlichen Angaben.
+    </p>
+
+    <form id="student-analysis-form" method="post" action="/schueler/analyze">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <label for="student-task-id">Aufgabe</label>
+        <select
+            id="student-task-id"
+            name="task_id"
+            {% if not task_options %}disabled{% endif %}
+            required
+        >
+            {% if not task_options %}
+                <option value="">Keine Vorlage verfügbar</option>
+            {% endif %}
+            {% for task in task_options %}
+                <option
+                    value="{{ task.task_id }}"
+                    {% if task.task_id == selected_task_id %}selected{% endif %}
+                >
+                    {{ task.title }}
+                    {% if task.subject %} · {{ task.subject }}{% endif %}
+                    {% if task.grade_level %} · Stufe {{ task.grade_level }}{% endif %}
+                </option>
+            {% endfor %}
+        </select>
+
+        <div class="student-task-previews" aria-live="polite">
+            {% for task in task_options %}
+                <section
+                    class="student-task-preview"
+                    data-student-task-preview="{{ task.task_id }}"
+                    {% if task.task_id != selected_task_id %}hidden{% endif %}
+                >
+                    <h3>{{ task.title }}</h3>
+                    {% if task.instructions %}
+                        <h4>Aufgabenstellung</h4>
+                        <p class="preformatted-value">{{ task.instructions }}</p>
+                    {% endif %}
+                    {% if task.material %}
+                        <details>
+                            <summary>Material anzeigen</summary>
+                            <p class="preformatted-value">{{ task.material }}</p>
+                        </details>
+                    {% endif %}
+                </section>
+            {% endfor %}
+        </div>
+
+        <label for="student-text">Dein Text</label>
+        <textarea
+            id="student-text"
+            name="student_text"
+            rows="14"
+            maxlength="{{ max_input_chars }}"
+            required
+        >{{ student_text }}</textarea>
+        <p class="hint">
+            Maximal {{ max_input_chars }} Zeichen. Der Text wird zur
+            Feedbackerzeugung an den serverseitig festgelegten KI-Dienst
+            übertragen und in den technischen Laufdaten nur als Prüfsumme
+            gespeichert.
+        </p>
+
+        <button
+            id="student-submit-button"
+            type="submit"
+            {% if not task_options %}disabled{% endif %}
+        >Feedback erstellen</button>
+
+        <div
+            id="student-analysis-loading"
+            class="loading-indicator"
+            role="status"
+            aria-live="polite"
+            hidden
+        >
+            <div class="loading-bar" aria-hidden="true"><span></span></div>
+            <p class="loading-message">Dein Text wird geprüft …</p>
+            <p class="loading-hint">
+                Die Kriterien werden nacheinander analysiert. Bitte lass
+                dieses Fenster geöffnet.
+            </p>
+        </div>
+    </form>
+</section>
+
+<div
+    id="student-analysis-response"
+    class="analysis-response student-analysis-response"
+    aria-live="polite"
+>
+    {% include "student_analysis_response.html" %}
+</div>
+
+{% endblock %}

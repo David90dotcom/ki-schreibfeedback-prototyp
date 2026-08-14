@@ -29,8 +29,10 @@
                 <h1>{{ app_name }}</h1>
 
                 <p>
-                    Minimaler Prototyp zur vergleichenden Analyse
-                    lokaler und cloudbasierter Sprachmodelle.
+                    {% block header_description %}
+                        Minimaler Prototyp zur vergleichenden Analyse
+                        lokaler und cloudbasierter Sprachmodelle.
+                    {% endblock %}
                 </p>
             </div>
 
@@ -53,6 +55,10 @@
                             class="meta-navigation-link"
                             {% if request.url.path.startswith("/feedback-evaluations") %}aria-current="page"{% endif %}
                         >Feedback-Bewertung</a>
+                        <a
+                            href="/schuelerzugange"
+                            {% if request.url.path.startswith("/schuelerzugange") %}aria-current="page"{% endif %}
+                        >Schülerzugänge</a>
                     </nav>
 
                     <div class="session-controls">
@@ -75,6 +81,27 @@
                             </button>
                         </form>
                     </div>
+                </div>
+            {% elif student_account %}
+                <div class="session-controls">
+                    <span>
+                        Zugang {{ student_account.label }}
+                    </span>
+
+                    <form method="post" action="/schueler/logout">
+                        <input
+                            type="hidden"
+                            name="csrf_token"
+                            value="{{ csrf_token }}"
+                        >
+
+                        <button
+                            class="secondary-button logout-button"
+                            type="submit"
+                        >
+                            Abmelden
+                        </button>
+                    </form>
                 </div>
             {% endif %}
         </header>

@@ -5,15 +5,20 @@ import unittest
 from pwdlib import PasswordHash
 
 from app.security import (
+    AUTHENTICATED_STUDENT_ACCESS_VERSION_SESSION_KEY,
+    AUTHENTICATED_STUDENT_SESSION_KEY,
     AUTHENTICATED_USER_SESSION_KEY,
     CSRF_TOKEN_SESSION_KEY,
     LoginRateLimiter,
+    authenticated_student_account_id,
+    authenticated_student_access_version,
     authenticated_username,
     end_authenticated_session,
     get_or_create_csrf_token,
     is_valid_csrf_token,
     is_authenticated,
     start_authenticated_session,
+    start_student_session,
     verify_credentials,
 )
 
@@ -95,6 +100,31 @@ class SecurityTests(unittest.TestCase):
 
         self.assertEqual(session, {})
         self.assertIsNone(authenticated_username(session))
+
+    def test_student_session_is_separate_from_admin_session(self) -> None:
+        session: dict[str, object] = {
+            AUTHENTICATED_USER_SESSION_KEY: self.username,
+        }
+
+        start_student_session(session, "student-account-1", 3)
+
+        self.assertEqual(
+            session,
+            {
+                AUTHENTICATED_STUDENT_SESSION_KEY: "student-account-1",
+                AUTHENTICATED_STUDENT_ACCESS_VERSION_SESSION_KEY: 3,
+            },
+        )
+        self.assertEqual(
+            authenticated_student_account_id(session),
+            "student-account-1",
+        )
+        self.assertEqual(
+            authenticated_student_access_version(session),
+            3,
+        )
+        self.assertIsNone(authenticated_username(session))
+        self.assertFalse(is_authenticated(session, self.username))
 
     def test_csrf_token_is_stored_and_verified(self) -> None:
         session: dict[str, object] = {}
@@ -188,3 +218,5 @@ class SecurityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+    authenticated_student_account_id,
+    authenticated_student_access_version,

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from app.config import _configured_student_feedback_provider
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -23,6 +27,45 @@ class DeploymentConfigurationTests(unittest.TestCase):
         )
 
         self.assertNotIn('"443:443/udp"', compose)
+
+    def test_example_environment_uses_safe_student_provider(self) -> None:
+        example_environment = (PROJECT_ROOT / ".env.example").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "STUDENT_FEEDBACK_PROVIDER=mistral",
+            example_environment,
+        )
+        self.assertNotIn(
+            "STUDENT_FEEDBACK_PROVIDER=runpod",
+            example_environment,
+        )
+
+    def test_student_portal_rejects_local_and_runpod_providers(self) -> None:
+        for provider in ("ollama", "runpod", "unbekannt"):
+            with (
+                self.subTest(provider=provider),
+                patch.dict(
+                    os.environ,
+                    {"STUDENT_FEEDBACK_PROVIDER": provider},
+                ),
+                self.assertRaises(ValueError),
+            ):
+                _configured_student_feedback_provider()
+
+        for provider in ("mistral", "openai"):
+            with (
+                self.subTest(provider=provider),
+                patch.dict(
+                    os.environ,
+                    {"STUDENT_FEEDBACK_PROVIDER": provider},
+                ),
+            ):
+                self.assertEqual(
+                    _configured_student_feedback_provider(),
+                    provider,
+                )
 
 
 if __name__ == "__main__":

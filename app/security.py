@@ -13,6 +13,10 @@ from pwdlib.exceptions import UnknownHashError
 
 
 AUTHENTICATED_USER_SESSION_KEY = "authenticated_user"
+AUTHENTICATED_STUDENT_SESSION_KEY = "authenticated_student_account_id"
+AUTHENTICATED_STUDENT_ACCESS_VERSION_SESSION_KEY = (
+    "authenticated_student_access_version"
+)
 CSRF_TOKEN_SESSION_KEY = "csrf_token"
 
 _PASSWORD_HASHER = PasswordHash.recommended()
@@ -172,6 +176,46 @@ def start_authenticated_session(
     """Ersetzt alte Sitzungsdaten durch den angemeldeten Benutzer."""
     session.clear()
     session[AUTHENTICATED_USER_SESSION_KEY] = username
+
+
+def start_student_session(
+    session: MutableMapping[str, object],
+    account_id: str,
+    access_version: int,
+) -> None:
+    """Ersetzt alte Sitzungsdaten durch genau ein Schülerkonto."""
+    session.clear()
+    session[AUTHENTICATED_STUDENT_SESSION_KEY] = account_id
+    session[AUTHENTICATED_STUDENT_ACCESS_VERSION_SESSION_KEY] = (
+        access_version
+    )
+
+
+def authenticated_student_account_id(
+    session: Mapping[str, object],
+) -> str | None:
+    """Liest die pseudonyme Konto-ID einer Schülersitzung."""
+    account_id = session.get(AUTHENTICATED_STUDENT_SESSION_KEY)
+
+    if not isinstance(account_id, str) or not account_id:
+        return None
+
+    return account_id
+
+
+def authenticated_student_access_version(
+    session: Mapping[str, object],
+) -> int | None:
+    """Liest die beim Codelogin gültige Zugangsversion."""
+
+    access_version = session.get(
+        AUTHENTICATED_STUDENT_ACCESS_VERSION_SESSION_KEY
+    )
+
+    if type(access_version) is not int or access_version <= 0:
+        return None
+
+    return access_version
 
 
 def authenticated_username(

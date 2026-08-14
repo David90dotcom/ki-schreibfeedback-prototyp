@@ -1,0 +1,44 @@
+{% if error %}
+<section class="card error" data-student-analysis-error>
+    <h2>Feedback nicht verfügbar</h2>
+    <p>{{ error }}</p>
+</section>
+{% endif %}
+
+{% if storage_warning %}
+<section class="card persistence-warning">
+    <h2>Hinweis</h2>
+    <p>{{ storage_warning }}</p>
+</section>
+{% endif %}
+
+{% if result %}
+<section class="card result student-result" data-student-analysis-result>
+    <h2>Dein Feedback</h2>
+
+    {% if result.evidence_warnings %}
+        <section class="analysis-evidence-warning" role="status">
+            <h3>Ein Hinweis zur Auswertung</h3>
+            <p>
+                Mindestens eine Rückmeldung konnte nicht sicher an deinem
+                Text überprüft werden und ist deshalb als „Nicht
+                beurteilbar“ markiert. Prüfe diesen Punkt zusätzlich selbst
+                oder frage deine Lehrkraft.
+            </p>
+        </section>
+    {% endif %}
+
+    <div class="criterion-feedback-list">
+        {% for item in result.criteria_feedback %}
+            {% set criterion_position = loop.index %}
+            {% set feedback_run_id = none %}
+            {% include "criterion_feedback_card.html" %}
+        {% endfor %}
+    </div>
+
+    <section class="overall-feedback">
+        <h3>Zusammenfassung</h3>
+        <p>{{ result.overall_feedback | feedback_inline_markdown }}</p>
+    </section>
+</section>
+{% endif %}

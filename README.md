@@ -1,6 +1,6 @@
 # KI-Schreibfeedback-Prototyp 1.0.0-rc1
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Mistral-Small-3.2-24B-Modell über RunPod Serverless. Version 1.0.0-rc1 verwendet eine frei festlegbare Standard-Kriterienvorlage und die kriterienweise Einzelanalyse als übersichtlichen Normalbetrieb. Gemeinsame Analyse, Zwei-Pass-Prüfung, kriterienloses Gesamtfeedback, freie Modell-IDs und technische Verbindungsoptionen bleiben über „Erweiterte Forschungsoptionen anzeigen“ für gezielte Vergleiche erhalten.
+Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Mistral-Small-3.2-24B-Modell über RunPod Serverless. Version 1.0.0-rc1 verwendet eine frei festlegbare Standard-Kriterienvorlage und die kriterienweise Einzelanalyse als übersichtlichen Normalbetrieb. Eine additive Schüleransicht ermöglicht pseudonyme Zugänge per sechsstelligem Code, ohne Provider- oder Forschungsoptionen offenzulegen. Gemeinsame Analyse, Zwei-Pass-Prüfung, kriterienloses Gesamtfeedback, freie Modell-IDs und technische Verbindungsoptionen bleiben im Prüferbereich über „Erweiterte Forschungsoptionen anzeigen“ für gezielte Vergleiche erhalten.
 
 > **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
 
@@ -18,7 +18,7 @@ Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der 
 | **0.9b** | abgeschlossen | Manuelle Qualitätsbewertung mit vier Kriterien, Begründungen, versioniertem Bogen und eigenständiger Bewertungshistorie |
 | **0.9c** | abgeschlossen | Optionale automatische Cloud-Vorbewertung mit festem Referenzmodell, detaillierter Evidenzprüfung und anschließender manueller Korrektur als eigener Datensatz |
 | **0.10** | experimenteller Testzweig | Vergleich von gemeinsamer, kriterienweiser und Zwei-Pass-Analyse mit getrennter Quellenrolle und technischer Belegprüfung |
-| **1.0.0-rc1** | Release Candidate | Konfigurierbare Standard-Kriterienvorlage, kriterienweise Analyse als Normalmodus und aufgeräumte Oberfläche mit optionalen Forschungsfunktionen |
+| **1.0.0-rc1** | Release Candidate | Konfigurierbare Standard-Kriterienvorlage, kriterienweise Analyse als Normalmodus, aufgeräumte Forschungsoberfläche und rollengetrennte Schüleransicht mit sechsstelligen Zugangscodes |
 
 Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Version 0.6.0 ist der neue stabile Standard; Modell-Payload und vLLM-Startkonfiguration bleiben gegenüber 0.5.0 unverändert.
 
@@ -26,19 +26,20 @@ Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Versio
 
 ```mermaid
 flowchart TD
-    A["Browser: HTTPS"] --> B["Caddy: TLS und Reverse Proxy"]
-    B --> C["FastAPI: Login und Sitzungsschutz"]
+    A["Prüfer-Browser: HTTPS"] --> B["Caddy: TLS und Reverse Proxy"]
+    A2["Schüler-Browser: /schueler"] --> B
+    B --> C["FastAPI: Prüfer- und Codesitzungen"]
     C --> D["Feedback-Service"]
     D --> E["RunPod Serverless: vLLM + Mistral Small 3.2 24B FP8"]
     D --> F["OpenAI API (optional)"]
     D --> G["Ollama (nur lokal)"]
     D --> H["Mistral API (optional)"]
-    C --> I["SQLite: Aufgaben, Feedback-Vorlagen und Feedbackläufe"]
+    C --> I["SQLite: Aufgaben, Feedback-Vorlagen, Schülerkonten und Feedbackläufe"]
     I --> J["Optionale Meta-Ebene: manuelle und automatische Bewertungen"]
     J --> K["OpenAI: getrenntes Bewertungsmodell (optional)"]
 ```
 
-Startseite und Analysefunktion sind nur nach erfolgreicher Anmeldung erreichbar. Zugangsdaten werden serverseitig gegen einen Argon2-Passworthash geprüft. RunPod-API-Key, Endpoint-ID und weitere Secrets werden ausschließlich serverseitig aus der `.env` gelesen und nicht an den Browser übertragen.
+Prüferbereich und reguläre Analysefunktion sind nur nach Anmeldung mit dem konfigurierten Prüferkonto erreichbar. Diese Zugangsdaten werden serverseitig gegen einen Argon2-Passworthash geprüft. Die getrennte Schüleransicht unter `/schueler` akzeptiert ausschließlich aktive sechsstellige Codes. RunPod-API-Key, Endpoint-ID und weitere Secrets werden ausschließlich serverseitig aus der `.env` gelesen und nicht an den Browser übertragen.
 
 Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und Mistral können serverseitige Standard-Keys hinterlegt werden. Browserseitige Provider- und Key-Overrides sind ausschließlich im lokalen Entwicklungsmodus erlaubt. OpenAI ist in der Textanalyse vorausgewählt; Mistral, RunPod und im lokalen Modus Ollama bleiben direkt auswählbar.
 
@@ -50,6 +51,13 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 - Zugriffsschutz für Startseite und Analysefunktion
 - Begrenzung wiederholter fehlgeschlagener Loginversuche pro erkanntem Client
 - CSRF-Schutz für Login, Logout und Analyseformular
+- getrennte Schüleransicht unter `/schueler` mit rollengetrennter Sitzung
+- beliebig viele pseudonym bezeichnete Schülerkonten, verwaltet durch das Prüferkonto
+- automatisch erzeugte sechsstellige Codes, die nur einmal angezeigt und ausschließlich als HMAC-SHA-256-Prüfwert gespeichert werden
+- sofortige Deaktivierung, Reaktivierung, Code-Erneuerung und Löschung einzelner Schülerkonten
+- ausschließlich aktive Feedback-Vorlagen in der Schüleransicht; keine Provider-, Modell-, Meta- oder Forschungsoptionen
+- serverseitig festgelegter Schülerprovider über `STUDENT_FEEDBACK_PROVIDER`, standardmäßig Mistral
+- Sperre paralleler Feedbackläufe desselben Schülerkontos gegen Mehrfachklicks und unnötige Cloudkosten
 - Eingabe eines anonymisierten, abgetippten Beispieltexts
 - Erstellen, Bearbeiten, Duplizieren und Löschen von Aufgaben mit jeweils einer Feedback-Vorlage
 - bis zu 100 geordnete Feedback-Kriterien pro Vorlage
@@ -155,6 +163,7 @@ SESSION_SECRET=<erzeugtes Sitzungs-Secret>
 SESSION_MAX_AGE_SECONDS=3600
 LOGIN_RATE_LIMIT_ATTEMPTS=5
 LOGIN_RATE_LIMIT_WINDOW_SECONDS=300
+STUDENT_FEEDBACK_PROVIDER=mistral
 
 OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_DEFAULT_MODEL=mistral-small3.2:24b-instruct-2506-q8_0
@@ -191,6 +200,12 @@ Für allgemeine JSON-Aufgaben erscheint nach der Auswahl in der Textanalyse zus�
 Ein eigener Bereich für eine ausformulierte Modelllösung oder einen Erwartungshorizont ist in diesem Teststand noch nicht vorhanden. Kurze verbindliche Erwartungspunkte gehören deshalb in das jeweils passende Feedback-Kriterium. Das Feld „Originaltext für diesen Lauf“ bleibt ausschließlich der Primärquelle vorbehalten, beispielsweise dem Gedicht, und darf nicht für eine Modelllösung verwendet werden. Eine vollständige Referenzlösung sollte auch nicht ersatzweise in das Aufgabenmaterial kopiert werden: Gerade schwächere Modelle könnten sie trotz Prompt-Trennung als Schülerleistung oder als zwingend nachzuahmende Formulierung behandeln. Ein künftiges optionales Feld müsste sie daher als eigene Quellenrolle kennzeichnen und ausdrücklich festlegen, dass Abweichungen nicht automatisch Fehler sind.
 
 Für Versuche sind standardmäßig bis zu 100 Einzelkriterien mit jeweils 10.000 Zeichen möglich. Beide Schutzgrenzen lassen sich in der lokalen `.env` über `MAX_CRITERIA` und `MAX_CRITERION_CHARS` anpassen. Sehr umfangreiche Vorlagen können unabhängig davon die Kontextgrenze des ausgewählten Sprachmodells überschreiten.
+
+## Schüleransicht verwenden
+
+Das Prüferkonto verwaltet unter „Schülerzugänge“ pseudonyme Konten. Beim Erstellen beziehungsweise bei einer Code-Erneuerung wird genau einmal ein zufälliger sechsstelliger Code angezeigt. Der Code muss in diesem Moment kopiert und getrennt an die betreffende Person weitergegeben werden; die Anwendung speichert ihn nicht im Klartext. Verlorene Codes werden nicht ausgelesen, sondern ersetzt. Eine Code-Erneuerung, Deaktivierung oder Löschung beendet bei der nächsten Anfrage auch bereits bestehende Sitzungen des betreffenden Kontos.
+
+Schülerinnen und Schüler öffnen `/schueler`, geben ausschließlich den Code ein und sehen danach nur aktive Aufgaben, Aufgabenstellung, Material, Texteingabe und das erzeugte Kriterienfeedback. Die Provider- und Modellauswahl bleibt vollständig serverseitig. `STUDENT_FEEDBACK_PROVIDER=mistral` nutzt das über `MISTRAL_API_KEY` und `MISTRAL_DEFAULT_MODEL` konfigurierte Modell; alternativ ist `openai` zulässig. Ollama und RunPod sind für diese vereinfachte Oberfläche bewusst nicht erlaubt. Die kriterienweise Analyse entspricht dem Normalverfahren des Prüferbereichs. Technische Laufdaten und eine Prüfsumme des Textes werden gespeichert, der Schülertext selbst jedoch nicht im Klartext. Gleichzeitig kann pro Schülerkonto höchstens ein Feedbacklauf aktiv sein.
 
 Die strukturierte Modellantwort wird vollständig validiert: Jede im jeweiligen Aufruf erwartete Kriterien-ID muss genau einmal vorkommen; unbekannte, doppelte oder fehlende Kriterien werden abgelehnt. Der versionierte Kriterienprompt `rubric-feedback-v4-grounded-complete-criteria` trennt Schülertext, Aufgabe, Material, laufbezogenen Originaltext und Kriterien ausdrücklich nach ihrer Quellenrolle. Kriterien gelten auch bei Formulierungen wie „Du hast …“ ausschließlich als Anforderungen und niemals als Beleg für eine Schülerleistung. Ein mehrteiliges Kriterium darf nur dann als vollständig erfüllt gelten, wenn sämtliche Teilanforderungen geprüft wurden; eine einzelne gefundene Stärke genügt nicht. Für jeden fachlich beurteilbaren Status von „Erfüllt“ bis „Nicht erfüllt“ soll das Modell mindestens einen kurzen wörtlichen Ausschnitt aus dem Schülertext liefern. Kann es keinen Beleg sicher kopieren, wird es ausdrücklich zu „Nicht beurteilbar“, einer leeren Belegliste und einem neutralen Kontrollhinweis ohne erfundene Überarbeitungsempfehlung angewiesen. Fehlt trotz des strikten Schemas ein nicht leerer nächster Schritt, übernimmt die Anwendung einen neutralen Hinweis, statt den gesamten Lauf abzubrechen oder selbst einen fachlichen Schritt zu erfinden.
 
@@ -280,7 +295,7 @@ Für den Prüfungsbetrieb gelten drei voneinander unabhängige Zeitwerte:
 | Endpoint-Ausführungslimit | `600 s` in RunPod | Maximale Laufzeit eines bereits übernommenen Modellauftrags. |
 | Endpoint-Idle-Timeout | `5 s` in RunPod | Der Worker wird nach einem Auftrag möglichst schnell beendet. |
 
-`RUNPOD_IDLE_TIMEOUT_SECONDS=5` dokumentiert den in der RunPod-Konsole einzustellenden Wert; die Web-App kann das externe Endpoint-Setting nicht selbst verändern. Außerhalb eines beaufsichtigten Tests bleibt `Maximum workers = 0`. Für einen einzelnen Test wird es vorübergehend auf `1` gesetzt und danach wieder auf `0` zurückgestellt.
+`RUNPOD_IDLE_TIMEOUT_SECONDS=5` dokumentiert den in der RunPod-Konsole einzustellenden Wert; die Web-App kann das externe Endpoint-Setting nicht selbst verändern. Für den Prüferzugang gilt dauerhaft `Minimum workers = 0` und `Maximum workers = 1`: Es läuft damit kein ständig aktiver Worker, zugleich kann höchstens ein Worker Kosten verursachen. Die reduzierte Schüleransicht verwendet RunPod nicht.
 
 Die Health-API funktioniert mit der normalen Queue-Berechtigung. Für die sichtbare Supply-Momentaufnahme und die intern weiterhin vorhandenen technischen Workerdaten benötigt der API-Key zusätzlich lesenden Zugriff auf den GPU-Katalog beziehungsweise die Serverless-Worker-API. Fehlt diese Berechtigung, zeigt die Anwendung „Nicht abrufbar“ und erfindet keine Hardwarezuordnung. Weitere Einzelheiten stehen in [RunPod-Transparenz in Version 0.6](docs/runpod-transparenz-v0.6.md).
 
@@ -296,7 +311,26 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der aktuelle Entwicklungsstand umfasst 189 erfolgreiche Tests. Sie decken zusätzlich zur bisherigen Browser- und Providerauswahl die SQLite-Verwaltung von Aufgaben und Feedback-Vorlagen, die persistente und wechselbare Standard-Kriterienvorlage, den kriterienweisen Serverstandard, Kriterienreihenfolge, Duplizieren, Löschen und Archivieren, strukturierte Kriterienantworten, die Trennung der Quellenrollen, technisch validierte Schülertextbelege, zeichensetzungstolerante Wortfolgen, die sichere Ersetzung fehlender oder erfundener Einzelbelege ohne vollständigen Laufabbruch, den versionierten Standardfeedback-Prompt, die ausgeblendete technische Speicherung kontextarmer Standardläufe, die explizite Auswahl von Feedbackläufen, additive Datenbankmigrationen, versionierte und optional benannte Mehrfachbewertungen, das geschützte Einzellöschen, den getrennten OpenAI-Responses-Aufruf ohne API-Speicherung, die detaillierte Prompt- und Schema-Validierung, automatische Vorbewertungen, deren Verknüpfung mit manuellen Korrekturen, die GPT-5.6-Modell- und Reasoning-Auswahl, fehlerfreie Abbrüche ohne Teil-Datensatz sowie Anmeldung und CSRF-Schutz der neuen Routen ab. Architektur- und JavaScript-Syntaxprüfung sind ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der aktuelle Entwicklungsstand umfasst 211 erfolgreiche Tests und 51
+erfolgreiche Subtests. Sie decken zusätzlich zur bisherigen Browser- und
+Providerauswahl die SQLite-Verwaltung von Aufgaben und Feedback-Vorlagen, die
+persistente und wechselbare Standard-Kriterienvorlage, den kriterienweisen
+Serverstandard, Kriterienreihenfolge, Duplizieren, Löschen und Archivieren,
+strukturierte Kriterienantworten, die Trennung der Quellenrollen, technisch
+validierte Schülertextbelege, zeichensetzungstolerante Wortfolgen, die sichere
+Ersetzung fehlender oder erfundener Einzelbelege ohne vollständigen
+Laufabbruch, den versionierten Standardfeedback-Prompt, die ausgeblendete
+Technikspeicherung kontextarmer Standardläufe, die explizite Auswahl von
+Feedbackläufen, additive Datenbankmigrationen, versionierte und optional
+benannte Mehrfachbewertungen, das geschützte Einzellöschen, den getrennten
+OpenAI-Responses-Aufruf ohne API-Speicherung, die detaillierte Prompt- und
+Schema-Validierung, automatische Vorbewertungen, deren Verknüpfung mit
+manuellen Korrekturen, die GPT-5.6-Modell- und Reasoning-Auswahl sowie die
+rollengetrennten, rate-limitierten und CSRF-geschützten Schülerzugänge ab. Die
+Schülerkontentests prüfen zusätzlich Einmalcode-Ausgabe, Speicherung ohne
+Klartext, sofortige Sperrung, Code-Erneuerung, Providerfestlegung und die
+Sperre paralleler Läufe. Architektur- und JavaScript-Syntaxprüfung sind
+ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 
@@ -308,7 +342,7 @@ Die Modellantwort wird in Version 0.6 mit einer engen, sicheren Markdown-Konfigu
 
 ## Sicherheit und Datenschutz
 
-- Die Anmeldung verwendet ein einzelnes, serverseitig konfiguriertes Prüferkonto. In der `.env` wird nur der Argon2-Hash des Passworts gespeichert.
+- Die Administration verwendet ein einzelnes, serverseitig konfiguriertes Prüferkonto. In der `.env` wird nur der Argon2-Hash des Passworts gespeichert. Schülerkonten besitzen keine Benutzernamen oder Passwörter; ihre sechsstelligen Codes werden nur als keyed HMAC-Prüfwerte gespeichert.
 - Das signierte Sitzungscookie ist `HttpOnly`, verwendet `SameSite=Lax` und läuft standardmäßig nach 3.600 Sekunden ab. In den HTTPS-Modi wird zusätzlich das `Secure`-Attribut gesetzt.
 - Login, Logout und Analyseformular verwenden sitzungsgebundene CSRF-Tokens. Fehlende oder manipulierte Tokens werden mit HTTP 403 abgewiesen.
 - Standardmäßig sind nach fünf fehlgeschlagenen Anmeldungen pro erkanntem Client für fünf Minuten keine weiteren Versuche möglich. Der Zähler liegt im Arbeitsspeicher und wird bei einem Serverneustart zurückgesetzt; verteilte Angriffe werden dadurch allein nicht vollständig verhindert.

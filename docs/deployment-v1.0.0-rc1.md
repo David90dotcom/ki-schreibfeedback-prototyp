@@ -13,7 +13,8 @@ Dieser Ablauf verwendet ausschließlich den vorhandenen automatischen 48-GB-GPU-
 | Lokales Ollama-Modell | `mistral-small3.2:24b-instruct-2506-q8_0` |
 | Serverless-Endpoint | automatischer Pool kompatibler 48-GB-GPUs |
 | Dedizierte Endpoints | nicht Bestandteil der endgültigen Anwendung |
-| Sicherheitsgrenze | 15 Minuten Job-TTL, 10 Minuten Ausführung, 5 Sekunden Idle |
+| Sicherheitsgrenze | 15 Minuten Job-TTL, 10 Minuten Ausführung, 5 Sekunden Idle, höchstens ein Worker |
+| Schüleransicht | `/schueler`, fester Provider `mistral`, sechsstellige Einmalcodes |
 
 Die FP8-Variante umfasst ungefähr 25,8 GB Modellgewichte. Das offizielle BF16-/FP16-Modell benötigt ungefähr 55 GB GPU-Speicher und passt deshalb nicht in die vorhandene Einzel-GPU-Strategie mit 32 beziehungsweise 48 GB. Die Quantisierungsform wird in den Versuchsdaten dokumentiert: lokal Q8 über Ollama, Serverless FP8 über vLLM.
 
@@ -49,7 +50,7 @@ Container disk: 60 GB
 GPU-Pool: L40, L40S und RTX 6000 Ada mit jeweils 48 GB
 ```
 
-Der automatische Pool erhöht die Chance, dass Prüfer trotz schwankender GPU-Supply einen Worker erhalten. Welche GPU einen Auftrag tatsächlich übernimmt, wird zusammen mit den Laufzeitwerten dokumentiert. Jeder App-Auftrag setzt zusätzlich `policy.ttl=900000` und `policy.executionTimeout=600000`. Außerhalb eines beaufsichtigten Tests bleibt `Maximum workers = 0`; nur für den einzelnen Test wird es kurzzeitig auf `1` gesetzt.
+Der automatische Pool erhöht die Chance, dass Prüfer trotz schwankender GPU-Supply einen Worker erhalten. Welche GPU einen Auftrag tatsächlich übernimmt, wird zusammen mit den Laufzeitwerten dokumentiert. Jeder App-Auftrag setzt zusätzlich `policy.ttl=900000` und `policy.executionTimeout=600000`. Für den Prüferzugang bleibt `Minimum workers = 0` und `Maximum workers = 1`; dadurch startet kein dauerhaft aktiver Worker und es kann zugleich niemals mehr als ein Worker abrechnen. Die Schüleransicht verwendet RunPod nicht.
 
 ## 3. RunPod vor der Umschaltung prüfen
 
@@ -57,8 +58,8 @@ Der automatische Pool erhöht die Chance, dass Prüfer trotz schwankender GPU-Su
 2. Beim automatischen Pool unter „Requests“ den Inhalt von `runpod_worker/test_input.json` absenden.
 3. Prüfen, dass der Job `COMPLETED` erreicht und unter `choices[0].message.content` ein JSON-Objekt mit dem Feld `feedback` zurückkommt.
 4. Queue-Zeit, tatsächliche GPU, Ausführungszeit und Worker-Logs dokumentieren.
-5. Nach dem Test die Queue kontrollieren und `Maximum workers` sofort wieder auf `0` setzen.
-6. Prüfen, dass kein Worker `Running` oder `Initializing` bleibt.
+5. Nach dem Test die Queue kontrollieren; `Maximum workers = 1` bleibt für den Prüferzugang bestehen, `Minimum workers = 0` verhindert einen dauerhaft aktiven Worker.
+6. Nach dem Idle Timeout prüfen, dass kein Worker `Running` oder `Initializing` bleibt.
 
 Erst nach diesem Test wird DigitalOcean umgestellt. Schlägt bereits der Start mit `CUDA out of memory` fehl, zunächst einen 48-GB-Pool verwenden und `MAX_MODEL_LEN` nicht erhöhen.
 
@@ -76,7 +77,7 @@ git status --short
 `git status --short` muss leer bleiben. Vor dem Container-Neubau eine SQLite-Sicherung innerhalb des persistenten Volumes anlegen:
 
 ```bash
-docker compose exec -T web python -c 'import sqlite3; source=sqlite3.connect("/app/data/analysis_runs.sqlite3"); target=sqlite3.connect("/app/data/analysis_runs-pre-1.0.0-rc1.sqlite3"); source.backup(target); target.close(); source.close()'
+sudo docker compose exec -T web python -c 'import sqlite3; source=sqlite3.connect("/app/data/analysis_runs.sqlite3"); target=sqlite3.connect("/app/data/analysis_runs-pre-1.0.0-rc1.sqlite3"); source.backup(target); target.close(); source.close()'
 ```
 
 Anschließend in der serverseitigen `.env` ausschließlich die ID des Pools eintragen:
@@ -86,6 +87,7 @@ RUNPOD_ENDPOINT_ID=<Endpoint-ID des automatischen Pools>
 RUNPOD_DEFAULT_MODEL=RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8
 RUNPOD_JOB_TIMEOUT_SECONDS=900
 RUNPOD_IDLE_TIMEOUT_SECONDS=5
+STUDENT_FEEDBACK_PROVIDER=mistral
 ```
 
 API-Key, Passwort-Hash und Sitzungs-Secret bleiben unverändert. Die `.env` darf weder angezeigt noch eingecheckt werden.
@@ -95,11 +97,11 @@ API-Key, Passwort-Hash und Sitzungs-Secret bleiben unverändert. Die `.env` darf
 Zuerst die Compose-Datei ohne Ausgabe der Secrets validieren, dann das Web-Image neu bauen und die Dienste aktualisieren:
 
 ```bash
-docker compose config --quiet
-docker compose build --pull web
-docker compose up -d --remove-orphans
-docker compose ps
-docker compose logs --tail=100 web caddy
+sudo docker compose config --quiet
+sudo docker compose build --pull web
+sudo docker compose up -d --remove-orphans
+sudo docker compose ps
+sudo docker compose logs --tail=100 web caddy
 ```
 
 Der Login-Endpunkt muss über HTTPS erreichbar sein:
@@ -117,7 +119,7 @@ TCP-basierte HTTP/2-Verbindung vermeidet diesen verwaisten Browserzustand.
 Nach einer Änderung muss die aktive Caddy-Konfiguration validiert werden:
 
 ```bash
-docker compose exec -T caddy \
+sudo docker compose exec -T caddy \
   caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 curl --http2 --silent --show-error --output /dev/null \
   --write-out 'HTTP-Version: %{http_version}\n' \
@@ -140,6 +142,10 @@ In der produktiven Oberfläche nacheinander prüfen:
 10. Manuelle Bewertung und PDF-Export funktionieren.
 11. Automatische Meta-Vorbewertung wird nur nach dem ausdrücklichen Cloud-Klick gestartet.
 12. Daten und Standardvorlage bleiben nach einem Container-Neustart erhalten.
+13. Unter „Schülerzugänge“ lässt sich ein pseudonymes Konto erstellen; der sechsstellige Code erscheint genau einmal.
+14. Der Code öffnet `/schueler`, dort werden nur aktive Vorlagen, Texteingabe und Schülerfeedback angezeigt.
+15. Eine Schüleranalyse verwendet den fest konfigurierten Mistral-Provider; Provider- und Forschungsoptionen fehlen vollständig.
+16. Nach der Deaktivierung verliert auch eine bereits angemeldete Schülersitzung bei der nächsten Anfrage den Zugriff.
 
 Zusätzlich Modellname, Gesamtdauer, Queue-Zeit und Ausführungszeit für die Bachelorarbeit notieren.
 
@@ -148,8 +154,8 @@ Zusätzlich Modellname, Gesamtdauer, Queue-Zeit und Ausführungszeit für die Ba
 Falls das neue Serverless-Modell nicht stabil läuft, bleibt die neue Web-App bestehen. In der DigitalOcean-`.env` werden lediglich die vorherige Endpoint-ID und der dazu passende frühere Modellname wiederhergestellt. Danach genügt:
 
 ```bash
-docker compose up -d --force-recreate web
-docker compose logs --tail=100 web
+sudo docker compose up -d --force-recreate web
+sudo docker compose logs --tail=100 web
 ```
 
 Die SQLite-Sicherung wird nur benötigt, falls unabhängig vom Modellwechsel ein Datenbankproblem festgestellt wird. Sie wird nicht vorsorglich über die aktuelle Datenbank kopiert.

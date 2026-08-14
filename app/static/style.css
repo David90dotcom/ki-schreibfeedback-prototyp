@@ -153,6 +153,119 @@ body {
     border-radius: 10px;
 }
 
+.login-alternative {
+    margin: 22px 0 0;
+    padding-top: 18px;
+    color: var(--muted);
+    border-top: 1px solid var(--border);
+}
+
+.student-code-input {
+    font-size: 1.35rem;
+    font-weight: 700;
+    letter-spacing: 0.35em;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+.issued-code-card {
+    background: var(--success-bg);
+    border-color: var(--success-border);
+}
+
+.issued-code-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 14px;
+}
+
+.issued-code {
+    padding: 10px 16px;
+    color: #065f46;
+    font-size: 1.7rem;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    background: #ffffff;
+    border: 1px solid var(--success-border);
+    border-radius: 10px;
+    font-variant-numeric: tabular-nums;
+}
+
+.student-account-list {
+    display: grid;
+    gap: 16px;
+}
+
+.student-account-card {
+    margin-bottom: 0;
+}
+
+.student-account-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+}
+
+.student-account-heading h2 {
+    margin: 0;
+}
+
+.student-account-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+.student-account-actions form,
+.student-account-actions button {
+    margin: 0;
+}
+
+.student-workspace > h2 {
+    margin-bottom: 4px;
+}
+
+.student-task-previews {
+    margin-top: 14px;
+}
+
+.student-task-preview {
+    padding: 16px;
+    background: #f8fafc;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+}
+
+.student-task-preview[hidden] {
+    display: none;
+}
+
+.student-task-preview h3,
+.student-task-preview h4 {
+    margin-top: 0;
+}
+
+.student-task-preview h4 {
+    margin-bottom: 5px;
+    font-size: 0.95rem;
+}
+
+.student-task-preview details {
+    margin-top: 14px;
+}
+
+.student-task-preview summary {
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.student-result > h2 {
+    margin-bottom: 18px;
+}
+
 label {
     display: block;
     margin: 18px 0 8px;

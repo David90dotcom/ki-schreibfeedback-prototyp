@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+
+{% block scripts %}
+<script
+    src="{{ url_for('static', path='/student_accounts.js') }}?v={{ static_asset_version }}"
+    defer
+></script>
+{% endblock %}
+
+{% block content %}
+
+<section class="card management-header">
+    <div>
+        <h2>Schülerzugänge</h2>
+        <p class="hint">
+            Erstelle pseudonyme Zugänge für die reduzierte Schüleransicht.
+            Die Anmeldung erfolgt ausschließlich mit einem sechsstelligen
+            Code unter:
+            <a
+                class="text-link"
+                href="{{ student_link }}"
+                target="_blank"
+                rel="noopener"
+            >{{ student_link }}</a>
+        </p>
+        <p class="hint">
+            Schüleranalysen verwenden serverseitig {{ student_provider_label }}.
+            Provider-, Modell- und Forschungsoptionen bleiben verborgen.
+            Verwende zum Testen des Codes ein privates Browserfenster, damit
+            die bestehende Prüfersitzung erhalten bleibt.
+        </p>
+    </div>
+</section>
+
+{% if notice %}
+<section class="card notice-success" role="status">
+    <p>{{ notice }}</p>
+</section>
+{% endif %}
+
+{% if issued_code %}
+<section class="card issued-code-card" role="status">
+    <h2>Neuer Zugangscode</h2>
+    <p>
+        Konto: <strong>{{ issued_code.account.label }}</strong>
+    </p>
+    <div class="issued-code-row">
+        <output
+            class="issued-code"
+            data-issued-code
+        >{{ issued_code.access_code }}</output>
+        <button
+            class="secondary-button compact-button"
+            type="button"
+            data-copy-issued-code
+        >Code kopieren</button>
+    </div>
+    <p class="hint">
+        Dieser Code wird nur jetzt angezeigt. Bei Verlust kann jederzeit ein
+        neuer Code erzeugt werden; der bisherige wird dann sofort ungültig.
+    </p>
+</section>
+{% endif %}
+
+{% if error %}
+<section class="card error" role="alert">
+    <h2>Fehler</h2>
+    <p>{{ error }}</p>
+</section>
+{% endif %}
+
+<section class="card">
+    <h2>Neues Konto erstellen</h2>
+    <form method="post" action="/schuelerzugange/new">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+        <label for="student-account-label">Pseudonyme Bezeichnung</label>
+        <input
+            id="student-account-label"
+            name="label"
+            type="text"
+            maxlength="{{ max_label_chars }}"
+            placeholder="z. B. Testperson 01"
+            autocomplete="off"
+            required
+        >
+        <p class="hint">
+            Verwende möglichst keine Klarnamen oder anderen personenbezogenen
+            Angaben.
+        </p>
+
+        <button type="submit">Konto und Code erstellen</button>
+    </form>
+</section>
+
+{% if accounts %}
+<section class="student-account-list" aria-label="Vorhandene Schülerkonten">
+    {% for account in accounts %}
+        <article class="card student-account-card">
+            <div class="student-account-heading">
+                <div>
+                    <h2>{{ account.label }}</h2>
+                    <p class="hint">
+                        Erstellt {{ account.created_at | datetime_utc }}
+                        {% if account.last_login_at %}
+                            · Letzte Anmeldung {{ account.last_login_at | datetime_utc }}
+                        {% else %}
+                            · Noch nicht angemeldet
+                        {% endif %}
+                    </p>
+                </div>
+
+                <span class="status-badge {% if account.is_active %}status-success{% else %}status-neutral{% endif %}">
+                    {% if account.is_active %}Aktiv{% else %}Deaktiviert{% endif %}
+                </span>
+            </div>
+
+            <div class="student-account-actions">
+                <form
+                    method="post"
+                    action="/schuelerzugange/{{ account.account_id }}/new-code"
+                    data-confirm-new-code
+                    data-account-label="{{ account.label }}"
+                >
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="secondary-button" type="submit">
+                        Neuen Code erzeugen
+                    </button>
+                </form>
+
+                <form
+                    method="post"
+                    action="/schuelerzugange/{{ account.account_id }}/status"
+                >
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input
+                        type="hidden"
+                        name="active"
+                        value="{% if account.is_active %}false{% else %}true{% endif %}"
+                    >
+                    <button class="secondary-button" type="submit">
+                        {% if account.is_active %}Deaktivieren{% else %}Aktivieren{% endif %}
+                    </button>
+                </form>
+
+                <form
+                    method="post"
+                    action="/schuelerzugange/{{ account.account_id }}/delete"
+                    data-confirm-student-account-delete
+                    data-account-label="{{ account.label }}"
+                >
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button class="danger-button" type="submit">
+                        Konto löschen
+                    </button>
+                </form>
+            </div>
+        </article>
+    {% endfor %}
+</section>
+{% else %}
+<section class="card">
+    <p class="hint">Noch keine Schülerkonten angelegt.</p>
+</section>
+{% endif %}
+
+{% endblock %}

@@ -22,7 +22,7 @@ async def run_checks() -> None:
     print("Prüfe die neue Version-0.3-Architektur")
     print("Es werden keine Modell-APIs aufgerufen.\n")
 
-    print("[1/7] Python-Importe")
+    print("[1/8] Python-Importe")
 
     from app.config import settings
     from app.domain.analysis import AnalysisPayload
@@ -42,13 +42,14 @@ async def run_checks() -> None:
     )
     from app.services.analysis_service import AnalysisService
     from app.services.metrics_service import MetricsService
+    from app.services.student_account_store import StudentAccountStore
 
     _ = AnalysisService
     _ = MetricsService
 
     print("      OK")
 
-    print("[2/7] YAML-Datei laden")
+    print("[2/8] YAML-Datei laden")
 
     if not MODEL_CATALOG_PATH.is_file():
         raise FileNotFoundError(
@@ -71,7 +72,7 @@ async def run_checks() -> None:
 
     print("      OK")
 
-    print("[3/7] Provider und Modelle validieren")
+    print("[3/8] Provider und Modelle validieren")
 
     raw_providers = catalog_data.get("providers")
     raw_models = catalog_data.get("models")
@@ -115,7 +116,7 @@ async def run_checks() -> None:
         f"{len(models)} Modelle"
     )
 
-    print("[4/7] ModelRegistry aufbauen")
+    print("[4/8] ModelRegistry aufbauen")
 
     registry = load_model_registry(
         MODEL_CATALOG_PATH
@@ -128,7 +129,7 @@ async def run_checks() -> None:
 
     print("      OK")
 
-    print("[5/7] Strukturiertes Analyseformat erzeugen")
+    print("[5/8] Strukturiertes Analyseformat erzeugen")
 
     analysis_schema: dict[str, Any] = (
         AnalysisPayload.model_json_schema()
@@ -141,7 +142,7 @@ async def run_checks() -> None:
 
     print("      OK")
 
-    print("[6/7] Provider-Factory konfigurieren")
+    print("[6/8] Provider-Factory konfigurieren")
 
     provider_factory = create_default_provider_factory(
         settings
@@ -169,7 +170,7 @@ async def run_checks() -> None:
 
     await provider_factory.close_all()
 
-    print("[7/7] Austauschbaren Analysespeicher prüfen")
+    print("[7/8] Austauschbaren Analysespeicher prüfen")
 
     with tempfile.TemporaryDirectory() as temporary_directory:
         database_path = (
@@ -195,6 +196,36 @@ async def run_checks() -> None:
         if not database_path.is_file():
             raise RuntimeError(
                 "Die Testdatenbank wurde nicht angelegt."
+            )
+
+    print("      OK")
+
+    print("[8/8] Rollengetrennten Schülerzugang prüfen")
+
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        database_path = (
+            Path(temporary_directory)
+            / "student-access-test.sqlite3"
+        )
+        student_store = StudentAccountStore(
+            database_path,
+            code_secret="architecture-check-only",
+            code_factory=lambda: "123456",
+        )
+        issued_code = await student_store.create_account(
+            "Architekturtest"
+        )
+        authenticated_account = await student_store.authenticate_code(
+            issued_code.access_code
+        )
+
+        if (
+            authenticated_account is None
+            or authenticated_account.account_id
+            != issued_code.account.account_id
+        ):
+            raise RuntimeError(
+                "Der rollengetrennte Schülerzugang ist nicht funktionsfähig."
             )
 
     print("      OK")

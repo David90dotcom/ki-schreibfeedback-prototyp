@@ -17,6 +17,11 @@ VALID_APP_MODES = {
     APP_MODE_PRODUCTION,
 }
 
+VALID_STUDENT_FEEDBACK_PROVIDERS = {
+    "mistral",
+    "openai",
+}
+
 OLLAMA_DEFAULT_MODEL = (
     "mistral-small3.2:24b-instruct-2506-q8_0"
 )
@@ -68,6 +73,26 @@ def _configured_app_mode() -> str:
         )
 
     return app_mode
+
+
+def _configured_student_feedback_provider() -> str:
+    """Begrenzt die Schüleransicht auf stabile Cloudprovider."""
+
+    provider = os.getenv(
+        "STUDENT_FEEDBACK_PROVIDER",
+        "mistral",
+    ).strip().lower()
+
+    if provider not in VALID_STUDENT_FEEDBACK_PROVIDERS:
+        allowed_values = ", ".join(
+            sorted(VALID_STUDENT_FEEDBACK_PROVIDERS)
+        )
+        raise ValueError(
+            "STUDENT_FEEDBACK_PROVIDER muss einen der folgenden Werte "
+            f"haben: {allowed_values}."
+        )
+
+    return provider
 
 
 def _positive_int_from_env(
@@ -170,6 +195,10 @@ class Settings:
             "LOGIN_RATE_LIMIT_WINDOW_SECONDS",
             300,
         )
+    )
+
+    student_feedback_provider: str = (
+        _configured_student_feedback_provider()
     )
 
     ollama_base_url: str = _first_configured_value(
