@@ -108,6 +108,22 @@ Der Login-Endpunkt muss über HTTPS erreichbar sein:
 curl --fail --silent --show-error --output /dev/null https://llm-lernlabor.de/login
 ```
 
+Der Reverse-Proxy akzeptiert für HTTPS ausschließlich HTTP/1.1 und HTTP/2.
+HTTP/3 bleibt bewusst deaktiviert, weil die in einem Test beobachtete
+QUIC-Verbindung einen noch aktiven, länger als 60 Sekunden wartenden
+RunPod-Aufruf mit `504 timeout: no recent network activity` vom Browser
+getrennt hat. Die Modellanfrage lief dabei bei RunPod weiter. Die
+TCP-basierte HTTP/2-Verbindung vermeidet diesen verwaisten Browserzustand.
+Nach einer Änderung muss die aktive Caddy-Konfiguration validiert werden:
+
+```bash
+docker compose exec -T caddy \
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+curl --http2 --silent --show-error --output /dev/null \
+  --write-out 'HTTP-Version: %{http_version}\n' \
+  https://llm-lernlabor.de/login
+```
+
 ## 6. Ende-zu-Ende-Abnahme
 
 In der produktiven Oberfläche nacheinander prüfen:

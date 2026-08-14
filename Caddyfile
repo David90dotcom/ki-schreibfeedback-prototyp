@@ -1,3 +1,9 @@
+{
+	servers :443 {
+		protocols h1 h2
+	}
+}
+
 www.llm-lernlabor.de {
 	redir https://llm-lernlabor.de{uri} permanent
 }
