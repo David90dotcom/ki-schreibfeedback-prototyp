@@ -262,34 +262,6 @@ models:
       max_output_tokens: 4000
       reasoning_effort: null
 
-  - id: mistral-ministral-14b-2512
-    provider_id: mistral
-    provider_model_name: ministral-14b-2512
-    display_name: Ministral 3 14B
-    description: Kleineres Mistral-Cloudmodell als zusätzlicher Vergleich zum lokalen 24B-Standardmodell.
-    role: feedback
-    enabled: true
-
-    capabilities:
-      streaming: true
-      structured_output: true
-      native_json_schema: true
-      reasoning: false
-      reasoning_efforts: []
-      input_token_usage: true
-      output_token_usage: true
-      reasoning_token_usage: false
-      cached_input_token_usage: false
-      cache_write_token_usage: false
-      provider_timing: false
-      time_to_first_token: true
-      cost_tracking: true
-
-    default_parameters:
-      temperature: 0.15
-      max_output_tokens: 4000
-      reasoning_effort: null
-
   - id: mistral-medium-latest
     provider_id: mistral
     provider_model_name: mistral-medium-latest

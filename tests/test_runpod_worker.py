@@ -13,8 +13,8 @@ from runpod_worker.worker import (
 
 class RunPodWorkerTests(unittest.TestCase):
     MODEL_NAME = (
-        "ministral-3:"
-        "14b-instruct-2512-q8_0"
+        "mistral-small3.2:"
+        "24b-instruct-2506-q8_0"
     )
 
     def setUp(self) -> None:

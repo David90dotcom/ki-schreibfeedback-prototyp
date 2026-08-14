@@ -34,7 +34,7 @@ class OllamaProviderTests(unittest.IsolatedAsyncioTestCase):
         ) as client_class:
             provider = OllamaProvider(
                 base_url="http://localhost:11434",
-                model_name="ministral-3:14b-instruct-2512-q8_0",
+                model_name="mistral-small3.2:24b-instruct-2506-q8_0",
             )
             result = await provider.generate(
                 "JSON-Testprompt",

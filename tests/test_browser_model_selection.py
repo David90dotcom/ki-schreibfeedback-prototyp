@@ -192,11 +192,8 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn("Max – maximale Denktiefe", response.text)
         self.assertIn(main.settings.mistral_model, response.text)
         self.assertIn('value="mistral"', response.text)
-        self.assertIn('value="ministral-14b-2512"', response.text)
-        self.assertIn(
-            "Ministral 3 14B – kleineres Vergleichsmodell",
-            response.text,
-        )
+        retired_model_id = "ministral-" + "14b-2512"
+        self.assertNotIn(retired_model_id, response.text)
         self.assertIn("Mistral Small – günstig", response.text)
         self.assertIn("Mistral Medium – ausgewogen", response.text)
         self.assertIn("Mistral Large – höchste Leistung", response.text)

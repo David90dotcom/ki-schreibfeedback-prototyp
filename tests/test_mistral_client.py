@@ -85,7 +85,7 @@ class MistralProviderTests(unittest.IsolatedAsyncioTestCase):
         ):
             provider = MistralProvider(
                 api_key="test-mistral-key",
-                model_name="ministral-14b-2512",
+                model_name="mistral-small-latest",
             )
             await provider.generate(
                 "JSON-Testprompt",

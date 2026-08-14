@@ -30,10 +30,6 @@ RUNPOD_VLLM_MODEL = (
     "RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8"
 )
 
-LEGACY_RUNPOD_OLLAMA_MODEL = (
-    "ministral-3:14b-instruct-2512-q8_0"
-)
-
 def _first_configured_value(*names: str, fallback: str) -> str:
     """Liefert den ersten nicht leeren Wert aus der .env-Datei."""
     for name in names:
@@ -45,18 +41,13 @@ def _first_configured_value(*names: str, fallback: str) -> str:
     return fallback
 
 def _configured_runpod_model() -> str:
-    """Migriert die frühere Ollama-ID auf die vLLM-Modell-ID."""
+    """Liest die festgelegte vLLM-Modell-ID des RunPod-Endpoints."""
 
-    value = _first_configured_value(
+    return _first_configured_value(
         "RUNPOD_DEFAULT_MODEL",
         "RUNPOD_MODEL",
         fallback=RUNPOD_VLLM_MODEL,
     )
-
-    if value == LEGACY_RUNPOD_OLLAMA_MODEL:
-        return RUNPOD_VLLM_MODEL
-
-    return value
 
 def _configured_app_mode() -> str:
     """Liest und validiert den zentralen Betriebsmodus."""
