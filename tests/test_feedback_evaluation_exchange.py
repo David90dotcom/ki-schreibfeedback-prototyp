@@ -168,10 +168,23 @@ class FeedbackEvaluationExchangeServiceTests(unittest.TestCase):
         )
 
         self.assertEqual(len(rows), 2)
-        self.assertEqual(rows[0]["feedback_duration_ms"], "12345")
-        self.assertEqual(rows[0]["feedback_model"], "lokales-testmodell")
-        self.assertEqual(rows[0]["score_factual_correctness"], "3")
-        self.assertEqual(rows[0]["average_score"], "2.25")
+        rows_by_type = {
+            row["evaluation_type"]: row
+            for row in rows
+        }
+        automatic_row = rows_by_type["automatic"]
+        manual_row = rows_by_type["manual"]
+        self.assertEqual(automatic_row["feedback_duration_ms"], "12345")
+        self.assertEqual(
+            automatic_row["feedback_model"],
+            "lokales-testmodell",
+        )
+        self.assertEqual(
+            automatic_row["score_factual_correctness"],
+            "3",
+        )
+        self.assertEqual(automatic_row["average_score"], "2.0")
+        self.assertEqual(manual_row["average_score"], "2.25")
         self.assertNotIn(self.feedback_run.student_text, decoded)
         self.assertNotIn("Ausführlicher Feedbacktext", decoded)
         self.assertNotIn("Nicht für CSV bestimmte Begründung", decoded)
