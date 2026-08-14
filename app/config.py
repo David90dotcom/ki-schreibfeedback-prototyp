@@ -223,34 +223,10 @@ class Settings:
         os.getenv("RUNPOD_ENDPOINT_ID", "").strip() or None
     )
 
-    runpod_endpoint_rtx4090_id: str | None = (
-        os.getenv(
-            "RUNPOD_ENDPOINT_RTX4090_ID",
-            "",
-        ).strip()
-        or None
-    )
-
-    runpod_endpoint_rtx5090_id: str | None = (
-        os.getenv(
-            "RUNPOD_ENDPOINT_RTX5090_ID",
-            "",
-        ).strip()
-        or None
-    )
-
-    runpod_endpoint_rtx6000_ada_id: str | None = (
-        os.getenv(
-            "RUNPOD_ENDPOINT_RTX6000_ADA_ID",
-            "",
-        ).strip()
-        or None
-    )
-
     runpod_model: str = _configured_runpod_model()
 
     runpod_job_timeout_seconds: float = float(
-        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "1200")
+        os.getenv("RUNPOD_JOB_TIMEOUT_SECONDS", "900")
     )
 
     runpod_poll_interval_seconds: float = float(
@@ -259,7 +235,7 @@ class Settings:
 
     runpod_idle_timeout_seconds: int = _bounded_int_from_env(
         "RUNPOD_IDLE_TIMEOUT_SECONDS",
-        3600,
+        5,
         minimum=1,
         maximum=3600,
     )

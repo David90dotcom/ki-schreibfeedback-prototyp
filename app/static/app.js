@@ -351,12 +351,12 @@
             }
         });
 
-        if (
-            selectedProvider === "runpod" &&
-            advancedOptionsEnabled()
-        ) {
+        if (selectedProvider === "runpod") {
             void loadRunpodStatus();
-            void loadRunpodJobs();
+
+            if (advancedOptionsEnabled()) {
+                void loadRunpodJobs();
+            }
         }
 
         updateAdvancedOptionsVisibility();
@@ -2226,11 +2226,13 @@
 
         if (
             providerSelect.value === "runpod" &&
-            advancedOptionsEnabled() &&
             latestRunpodSnapshot === null
         ) {
             void loadRunpodStatus();
-            void loadRunpodJobs();
+
+            if (advancedOptionsEnabled()) {
+                void loadRunpodJobs();
+            }
         }
     });
 

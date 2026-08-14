@@ -194,27 +194,6 @@ RUNPOD_ENDPOINT_CATALOG = (
             "NVIDIA RTX 6000 Ada Generation",
         ),
     ),
-    (
-        "rtx4090_24gb",
-        "RTX 4090 – 24 GB",
-        "runpod_endpoint_rtx4090_id",
-        "RUNPOD_ENDPOINT_RTX4090_ID",
-        ("NVIDIA GeForce RTX 4090",),
-    ),
-    (
-        "rtx5090_32gb",
-        "RTX 5090 – 32 GB",
-        "runpod_endpoint_rtx5090_id",
-        "RUNPOD_ENDPOINT_RTX5090_ID",
-        ("NVIDIA GeForce RTX 5090",),
-    ),
-    (
-        "rtx6000ada_48gb",
-        "RTX 6000 Ada – 48 GB",
-        "runpod_endpoint_rtx6000_ada_id",
-        "RUNPOD_ENDPOINT_RTX6000_ADA_ID",
-        ("NVIDIA RTX 6000 Ada Generation",),
-    ),
 )
 
 

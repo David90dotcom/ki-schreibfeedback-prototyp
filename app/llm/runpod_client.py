@@ -38,6 +38,8 @@ from app.llm.errors import (
 
 
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
+RUNPOD_JOB_TTL_MS = 900_000
+RUNPOD_EXECUTION_TIMEOUT_MS = 600_000
 ACTIVE_JOB_STATUSES = {"IN_QUEUE", "IN_PROGRESS", "RUNNING"}
 TERMINAL_JOB_STATUSES = {
     "FAILED",
@@ -67,7 +69,7 @@ class RunPodProvider:
         api_key: str | None,
         endpoint_id: str | None,
         model_name: str,
-        job_timeout_seconds: float = 1200.0,
+        job_timeout_seconds: float = 900.0,
         poll_interval_seconds: float = 1.0,
         job_status_callback: RunPodJobStatusCallback | None = None,
     ) -> None:
@@ -150,7 +152,15 @@ class RunPodProvider:
                 url=self._url("run"),
                 model_name=request.model_name,
                 operation="run",
-                json_body={"input": self._worker_input(request)},
+                json_body={
+                    "input": self._worker_input(request),
+                    "policy": {
+                        "executionTimeout": (
+                            RUNPOD_EXECUTION_TIMEOUT_MS
+                        ),
+                        "ttl": RUNPOD_JOB_TTL_MS,
+                    },
+                },
             )
 
             job_id = submitted.get("id")

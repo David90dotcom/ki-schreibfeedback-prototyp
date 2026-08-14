@@ -121,11 +121,11 @@ class BrowserModelSelectionTests(unittest.TestCase):
         )
         self.assertIn('data-worker-count="throttled"', response.text)
         self.assertIn('data-worker-count="unhealthy"', response.text)
-        self.assertNotIn('id="runpod-supply-status"', response.text)
+        self.assertIn('id="runpod-supply-status"', response.text)
         self.assertNotIn('id="runpod-warm-window"', response.text)
-        self.assertNotIn('id="runpod-status-note"', response.text)
+        self.assertIn('id="runpod-status-note"', response.text)
         self.assertNotIn('id="runpod-worker-details"', response.text)
-        self.assertNotIn("GPU-Verfügbarkeit", response.text)
+        self.assertIn("GPU-Verfügbarkeit", response.text)
         self.assertNotIn("Warmhaltefenster", response.text)
         self.assertNotIn("Technische Workerdetails", response.text)
         self.assertIn('id="analysis-response"', response.text)
@@ -172,10 +172,12 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('value="criterion_wise"', response.text)
         self.assertIn('value="two_pass"', response.text)
         self.assertIn('value="runpod"', response.text)
+        self.assertIn('name="runpod_endpoint"', response.text)
+        self.assertNotIn('<select id="runpod-endpoint"', response.text)
         self.assertIn('value="standard"', response.text)
-        self.assertIn('value="rtx4090_24gb"', response.text)
-        self.assertIn('value="rtx5090_32gb"', response.text)
-        self.assertIn('value="rtx6000ada_48gb"', response.text)
+        self.assertNotIn('value="rtx4090_24gb"', response.text)
+        self.assertNotIn('value="rtx5090_32gb"', response.text)
+        self.assertNotIn('value="rtx6000ada_48gb"', response.text)
         self.assertIn(main.settings.ollama_base_url, response.text)
         self.assertIn(main.settings.openai_model, response.text)
         self.assertIn('value="gpt-5.6-luna"', response.text)
@@ -233,6 +235,10 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn("controller.abort()", script)
         self.assertIn(
             'providerSelect.value !== "runpod"',
+            script,
+        )
+        self.assertIn(
+            'if (selectedProvider === "runpod")',
             script,
         )
         self.assertNotIn("TWO_PASS_DEFAULT_PROVIDERS", script)
@@ -785,7 +791,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         )
         self.assertNotIn("warm-window-note", response.text)
         self.assertNotIn("data-runpod-result-details", response.text)
-        self.assertNotIn("GPU-Verfügbarkeit", response.text)
+        self.assertIn("GPU-Verfügbarkeit", response.text)
         self.assertNotIn("Technische Details", response.text)
         self.assertNotIn(standard_endpoint_id, response.text)
 
@@ -795,12 +801,12 @@ class BrowserModelSelectionTests(unittest.TestCase):
         endpoint_id = "status-endpoint-secret-test-only"
         runpod_settings = replace(
             main.settings,
-            runpod_endpoint_rtx4090_id=endpoint_id,
+            runpod_endpoint_id=endpoint_id,
         )
         snapshot = {
             "endpoint": {
-                "key": "rtx4090_24gb",
-                "label": "RTX 4090 – 24 GB",
+                "key": "standard",
+                "label": "RunPod Standard – automatischer 48-GB-GPU-Pool",
             },
             "checkedAt": "2026-08-09T12:00:00+00:00",
             "worker": {
@@ -832,7 +838,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         ):
             response = self.client.get(
                 "/api/runpod/status",
-                params={"endpoint_key": "rtx4090_24gb"},
+                params={"endpoint_key": "standard"},
             )
 
         self.assertEqual(response.status_code, 200)
@@ -843,10 +849,14 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertEqual(response.json(), snapshot)
         self.assertNotIn(endpoint_id, response.text)
         snapshot_mock.assert_awaited_once_with(
-            endpoint_key="rtx4090_24gb",
-            endpoint_label="RTX 4090 – 24 GB",
+            endpoint_key="standard",
+            endpoint_label="RunPod Standard – automatischer 48-GB-GPU-Pool",
             endpoint_id=endpoint_id,
-            gpu_type_ids=("NVIDIA GeForce RTX 4090",),
+            gpu_type_ids=(
+                "NVIDIA L40",
+                "NVIDIA L40S",
+                "NVIDIA RTX 6000 Ada Generation",
+            ),
         )
 
     def test_async_runpod_response_contains_transparent_metrics(
@@ -855,7 +865,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         endpoint_id = "async-endpoint-secret-test-only"
         runpod_settings = replace(
             main.settings,
-            runpod_endpoint_rtx4090_id=endpoint_id,
+            runpod_endpoint_id=endpoint_id,
         )
 
         async def fake_analyze_text(**kwargs: object) -> FeedbackResult:
@@ -884,7 +894,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
                 data={
                     "student_text": "Ein kurzer Beispieltext.",
                     "provider": "runpod",
-                    "runpod_endpoint": "rtx4090_24gb",
+                    "runpod_endpoint": "standard",
                     "csrf_token": self.csrf_token,
                 },
             )
@@ -904,88 +914,6 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertNotIn("keine garantierte Reservierung", response.text)
         self.assertNotIn("data-runpod-result-details", response.text)
         self.assertNotIn(endpoint_id, response.text)
-
-    def test_fixed_runpod_endpoints_are_mapped_server_side(self) -> None:
-        endpoint_mapping = {
-            "rtx4090_24gb": "endpoint-4090-test-only",
-            "rtx5090_32gb": "endpoint-5090-test-only",
-            "rtx6000ada_48gb": "endpoint-6000ada-test-only",
-        }
-        endpoint_labels = {
-            "rtx4090_24gb": "RTX 4090 – 24 GB",
-            "rtx5090_32gb": "RTX 5090 – 32 GB",
-            "rtx6000ada_48gb": "RTX 6000 Ada – 48 GB",
-        }
-        runpod_settings = replace(
-            main.settings,
-            runpod_endpoint_rtx4090_id=(
-                endpoint_mapping["rtx4090_24gb"]
-            ),
-            runpod_endpoint_rtx5090_id=(
-                endpoint_mapping["rtx5090_32gb"]
-            ),
-            runpod_endpoint_rtx6000_ada_id=(
-                endpoint_mapping["rtx6000ada_48gb"]
-            ),
-        )
-
-        for endpoint_key, expected_endpoint_id in (
-            endpoint_mapping.items()
-        ):
-            with self.subTest(endpoint_key=endpoint_key):
-                captured: dict[str, str | None] = {}
-
-                async def fake_analyze_text(
-                    **kwargs: object,
-                ) -> FeedbackResult:
-                    provider = kwargs["provider_override"]
-                    captured["endpoint_id"] = (
-                        provider.endpoint_id  # type: ignore[attr-defined]
-                    )
-
-                    return FeedbackResult(
-                        provider="runpod",
-                        model=runpod_settings.runpod_model,
-                        feedback="Zuordnungstest",
-                        duration_ms=1,
-                    )
-
-                with (
-                    patch.object(
-                        main,
-                        "settings",
-                        runpod_settings,
-                    ),
-                    patch.object(
-                        main.feedback_service,
-                        "analyze_text",
-                        new=AsyncMock(
-                            side_effect=fake_analyze_text
-                        ),
-                    ),
-                ):
-                    response = self.client.post(
-                        "/analyze",
-                        data={
-                            "student_text": "Zuordnungstest.",
-                            "provider": "runpod",
-                            "runpod_endpoint": endpoint_key,
-                            "csrf_token": self.csrf_token,
-                        },
-                    )
-
-                self.assertEqual(response.status_code, 200)
-                self.assertEqual(
-                    captured["endpoint_id"],
-                    expected_endpoint_id,
-                )
-                self.assertIn(
-                    endpoint_labels[endpoint_key],
-                    response.text,
-                )
-
-                for endpoint_id in endpoint_mapping.values():
-                    self.assertNotIn(endpoint_id, response.text)
 
     def test_unknown_runpod_endpoint_is_rejected(self) -> None:
         with patch.object(

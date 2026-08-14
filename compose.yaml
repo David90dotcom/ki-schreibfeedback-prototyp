@@ -13,8 +13,8 @@ services:
       APP_MODE: production
       ANALYSIS_DATABASE_PATH: /app/data/analysis_runs.sqlite3
       FORWARDED_ALLOW_IPS: "*"
-      RUNPOD_JOB_TIMEOUT_SECONDS: "1200"
-      RUNPOD_IDLE_TIMEOUT_SECONDS: "3600"
+      RUNPOD_JOB_TIMEOUT_SECONDS: "900"
+      RUNPOD_IDLE_TIMEOUT_SECONDS: "5"
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

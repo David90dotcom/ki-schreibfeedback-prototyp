@@ -1333,7 +1333,7 @@ class TaskManagementTests(unittest.TestCase):
                     "task_id": task.task_id,
                     "student_text": "Anonymisierter Schülertext",
                     "provider": "runpod",
-                    "runpod_endpoint": "standard",
+                    "runpod_endpoint": "rtx5090_32gb",
                     "runpod_tracking_id": (
                         "265d345e-1843-49af-b5aa-d875807fa504"
                     ),

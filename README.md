@@ -98,14 +98,14 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 - RunPod-Serverless-Worker mit vLLM und `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8`
 - Validierung von Modell, Eingabe, Ausgabeformat und erlaubten Generierungsoptionen im Worker
 - Anzeige von Provider, tatsächlich verwendetem Modell und Gesamtdauer
-- Auswahl zwischen Standard-Pool, RTX 4090, RTX 5090 und RTX 6000 Ada über serverseitig erlaubte Endpoint-IDs
-- kompakte RunPod-Betriebsbereitschaft mit Worker-Kapazität, Zeitpunkt und aggregierten Workerzahlen
+- ein automatischer 48-GB-GPU-Pool als einziger RunPod-Endpoint; keine dedizierten GPU-Endpunkte
+- kompakte RunPod-Betriebsbereitschaft mit automatisch abgerufenem GPU-Angebot, Worker-Kapazität, Zeitpunkt und aggregierten Workerzahlen
 - verständlicher Live-Status mit laufendem Zeitmesser während Queue, Cold Start und Modellverarbeitung
 - individueller Jobstatus mit Orange für `IN_QUEUE` und Grün erst ab `IN_PROGRESS` beziehungsweise `RUNNING`
 - persistente technische Registrierung aktiver RunPod-Jobs ohne Schülertext oder Prompt
 - eingeklappte Verwaltung zum gezielten Abbruch registrierter und manuell angegebener Altjobs
 - getrennte Anzeige von Gesamtzeit, RunPod-`delayTime` und RunPod-`executionTime`
-- intern beibehaltene, aber in der bereinigten GUI ausgeblendete Supply-, Warmhalte- und Workerdetaildaten
+- sichtbare Supply-Momentaufnahme; Warmhalte- und Workerdetaildaten bleiben in der bereinigten GUI ausgeblendet
 - Docker-Image für die FastAPI-Webanwendung und reproduzierbare Docker-Compose-Konfiguration
 - Caddy-Reverse-Proxy mit automatischem HTTPS und permanenter `www`-Weiterleitung
 - Container-Healthcheck, automatische Neustarts und begrenzte Logdateigrößen
@@ -264,11 +264,11 @@ Wie bei OpenAI wird im Produktionsbetrieb ausschließlich der serverseitige Key 
 
 ### RunPod Serverless
 
-Für RunPod werden ein vLLM-kompatibler Serverless-Endpoint sowie `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID` und `RUNPOD_DEFAULT_MODEL` in der `.env` benötigt.
+Für RunPod wird ausschließlich ein automatischer 48-GB-GPU-Pool über `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID` und `RUNPOD_DEFAULT_MODEL` konfiguriert. Dedizierte RTX-4090-, RTX-5090- und RTX-6000-Ada-Endpunkte gehören nicht zur endgültigen Anwendung. Der automatische Pool erhöht die Verfügbarkeit, erlaubt aber keine reproduzierbare Zuordnung eines Standardauftrags zu einem bestimmten Grafikkartenmodell.
 
 Das Zielmodell für Version 1.0 lautet `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8`. Es ist eine vLLM-kompatible FP8-Variante derselben Mistral-Small-3.2-24B-Modellgeneration wie das lokal über Ollama eingesetzte Q8-Modell. Das offizielle BF16-/FP16-Modell benötigt laut Modellkarte ungefähr 55 GB GPU-Speicher; die etwa 25,8 GB große FP8-Variante ermöglicht dagegen den vorgesehenen Betrieb auf 32- und 48-GB-GPUs. Eine RTX 4090 mit 24 GB ist für diesen Release nicht freigegeben und ihre Endpoint-ID soll leer bleiben.
 
-Der RunPod-Endpoint verwendet das fest gepinnte Worker-Image `runpod/worker-v1-vllm:v2.24.0`, `MAX_MODEL_LEN=8192` und die Mistral-spezifischen Ladeoptionen. `QUANTIZATION` wird bewusst nicht gesetzt, weil das FP8-Format bereits im Modell hinterlegt ist. Die Datei `runpod_worker/test_input.json` dient als direkte strukturierte Testeingabe. Die vollständigen Einstellungen, die sichere Reihenfolge des Rollouts und der Rückkehrweg stehen im [Deployment-Ablauf für Version 1.0.0-rc1](docs/deployment-v1.0.0-rc1.md).
+Der Endpoint verwendet das fest gepinnte Worker-Image `runpod/worker-v1-vllm:v2.24.0`, `MAX_MODEL_LEN=8192` und die Mistral-spezifischen Ladeoptionen. Jeder Auftrag enthält eine RunPod-Policy mit `ttl=900000` und `executionTimeout=600000`; damit endet seine gesamte Lebensdauer einschließlich Queue spätestens nach 15 Minuten. Bei einem Anwendungstimeout versucht der Client zusätzlich, den konkreten Auftrag über die Cancel-API zu beenden. `QUANTIZATION` wird nicht gesetzt, weil das FP8-Format bereits im Modell hinterlegt ist.
 
 Container-Build, Endpoint, Queue-Verarbeitung, Scale-to-zero-Kaltstart und Rückgabe des Schreibfeedbacks an die Webanwendung wurden für Version 0.5.0 produktiv geprüft.
 
@@ -276,13 +276,13 @@ Für den Prüfungsbetrieb gelten drei voneinander unabhängige Zeitwerte:
 
 | Wert | Einstellung | Bedeutung |
 |---|---:|---|
-| App-Wartezeit | `RUNPOD_JOB_TIMEOUT_SECONDS=1200` | Die Web-App wartet bis zu 20 Minuten einschließlich Queue und Cold Start. |
+| App-Wartezeit | `RUNPOD_JOB_TIMEOUT_SECONDS=900` | Die Web-App wartet höchstens 15 Minuten einschließlich Queue und Cold Start und sendet danach ein Cancel. |
 | Endpoint-Ausführungslimit | `600 s` in RunPod | Maximale Laufzeit eines bereits übernommenen Modellauftrags. |
-| Endpoint-Idle-Timeout | `3600 s` in RunPod | Ein erfolgreicher Worker bleibt danach bis zu 60 Minuten warm. |
+| Endpoint-Idle-Timeout | `5 s` in RunPod | Der Worker wird nach einem Auftrag möglichst schnell beendet. |
 
-`RUNPOD_IDLE_TIMEOUT_SECONDS=3600` dokumentiert den in der RunPod-Konsole eingestellten Wert für die Oberfläche; die Web-App kann das externe Endpoint-Setting nicht selbst verändern. Deshalb muss `Idle timeout = 3600 sec` bei allen verwendeten RunPod-Endpunkten separat gesetzt sein. Das Warmhaltefenster ist kostenpflichtig und keine garantierte Reservierung.
+`RUNPOD_IDLE_TIMEOUT_SECONDS=5` dokumentiert den in der RunPod-Konsole einzustellenden Wert; die Web-App kann das externe Endpoint-Setting nicht selbst verändern. Außerhalb eines beaufsichtigten Tests bleibt `Maximum workers = 0`. Für einen einzelnen Test wird es vorübergehend auf `1` gesetzt und danach wieder auf `0` zurückgestellt.
 
-Die Health-API funktioniert mit der normalen Queue-Berechtigung. Für die intern weiterhin vorhandenen Supply- und technischen Workerdaten benötigt der API-Key zusätzlich lesenden Zugriff auf den GPU-Katalog beziehungsweise die Serverless-Worker-API. Fehlt diese Berechtigung, erfindet die Anwendung keine Hardwarezuordnung. Weitere Einzelheiten stehen in [RunPod-Transparenz in Version 0.6](docs/runpod-transparenz-v0.6.md).
+Die Health-API funktioniert mit der normalen Queue-Berechtigung. Für die sichtbare Supply-Momentaufnahme und die intern weiterhin vorhandenen technischen Workerdaten benötigt der API-Key zusätzlich lesenden Zugriff auf den GPU-Katalog beziehungsweise die Serverless-Worker-API. Fehlt diese Berechtigung, zeigt die Anwendung „Nicht abrufbar“ und erfindet keine Hardwarezuordnung. Weitere Einzelheiten stehen in [RunPod-Transparenz in Version 0.6](docs/runpod-transparenz-v0.6.md).
 
 Die bereinigte 0.6-Oberfläche zeigt diese Verwaltungsdetails vorübergehend nicht an. Zusätzlich registriert sie die Job-ID jedes von der Web-App gestarteten RunPod-Auftrags in der persistenten technischen SQLite-Datei. Unter „Hängende Anfragen verwalten“ lassen sich aktive Jobs einzeln abbrechen. Für ältere oder direkt in RunPod gestartete Jobs kann die Request-ID manuell eingegeben werden. Der Abbruch beendet nur den konkreten Job, nicht den Worker; ein pauschales Leeren der Queue ist nicht Teil der Oberfläche.
 

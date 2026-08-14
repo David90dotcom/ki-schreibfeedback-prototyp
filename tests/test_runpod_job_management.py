@@ -29,7 +29,7 @@ def _csrf_token_from(response: Response) -> str:
 
 class RunPodJobManagementTests(unittest.TestCase):
     ENDPOINT_ID = "internal-endpoint-id-must-stay-secret"
-    ENDPOINT_KEY = "rtx4090_24gb"
+    ENDPOINT_KEY = "standard"
     TRACKING_ID = "fead037f-17ba-4cce-955b-cf594212b43d"
     JOB_ID = "1ce415e5-e43f-4905-9b03-f6c17afb3b77-e1"
 
@@ -41,7 +41,7 @@ class RunPodJobManagementTests(unittest.TestCase):
         self.runpod_settings = replace(
             main.settings,
             runpod_api_key="test-api-key",
-            runpod_endpoint_rtx4090_id=self.ENDPOINT_ID,
+            runpod_endpoint_id=self.ENDPOINT_ID,
         )
         self.client = TestClient(main.app)
         csrf_token = _csrf_token_from(self.client.get("/login"))

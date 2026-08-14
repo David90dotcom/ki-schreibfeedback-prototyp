@@ -762,43 +762,29 @@
                 data-standard-options
                 {% if advanced_options %}hidden{% endif %}
             >
-                Im Standardbetrieb wird das serverseitig konfigurierte
-                RunPod-Inferenzziel verwendet.
+                Im Standardbetrieb wird ein automatischer Pool aller
+                für das Modell freigegebenen GPUs verwendet. Die
+                aktuelle Pool-Verfügbarkeit wird unten angezeigt.
             </p>
 
             <div
                 data-advanced-options
                 {% if not advanced_options %}hidden{% endif %}
             >
-            <label for="runpod-endpoint">
-                Inferenzziel
-            </label>
+                <p class="hint">
+                    RunPod verwendet auch in den erweiterten Optionen
+                    ausschließlich den serverseitig konfigurierten
+                    automatischen 48-GB-GPU-Pool. Dedizierte
+                    Hardware-Endpunkte sind deaktiviert.
+                </p>
+            </div>
 
-            <select
+            <input
                 id="runpod-endpoint"
                 name="runpod_endpoint"
-                required
+                type="hidden"
+                value="standard"
             >
-                {% for endpoint in runpod_endpoint_options %}
-                    <option
-                        value="{{ endpoint.key }}"
-                        {% if endpoint.key == selected_runpod_endpoint %}selected{% endif %}
-                        {% if not endpoint.configured %}disabled{% endif %}
-                    >
-                        {{ endpoint.label }}
-                        {% if not endpoint.configured %}
-                            (noch nicht konfiguriert)
-                        {% endif %}
-                    </option>
-                {% endfor %}
-            </select>
-
-            <p class="hint">
-                Der bestehende Standard nutzt den automatischen
-                48-GB-GPU-Pool. Die drei festen Ziele dienen dem
-                Hardwarevergleich. Alle vier verwenden dasselbe Modell;
-                die Endpoint-IDs bleiben ausschließlich im Backend.
-            </p>
 
             <section
                 id="runpod-readiness"
@@ -810,8 +796,8 @@
                     <div>
                         <h4>RunPod-Betriebsbereitschaft</h4>
                         <p>
-                            Aktuelle Momentaufnahme für das ausgewählte
-                            Inferenzziel
+                            Aktuelle Momentaufnahme für den automatischen
+                            48-GB-GPU-Pool
                         </p>
                     </div>
 
@@ -825,6 +811,18 @@
                 </div>
 
                 <dl class="readiness-values">
+                    <div>
+                        <dt>GPU-Verfügbarkeit</dt>
+                        <dd>
+                            <span
+                                id="runpod-supply-status"
+                                class="status-badge status-neutral"
+                            >
+                                Verfügbarkeit wird geladen …
+                            </span>
+                        </dd>
+                    </div>
+
                     <div>
                         <dt>Worker</dt>
                         <dd>
@@ -883,14 +881,23 @@
                         </div>
                     </dl>
                 </section>
+
+                <p id="runpod-status-note" class="hint">
+                    Die Supply-Angabe ist eine aktuelle Momentaufnahme
+                    und keine garantierte GPU-Reservierung.
+                </p>
             </section>
 
-            <details
-                id="runpod-job-manager"
-                class="runpod-job-manager"
-                data-jobs-url="{{ url_for('runpod_jobs') }}"
-                data-cancel-url="{{ url_for('cancel_runpod_job') }}"
+            <div
+                data-advanced-options
+                {% if not advanced_options %}hidden{% endif %}
             >
+                <details
+                    id="runpod-job-manager"
+                    class="runpod-job-manager"
+                    data-jobs-url="{{ url_for('runpod_jobs') }}"
+                    data-cancel-url="{{ url_for('cancel_runpod_job') }}"
+                >
                 <summary>Hängende Anfragen verwalten</summary>
 
                 <p class="hint">
@@ -953,7 +960,7 @@
                     role="status"
                     aria-live="polite"
                 ></p>
-            </details>
+                </details>
             </div>
         </section>
 

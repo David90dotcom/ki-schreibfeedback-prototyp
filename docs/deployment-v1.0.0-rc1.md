@@ -1,6 +1,6 @@
 # Deployment-Ablauf für Version 1.0.0-rc1
 
-Dieser Ablauf stellt zuerst einen neuen RunPod-Endpoint bereit und schaltet erst danach die Webanwendung auf DigitalOcean um. Der bisherige Endpoint bleibt bis zum erfolgreichen Ende-zu-Ende-Test unverändert und dient als schneller Rückkehrweg.
+Dieser Ablauf verwendet ausschließlich den vorhandenen automatischen 48-GB-GPU-Pool. Dedizierte RTX-4090-, RTX-5090- und RTX-6000-Ada-Endpunkte werden nach dem Leeren ihrer Queues und dem Beenden aller Worker gelöscht. Damit verbleibt genau ein ergänzender RunPod-Providerweg.
 
 ## 1. Zielkonfiguration
 
@@ -11,29 +11,31 @@ Dieser Ablauf stellt zuerst einen neuen RunPod-Endpoint bereit und schaltet erst
 | RunPod-Worker | `runpod/worker-v1-vllm:v2.24.0` |
 | Serverless-Modell | `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8` |
 | Lokales Ollama-Modell | `mistral-small3.2:24b-instruct-2506-q8_0` |
-| Bevorzugte Serverless-GPU | 48 GB VRAM; RTX 5090 mit 32 GB erst nach erfolgreichem Standardtest |
-| Nicht geeignet | RTX 4090 mit 24 GB VRAM |
+| Serverless-Endpoint | automatischer Pool kompatibler 48-GB-GPUs |
+| Dedizierte Endpoints | nicht Bestandteil der endgültigen Anwendung |
+| Sicherheitsgrenze | 15 Minuten Job-TTL, 10 Minuten Ausführung, 5 Sekunden Idle |
 
 Die FP8-Variante umfasst ungefähr 25,8 GB Modellgewichte. Das offizielle BF16-/FP16-Modell benötigt ungefähr 55 GB GPU-Speicher und passt deshalb nicht in die vorhandene Einzel-GPU-Strategie mit 32 beziehungsweise 48 GB. Die Quantisierungsform wird in den Versuchsdaten dokumentiert: lokal Q8 über Ollama, Serverless FP8 über vLLM.
 
-## 2. Neuen RunPod-Endpoint anlegen
+## 2. Bestehende RunPod-Endpoints aktualisieren
 
-Den bestehenden funktionierenden Endpoint nicht überschreiben. In RunPod einen neuen vLLM-Serverless-Endpoint mit folgenden Einstellungen anlegen:
+Nur der automatische Pool behält seine ID. Sein Template verwendet:
 
 ```text
 Container image: runpod/worker-v1-vllm:v2.24.0
 MODEL_NAME: RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8
-OPENAI_SERVED_MODEL_NAME_OVERRIDE: RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8
 MAX_MODEL_LEN: 8192
-GPU_MEMORY_UTILIZATION: 0.95
+GPU_MEMORY_UTILIZATION: 0.90
 MAX_NUM_SEQS: 1
 MAX_CONCURRENCY: 1
 TOKENIZER_MODE: mistral
 CONFIG_FORMAT: mistral
 LOAD_FORMAT: mistral
+RUNPOD_INIT_TIMEOUT: 800
+VLLM_STARTUP_TIMEOUT: 1200
 ```
 
-`QUANTIZATION` nicht setzen. Das Modell bringt seine FP8-/Compressed-Tensors-Konfiguration selbst mit. Für den textbasierten Feedbackbetrieb sind Tool- und Bildoptionen nicht erforderlich.
+`OPENAI_SERVED_MODEL_NAME_OVERRIDE` und `QUANTIZATION` nicht setzen. Der von der Web-App gesendete Modellname entspricht bereits `MODEL_NAME`; das FP8-Format ist im Modell hinterlegt.
 
 Weitere Endpoint-Einstellungen:
 
@@ -41,20 +43,22 @@ Weitere Endpoint-Einstellungen:
 Minimum workers: 0
 Maximum workers: 1
 Execution timeout: 600 Sekunden
-Idle timeout: 3600 Sekunden
+Idle timeout: 5 Sekunden
 FlashBoot: aktiviert, sofern verfügbar
-GPU-Pool: L40, L40S oder RTX 6000 Ada mit jeweils 48 GB
+Container disk: 60 GB
+GPU-Pool: L40, L40S und RTX 6000 Ada mit jeweils 48 GB
 ```
 
-Für wiederholbare Versuche sollte ein ausreichend großes Netzlaufwerk beziehungsweise ein Modellcache verwendet werden. Wegen der Modellgröße sind mindestens 40 GB freier Cache-Speicher, mit Reserve besser 50 bis 60 GB, vorzusehen.
+Der automatische Pool erhöht die Chance, dass Prüfer trotz schwankender GPU-Supply einen Worker erhalten. Welche GPU einen Auftrag tatsächlich übernimmt, wird zusammen mit den Laufzeitwerten dokumentiert. Jeder App-Auftrag setzt zusätzlich `policy.ttl=900000` und `policy.executionTimeout=600000`. Außerhalb eines beaufsichtigten Tests bleibt `Maximum workers = 0`; nur für den einzelnen Test wird es kurzzeitig auf `1` gesetzt.
 
 ## 3. RunPod vor der Umschaltung prüfen
 
-1. Den neuen Endpoint starten.
-2. In RunPod unter „Requests“ den Inhalt von `runpod_worker/test_input.json` absenden.
+1. `Maximum workers` unmittelbar vor dem beaufsichtigten Test von `0` auf `1` setzen.
+2. Beim automatischen Pool unter „Requests“ den Inhalt von `runpod_worker/test_input.json` absenden.
 3. Prüfen, dass der Job `COMPLETED` erreicht und unter `choices[0].message.content` ein JSON-Objekt mit dem Feld `feedback` zurückkommt.
-4. Endpoint-ID notieren.
-5. Worker-Logs auf Speicherfehler, Modellabbruch und wiederholte Neustarts kontrollieren.
+4. Queue-Zeit, tatsächliche GPU, Ausführungszeit und Worker-Logs dokumentieren.
+5. Nach dem Test die Queue kontrollieren und `Maximum workers` sofort wieder auf `0` setzen.
+6. Prüfen, dass kein Worker `Running` oder `Initializing` bleibt.
 
 Erst nach diesem Test wird DigitalOcean umgestellt. Schlägt bereits der Start mit `CUDA out of memory` fehl, zunächst einen 48-GB-Pool verwenden und `MAX_MODEL_LEN` nicht erhöhen.
 
@@ -75,14 +79,13 @@ git status --short
 docker compose exec -T web python -c 'import sqlite3; source=sqlite3.connect("/app/data/analysis_runs.sqlite3"); target=sqlite3.connect("/app/data/analysis_runs-pre-1.0.0-rc1.sqlite3"); source.backup(target); target.close(); source.close()'
 ```
 
-Anschließend in der serverseitigen `.env` ausschließlich die Werte des neuen Endpoints eintragen:
+Anschließend in der serverseitigen `.env` ausschließlich die ID des Pools eintragen:
 
 ```env
-RUNPOD_ENDPOINT_ID=<neue Endpoint-ID>
-RUNPOD_ENDPOINT_RTX4090_ID=
+RUNPOD_ENDPOINT_ID=<Endpoint-ID des automatischen Pools>
 RUNPOD_DEFAULT_MODEL=RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8
-RUNPOD_JOB_TIMEOUT_SECONDS=1200
-RUNPOD_IDLE_TIMEOUT_SECONDS=3600
+RUNPOD_JOB_TIMEOUT_SECONDS=900
+RUNPOD_IDLE_TIMEOUT_SECONDS=5
 ```
 
 API-Key, Passwort-Hash und Sitzungs-Secret bleiben unverändert. Die `.env` darf weder angezeigt noch eingecheckt werden.
@@ -112,13 +115,15 @@ In der produktiven Oberfläche nacheinander prüfen:
 1. Anmeldung und Abmeldung.
 2. Standard-Kriterienvorlage ist vorausgewählt.
 3. OpenAI- und Mistral-Cloudauswahl werden angezeigt.
-4. RunPod Standard startet die kriterienweise Analyse.
-5. Alle Kriterienkarten erscheinen; ein unsicherer Einzelbefund wird höchstens als „Nicht beurteilbar“ ersetzt und bricht nicht den gesamten Lauf ab.
-6. Eine einzelne Kriterienkarte lässt sich aktualisieren.
-7. Feedbacklauf lässt sich für die Meta-Bewertung speichern.
-8. Manuelle Bewertung und PDF-Export funktionieren.
-9. Automatische Meta-Vorbewertung wird nur nach dem ausdrücklichen Cloud-Klick gestartet.
-10. Daten und Standardvorlage bleiben nach einem Container-Neustart erhalten.
+4. RunPod zeigt im Standardmodus automatisch die aktuelle Supply-Momentaufnahme des GPU-Pools.
+5. RunPod Standard startet die kriterienweise Analyse über den automatischen Pool.
+6. Auch im Experimentmodus wird keine dedizierte GPU-Auswahl angeboten.
+7. Alle Kriterienkarten erscheinen; ein unsicherer Einzelbefund wird höchstens als „Nicht beurteilbar“ ersetzt und bricht nicht den gesamten Lauf ab.
+8. Eine einzelne Kriterienkarte lässt sich aktualisieren.
+9. Feedbacklauf lässt sich für die Meta-Bewertung speichern.
+10. Manuelle Bewertung und PDF-Export funktionieren.
+11. Automatische Meta-Vorbewertung wird nur nach dem ausdrücklichen Cloud-Klick gestartet.
+12. Daten und Standardvorlage bleiben nach einem Container-Neustart erhalten.
 
 Zusätzlich Modellname, Gesamtdauer, Queue-Zeit und Ausführungszeit für die Bachelorarbeit notieren.
 

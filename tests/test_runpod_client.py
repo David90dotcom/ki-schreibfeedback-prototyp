@@ -45,7 +45,7 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
             model_name=self.MODEL_NAME,
         )
 
-        self.assertEqual(provider.job_timeout_seconds, 1200.0)
+        self.assertEqual(provider.job_timeout_seconds, 900.0)
 
     async def test_cancel_job_uses_exact_request_id(self) -> None:
         recorded_requests: list[httpx.Request] = []
@@ -308,6 +308,13 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
 
         request_body = json.loads(
             submit_request.content
+        )
+        self.assertEqual(
+            request_body["policy"],
+            {
+                "executionTimeout": 600_000,
+                "ttl": 900_000,
+            },
         )
         worker_input = request_body["input"]
 
