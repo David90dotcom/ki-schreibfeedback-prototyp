@@ -10,35 +10,16 @@
 {% block content %}
 
 <section class="card meta-overview-header">
-    <div class="management-header">
-        <div>
-            <span class="meta-level-badge">Optional · Meta-Ebene</span>
-            <h2>Feedback-Bewertung</h2>
-            <p class="hint">
-                Hier erscheinen ausschließlich Feedbackläufe, die nach
-                einer Textanalyse bewusst für die Meta-Ebene gespeichert
-                wurden. Du kannst jeden Lauf anhand desselben versionierten
-                Qualitätsrasters automatisch vorbewerten, manuell prüfen und
-                mehrfach getrennt speichern.
-            </p>
-        </div>
-
-        {% if evaluation_export_available %}
-            <div class="management-actions">
-                <a
-                    class="button-link secondary-link"
-                    href="/feedback-evaluations/export-json"
-                >
-                    JSON zur Übertragung
-                </a>
-                <a
-                    class="button-link secondary-link"
-                    href="/feedback-evaluations/export-csv"
-                >
-                    CSV für Auswertung
-                </a>
-            </div>
-        {% endif %}
+    <div>
+        <span class="meta-level-badge">Optional · Meta-Ebene</span>
+        <h2>Feedback-Bewertung</h2>
+        <p class="hint">
+            Hier erscheinen ausschließlich Feedbackläufe, die nach
+            einer Textanalyse bewusst für die Meta-Ebene gespeichert
+            wurden. Du kannst jeden Lauf anhand desselben versionierten
+            Qualitätsrasters automatisch vorbewerten, manuell prüfen und
+            mehrfach getrennt speichern.
+        </p>
     </div>
 </section>
 
@@ -57,53 +38,6 @@
         <p>{{ error }}</p>
     </section>
 {% endif %}
-
-<section class="card exchange-panel meta-exchange-panel">
-    <div>
-        <h2>Meta-Bewertungen übertragen</h2>
-        <p class="hint">
-            Importiere hier einen zuvor lokal erzeugten JSON-Export.
-            Feedbackläufe und Bewertungen werden als neue Kopien ergänzt;
-            vorhandene Daten bleiben unverändert.
-        </p>
-    </div>
-
-    <form
-        class="import-form"
-        method="post"
-        action="/feedback-evaluations/import"
-        enctype="multipart/form-data"
-    >
-        <input
-            type="hidden"
-            name="csrf_token"
-            value="{{ csrf_token }}"
-        >
-
-        <label for="meta-evaluation-import-file">
-            Meta-Bewertungs-Export auswählen
-        </label>
-        <input
-            id="meta-evaluation-import-file"
-            name="import_file"
-            type="file"
-            accept=".json,application/json"
-            required
-        >
-
-        <button class="secondary-button" type="submit">
-            JSON importieren
-        </button>
-    </form>
-
-    <p class="hint exchange-note">
-        Der übertragbare JSON-Export enthält den anonymisierten Schülertext,
-        das erzeugte Feedback und die vollständigen Meta-Bewertungen. API-Keys
-        sind nicht enthalten. Der separate CSV-Export enthält dagegen nur
-        Zuordnungen, Modelle, Laufzeiten und numerische Bewertungen – keine
-        Schülertexte, Feedbacktexte oder Begründungen.
-    </p>
-</section>
 
 {% if feedback_runs %}
     <section class="meta-run-list" aria-label="Gespeicherte Feedbackläufe">
@@ -396,26 +330,32 @@
                     </div>
                 </details>
 
-                <section class="meta-automatic-evaluation">
-                    <div class="meta-automatic-heading">
-                        <div>
+                <details
+                    class="meta-automatic-evaluation"
+                    data-automatic-evaluation-details
+                    {% if automatic_feedback_run_id == feedback_run.feedback_run_id %}open{% endif %}
+                >
+                    <summary class="meta-automatic-summary">
+                        <span class="meta-automatic-summary-title">
                             <span class="meta-cloud-badge">Cloud · optional</span>
-                            <h3>Automatische Vorbewertung</h3>
-                        </div>
+                            <strong>Automatische Vorbewertung</strong>
+                        </span>
                         <span class="meta-model-badge">
                             {{ automatic_evaluation_model }}
                         </span>
-                    </div>
+                    </summary>
 
-                    <p>
-                        Ein getrenntes starkes Bewertungsmodell prüft jede
-                        Feedbackaussage gegen Aufgabe, Aufgabenmaterial,
-                        optionalen Originaltext, Kriterien und Schülertext. Es
-                        bewertet dieselben vier Qualitätskriterien von 0 bis 3
-                        und begründet jeden Befund detailliert.
-                    </p>
+                    <div class="meta-automatic-content">
 
-                    {% if automatic_feedback_run_id == feedback_run.feedback_run_id and notice_message %}
+                        <p>
+                            Ein getrenntes starkes Bewertungsmodell prüft jede
+                            Feedbackaussage gegen Aufgabe, Aufgabenmaterial,
+                            optionalen Originaltext, Kriterien und Schülertext.
+                            Es bewertet dieselben vier Qualitätskriterien von
+                            0 bis 3 und begründet jeden Befund detailliert.
+                        </p>
+
+                        {% if automatic_feedback_run_id == feedback_run.feedback_run_id and notice_message %}
                         <div
                             class="meta-automatic-result {% if notice_tone == 'error' %}meta-automatic-result-error{% else %}meta-automatic-result-success{% endif %}"
                             role="status"
@@ -429,9 +369,9 @@
                             </strong>
                             <p>{{ notice_message }}</p>
                         </div>
-                    {% endif %}
+                        {% endif %}
 
-                    <dl class="metadata meta-automatic-metadata">
+                        <dl class="metadata meta-automatic-metadata">
                         <div>
                             <dt>Anbieter</dt>
                             <dd>{{ automatic_evaluation_provider }}</dd>
@@ -453,9 +393,9 @@
                                 <code>{{ automatic_evaluation_prompt_version }}</code>
                             </dd>
                         </div>
-                    </dl>
+                        </dl>
 
-                    <p class="meta-cloud-warning">
+                        <p class="meta-cloud-warning">
                         Erst beim folgenden Klick werden der anonymisierte
                         Schülertext, Aufgabe, Aufgabenmaterial, der optionale
                         Originaltext dieses Laufs, Feedback-Kriterien und das
@@ -465,9 +405,9 @@
                         Response-Speicherung wird mit <code>store=false</code>
                         deaktiviert; geltende providerseitige
                         Aufbewahrungsregeln bleiben unberührt.
-                    </p>
+                        </p>
 
-                    {% if automatic_evaluation_configured %}
+                        {% if automatic_evaluation_configured %}
                         <form
                             method="post"
                             action="/feedback-runs/{{ feedback_run.feedback_run_id }}/automatic-evaluations"
@@ -556,20 +496,21 @@
                                 </p>
                             </div>
                         </form>
-                    {% else %}
+                        {% else %}
                         <p class="meta-configuration-warning" role="status">
                             Für diese Funktion muss <code>OPENAI_API_KEY</code>
                             serverseitig in der <code>.env</code>-Datei gesetzt
                             sein. Ohne Key wird nichts übertragen.
                         </p>
-                    {% endif %}
+                        {% endif %}
 
-                    <p class="hint">
-                        Jede erfolgreiche Anfrage erzeugt einen unveränderten
-                        automatischen Datensatz. Frühere Vorbewertungen werden
-                        nicht überschrieben.
-                    </p>
-                </section>
+                        <p class="hint">
+                            Jede erfolgreiche Anfrage erzeugt einen
+                            unveränderten automatischen Datensatz. Frühere
+                            Vorbewertungen werden nicht überschrieben.
+                        </p>
+                    </div>
+                </details>
 
                 {% if feedback_run.evaluations %}
                     <details
@@ -878,5 +819,83 @@
         </a>
     </section>
 {% endif %}
+
+<details
+    class="card meta-exchange-panel"
+    data-meta-exchange-details
+>
+    <summary class="meta-exchange-summary">
+        <span>
+            <strong>Daten übertragen</strong>
+            <small>JSON-Import und -Export · CSV-Auswertung</small>
+        </span>
+    </summary>
+
+    <div class="meta-exchange-content">
+        <p class="hint">
+            Sichere vollständige Meta-Bewertungen als JSON oder exportiere
+            ausschließlich Kennzahlen als CSV. Ein JSON-Export kann hier
+            später wieder eingelesen werden.
+        </p>
+
+        <div
+            class="meta-exchange-actions"
+            aria-label="Meta-Bewertungen exportieren"
+        >
+            <a
+                class="button-link secondary-link compact-button"
+                href="/feedback-evaluations/export-json"
+            >
+                JSON exportieren
+            </a>
+            <a
+                class="button-link secondary-link compact-button"
+                href="/feedback-evaluations/export-csv"
+            >
+                CSV exportieren
+            </a>
+        </div>
+
+        <form
+            class="import-form meta-import-form"
+            method="post"
+            action="/feedback-evaluations/import"
+            enctype="multipart/form-data"
+        >
+            <input
+                type="hidden"
+                name="csrf_token"
+                value="{{ csrf_token }}"
+            >
+
+            <label for="meta-evaluation-import-file">
+                JSON-Export importieren
+            </label>
+            <input
+                id="meta-evaluation-import-file"
+                name="import_file"
+                type="file"
+                accept=".json,application/json"
+                required
+            >
+
+            <button
+                class="secondary-button compact-button"
+                type="submit"
+            >
+                JSON importieren
+            </button>
+        </form>
+
+        <p class="hint exchange-note">
+            JSON enthält den anonymisierten Schülertext, das erzeugte Feedback
+            und die vollständigen Meta-Bewertungen, aber keine API-Keys. CSV
+            enthält nur Zuordnungen, Modelle, Laufzeiten und numerische
+            Bewertungen – keine Schülertexte, Feedbacktexte oder Begründungen.
+            Beim Import werden neue Kopien ergänzt; vorhandene Daten bleiben
+            unverändert.
+        </p>
+    </div>
+</details>
 
 {% endblock %}

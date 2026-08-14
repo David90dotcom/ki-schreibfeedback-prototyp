@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import json
 import re
 import tempfile
 import unittest
@@ -296,14 +297,52 @@ class FeedbackEvaluationExchangeRouteTests(unittest.TestCase):
         page = self.client.get("/feedback-evaluations")
         csrf_token = _csrf_token_from(page)
 
-        self.assertIn("JSON zur Übertragung", page.text)
-        self.assertIn("CSV für Auswertung", page.text)
+        self.assertIn("JSON exportieren", page.text)
+        self.assertIn("CSV exportieren", page.text)
         self.assertIn(
             'action="/feedback-evaluations/import"',
             page.text,
         )
         self.assertIn("keine", page.text)
         self.assertIn("Schülertexte", page.text)
+        exchange_details = re.search(
+            r'<details\s+class="card meta-exchange-panel"[^>]*>',
+            page.text,
+        )
+        self.assertIsNotNone(exchange_details)
+        self.assertNotIn(
+            " open",
+            exchange_details.group(0) if exchange_details else "",
+        )
+        self.assertGreater(
+            page.text.find("Daten übertragen"),
+            page.text.find("meta-run-list"),
+        )
+        automatic_details = re.search(
+            r'<details\s+class="meta-automatic-evaluation"[^>]*>',
+            page.text,
+        )
+        self.assertIsNotNone(automatic_details)
+        self.assertNotIn(
+            " open",
+            automatic_details.group(0) if automatic_details else "",
+        )
+
+        opened_page = self.client.get(
+            (
+                "/feedback-evaluations?automatic_feedback_run_id="
+                f"{self.feedback_run.feedback_run_id}"
+            )
+        )
+        opened_details = re.search(
+            r'<details\s+class="meta-automatic-evaluation"[^>]*>',
+            opened_page.text,
+        )
+        self.assertIsNotNone(opened_details)
+        self.assertIn(
+            "open",
+            opened_details.group(0) if opened_details else "",
+        )
 
         json_export = self.client.get(
             "/feedback-evaluations/export-json"
@@ -358,6 +397,45 @@ class FeedbackEvaluationExchangeRouteTests(unittest.TestCase):
         self.assertEqual(
             sum(len(item.evaluations) for item in imported_runs),
             4,
+        )
+
+    def test_empty_meta_page_still_offers_both_exports(self) -> None:
+        empty_store = TaskStore(
+            Path(self.temporary_directory.name) / "empty.sqlite3"
+        )
+
+        with patch.object(main, "task_store", empty_store):
+            page = self.client.get("/feedback-evaluations")
+            json_export = self.client.get(
+                "/feedback-evaluations/export-json"
+            )
+            csv_export = self.client.get(
+                "/feedback-evaluations/export-csv"
+            )
+
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("JSON exportieren", page.text)
+        self.assertIn("CSV exportieren", page.text)
+        self.assertGreater(
+            page.text.find("Daten übertragen"),
+            page.text.find("meta-empty-state"),
+        )
+        self.assertEqual(json_export.status_code, 200)
+        document = json.loads(json_export.content.decode("utf-8"))
+        self.assertEqual(document["feedback_run_count"], 0)
+        self.assertEqual(document["evaluation_count"], 0)
+        self.assertEqual(document["feedback_runs"], [])
+        self.assertEqual(csv_export.status_code, 200)
+        rows = list(
+            csv.DictReader(
+                io.StringIO(csv_export.content.decode("utf-8-sig")),
+                delimiter=";",
+            )
+        )
+        self.assertEqual(rows, [])
+        self.assertIn(
+            "score_factual_correctness",
+            csv_export.content.decode("utf-8-sig"),
         )
 
     def test_import_requires_csrf_and_json_export_requires_login(self) -> None:

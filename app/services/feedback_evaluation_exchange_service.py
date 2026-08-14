@@ -44,11 +44,6 @@ class FeedbackEvaluationExchangeService:
             if feedback_run.evaluations
         )
 
-        if not runs:
-            raise FeedbackEvaluationExchangeError(
-                "Es sind keine Meta-Bewertungen für den Export vorhanden."
-            )
-
         document = {
             "format": FEEDBACK_EVALUATION_EXPORT_FORMAT,
             "format_version": FEEDBACK_EVALUATION_EXPORT_VERSION,
@@ -89,11 +84,6 @@ class FeedbackEvaluationExchangeService:
             for feedback_run in feedback_runs
             for evaluation in feedback_run.evaluations
         ]
-
-        if not rows:
-            raise FeedbackEvaluationExchangeError(
-                "Es sind keine Meta-Bewertungen für den Export vorhanden."
-            )
 
         fieldnames = (
             "feedback_run_id",

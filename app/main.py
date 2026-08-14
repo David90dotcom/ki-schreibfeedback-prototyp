@@ -2265,13 +2265,8 @@ async def feedback_evaluations_page(
         feedback_runs = (
             await task_store.list_feedback_runs_for_evaluation()
         )
-        evaluation_export_available = any(
-            feedback_run.evaluations
-            for feedback_run in feedback_runs
-        )
     except TaskStoreError:
         feedback_runs = []
-        evaluation_export_available = False
         error = (
             "Die gespeicherten Feedbackläufe konnten momentan nicht "
             "geladen werden."
@@ -2293,9 +2288,6 @@ async def feedback_evaluations_page(
                 request.session
             ),
             "feedback_runs": feedback_runs,
-            "evaluation_export_available": (
-                evaluation_export_available
-            ),
             "manual_meta_rubric": MANUAL_META_EVALUATION_RUBRIC,
             "meta_evaluation_score_options": (
                 META_EVALUATION_SCORE_OPTIONS
