@@ -17,6 +17,7 @@ from app.llm.errors import (
     ProviderAuthenticationError,
     ProviderInvalidRequestError,
     ProviderTimeoutError,
+    ProviderUnknownError,
 )
 from app.llm.runpod_client import RunPodProvider
 
@@ -473,6 +474,186 @@ class RunPodProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             error.details["operation"],
             "run",
+        )
+        self.assertEqual(
+            error.details["response_error"],
+            "Invalid API key",
+        )
+
+    async def test_transient_status_409_is_retried_without_cancel(
+        self,
+    ) -> None:
+        status_requests = 0
+        cancel_requests = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal status_requests, cancel_requests
+
+            if request.url.path.endswith("/run"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "job-transient-409",
+                        "status": "IN_QUEUE",
+                    },
+                )
+
+            if request.url.path.endswith(
+                "/status/job-transient-409"
+            ):
+                status_requests += 1
+
+                if status_requests == 1:
+                    return httpx.Response(
+                        409,
+                        json={
+                            "error": "Job status is transitioning",
+                        },
+                    )
+
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "job-transient-409",
+                        "status": "COMPLETED",
+                        "output": {
+                            "model": self.MODEL_NAME,
+                            "text": "Feedback nach erneutem Statusabruf",
+                        },
+                    },
+                )
+
+            if request.url.path.endswith(
+                "/cancel/job-transient-409"
+            ):
+                cancel_requests += 1
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "job-transient-409",
+                        "status": "CANCELLED",
+                    },
+                )
+
+            return httpx.Response(404)
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+        )
+        provider = self._provider()
+
+        with (
+            patch.object(
+                provider,
+                "_create_http_client",
+                return_value=client,
+            ),
+            patch(
+                "app.llm.runpod_client.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+            self.assertLogs(
+                "app.llm.runpod_client",
+                level="WARNING",
+            ) as captured_logs,
+        ):
+            response = await provider.complete(self._request())
+
+        self.assertEqual(
+            response.text,
+            "Feedback nach erneutem Statusabruf",
+        )
+        self.assertEqual(status_requests, 2)
+        self.assertEqual(cancel_requests, 0)
+        self.assertIn(
+            "der Auftrag bleibt aktiv",
+            "\n".join(captured_logs.output),
+        )
+
+    async def test_repeated_status_409_is_bounded_and_cancelled(
+        self,
+    ) -> None:
+        status_requests = 0
+        cancel_requests = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal status_requests, cancel_requests
+
+            if request.url.path.endswith("/run"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "job-persistent-409",
+                        "status": "IN_QUEUE",
+                    },
+                )
+
+            if request.url.path.endswith(
+                "/status/job-persistent-409"
+            ):
+                status_requests += 1
+                return httpx.Response(
+                    409,
+                    json={"message": "Job remains locked"},
+                )
+
+            if request.url.path.endswith(
+                "/cancel/job-persistent-409"
+            ):
+                cancel_requests += 1
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "job-persistent-409",
+                        "status": "CANCELLED",
+                    },
+                )
+
+            return httpx.Response(404)
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+        )
+        provider = self._provider()
+
+        with (
+            patch.object(
+                provider,
+                "_create_http_client",
+                return_value=client,
+            ),
+            patch(
+                "app.llm.runpod_client.asyncio.sleep",
+                new=AsyncMock(),
+            ),
+            patch(
+                "app.llm.runpod_client."
+                "RUNPOD_STATUS_MAX_TRANSIENT_RETRIES",
+                2,
+            ),
+            self.assertLogs(
+                "app.llm.runpod_client",
+                level="WARNING",
+            ),
+        ):
+            with self.assertRaises(
+                ProviderUnknownError
+            ) as raised:
+                await provider.complete(self._request())
+
+        error = raised.exception
+        self.assertEqual(status_requests, 3)
+        self.assertEqual(cancel_requests, 1)
+        self.assertEqual(error.status_code, 409)
+        self.assertEqual(
+            error.details,
+            {
+                "operation": "status",
+                "response_error": "Job remains locked",
+                "request_id": "job-persistent-409",
+                "job_status": "IN_QUEUE",
+                "status_retry_count": 3,
+            },
         )
 
     async def test_generate_preserves_runpod_timing_and_worker_id(

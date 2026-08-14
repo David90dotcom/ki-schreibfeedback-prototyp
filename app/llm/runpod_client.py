@@ -40,6 +40,14 @@ from app.llm.errors import (
 RUNPOD_API_BASE_URL = "https://api.runpod.ai/v2"
 RUNPOD_JOB_TTL_MS = 900_000
 RUNPOD_EXECUTION_TIMEOUT_MS = 600_000
+RUNPOD_STATUS_MAX_TRANSIENT_RETRIES = 8
+RUNPOD_TRANSIENT_STATUS_CODES = {
+    404,
+    408,
+    409,
+    425,
+    429,
+}
 ACTIVE_JOB_STATUSES = {"IN_QUEUE", "IN_PROGRESS", "RUNNING"}
 TERMINAL_JOB_STATUSES = {
     "FAILED",
@@ -416,6 +424,7 @@ class RunPodProvider:
         deadline: float,
     ) -> dict[str, Any]:
         loop = asyncio.get_running_loop()
+        transient_status_retries = 0
 
         while True:
             raw_status = payload.get("status")
@@ -501,6 +510,76 @@ class RunPodProvider:
                     model_name=model_name,
                     status=status,
                 ) from exc
+            except ProviderError as exc:
+                if not self._is_transient_status_error(exc):
+                    self._add_job_error_details(
+                        exc,
+                        job_id=job_id,
+                        status=status,
+                        retry_count=transient_status_retries,
+                    )
+                    raise
+
+                transient_status_retries += 1
+
+                if (
+                    transient_status_retries
+                    > RUNPOD_STATUS_MAX_TRANSIENT_RETRIES
+                ):
+                    self._add_job_error_details(
+                        exc,
+                        job_id=job_id,
+                        status=status,
+                        retry_count=transient_status_retries,
+                    )
+                    raise
+
+                logger.warning(
+                    "Vorübergehender Fehler beim Abruf des "
+                    "RunPod-Jobstatus; der Auftrag bleibt aktiv "
+                    "und der Abruf wird wiederholt "
+                    "(request_id=%s, job_status=%s, "
+                    "retry=%s/%s, error_type=%s, "
+                    "http_status=%s).",
+                    job_id,
+                    status,
+                    transient_status_retries,
+                    RUNPOD_STATUS_MAX_TRANSIENT_RETRIES,
+                    type(exc).__name__,
+                    exc.status_code,
+                )
+                continue
+
+            transient_status_retries = 0
+
+    @staticmethod
+    def _is_transient_status_error(exc: ProviderError) -> bool:
+        status_code = exc.status_code
+
+        return bool(
+            exc.retryable
+            or status_code in RUNPOD_TRANSIENT_STATUS_CODES
+            or (
+                status_code is not None
+                and 500 <= status_code <= 599
+            )
+        )
+
+    @staticmethod
+    def _add_job_error_details(
+        exc: ProviderError,
+        *,
+        job_id: str,
+        status: str,
+        retry_count: int,
+    ) -> None:
+        exc.details.update(
+            {
+                "request_id": job_id,
+                "job_status": status,
+                "status_retry_count": retry_count,
+            }
+        )
 
     def _job_timeout_error(
         self,
@@ -623,6 +702,14 @@ class RunPodProvider:
             ) from exc
 
         if response.is_error:
+            details: dict[str, Any] = {
+                "operation": operation,
+            }
+            response_error = self._response_error_message(response)
+
+            if response_error is not None:
+                details["response_error"] = response_error
+
             raise provider_error_from_http_status(
                 provider_id=self.provider_id,
                 model_name=model_name,
@@ -631,7 +718,7 @@ class RunPodProvider:
                     "Die RunPod-API hat die Anfrage abgelehnt "
                     f"(HTTP {response.status_code})."
                 ),
-                details={"operation": operation},
+                details=details,
             )
 
         try:
@@ -651,6 +738,30 @@ class RunPodProvider:
             )
 
         return payload
+
+    @staticmethod
+    def _response_error_message(
+        response: httpx.Response,
+    ) -> str | None:
+        try:
+            payload = response.json()
+        except ValueError:
+            return None
+
+        if not isinstance(payload, dict):
+            return None
+
+        for key in ("error", "message"):
+            value = payload.get(key)
+
+            if isinstance(value, dict):
+                value = value.get("message")
+
+            if isinstance(value, str) and value.strip():
+                normalized = " ".join(value.split())
+                return normalized[:300]
+
+        return None
 
     def _model_response(
         self,

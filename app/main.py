@@ -3011,14 +3011,30 @@ async def analyze(
                 runpod_status_service.mark_success(endpoint_key)
             )
     except Exception as exc:
+        provider_error_details = (
+            exc.details
+            if isinstance(exc, ProviderError)
+            else {}
+        )
         logger.error(
             "Feedbackanalyse fehlgeschlagen "
             "(provider=%s, task_selected=%s, rubric_mode=%s, "
-            "error_type=%s).",
+            "error_type=%s, status_code=%s, operation=%s, "
+            "request_id=%s, job_status=%s, "
+            "provider_error=%s).",
             provider,
             bool(task_id.strip()),
             selected_rubric_analysis_mode,
             type(exc).__name__,
+            (
+                exc.status_code
+                if isinstance(exc, ProviderError)
+                else None
+            ),
+            provider_error_details.get("operation"),
+            provider_error_details.get("request_id"),
+            provider_error_details.get("job_status"),
+            provider_error_details.get("response_error"),
         )
         error = str(exc).strip() or (
             "Die Feedbackanalyse ist mit einem internen Fehler "
