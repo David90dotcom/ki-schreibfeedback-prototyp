@@ -2177,8 +2177,10 @@ fieldset > label:first-of-type {
 }
 
 .meta-feedback-item {
-    padding-top: 16px;
+    padding: 16px 0 0 14px;
     border-top: 1px solid var(--border);
+    border-left-width: 4px;
+    border-left-style: solid;
 }
 
 .meta-feedback-item:first-child {
@@ -2186,8 +2188,25 @@ fieldset > label:first-of-type {
     border-top: 0;
 }
 
-.meta-feedback-item h4 {
-    margin-bottom: 7px;
+.meta-feedback-item-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.meta-feedback-item-header h4 {
+    margin: 0;
+}
+
+.meta-feedback-status-badge {
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.meta-feedback-item-header + .meta-feedback-copy {
+    margin-top: 7px;
 }
 
 .meta-feedback-copy {

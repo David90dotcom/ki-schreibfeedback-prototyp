@@ -636,6 +636,28 @@ class TaskManagementTests(unittest.TestCase):
             'class="meta-feedback-next-step"',
             overview.text,
         )
+        self.assertIn(
+            (
+                'class="meta-feedback-item '
+                'criterion-status-mostly_met"'
+            ),
+            overview.text,
+        )
+        self.assertIn(
+            (
+                'class="meta-feedback-item '
+                'criterion-status-not_assessable"'
+            ),
+            overview.text,
+        )
+        self.assertIn(
+            'aria-label="Rückmeldestufe: Weitgehend erkennbar"',
+            overview.text,
+        )
+        self.assertIn(
+            'aria-label="Rückmeldestufe: Keine sichere Einordnung"',
+            overview.text,
+        )
         self.assertNotIn(
             "<strong>Überarbeitung:</strong>",
             overview.text,

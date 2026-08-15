@@ -324,10 +324,23 @@
 
                                 <div class="meta-feedback-text">
                                     {% for item in feedback_run.feedback_payload.criteria %}
-                                        <section class="meta-feedback-item">
-                                            <h4>
-                                                {{ item.criterion_title or ("Kriterium " ~ loop.index) }}
-                                            </h4>
+                                        {% set display_status_label =
+                                            item.status | criterion_status_display_label
+                                        %}
+                                        <section
+                                            class="meta-feedback-item criterion-status-{{ item.status }}"
+                                        >
+                                            <div class="meta-feedback-item-header">
+                                                <h4>
+                                                    {{ item.criterion_title or ("Kriterium " ~ loop.index) }}
+                                                </h4>
+                                                <span
+                                                    class="criterion-status-badge meta-feedback-status-badge"
+                                                    aria-label="Rückmeldestufe: {{ display_status_label }}"
+                                                >
+                                                    {{ display_status_label }}
+                                                </span>
+                                            </div>
                                             <div class="meta-feedback-copy">
                                                 <p>
                                                     {{ item.feedback | feedback_inline_markdown }}
