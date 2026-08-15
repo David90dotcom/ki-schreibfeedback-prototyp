@@ -2391,6 +2391,45 @@ fieldset > label:first-of-type {
     margin: 14px 0 0;
 }
 
+.meta-automatic-settings {
+    margin: 14px 0 18px;
+    padding: 11px 13px;
+    background: rgba(255, 255, 255, 0.72);
+    border: 1px solid #ddd6fe;
+    border-radius: 9px;
+}
+
+.meta-automatic-settings > summary {
+    color: #4c1d95;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.meta-automatic-settings > .hint {
+    margin: 10px 0 0;
+}
+
+.meta-automatic-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.meta-automatic-settings-grid label {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.86rem;
+}
+
+.meta-automatic-settings-grid select {
+    margin-top: 6px;
+    padding: 9px 10px;
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
 .meta-evaluation-name-label {
     display: block;
     margin: 0 0 6px;

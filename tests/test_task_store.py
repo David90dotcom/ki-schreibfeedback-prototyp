@@ -869,6 +869,8 @@ class TaskStoreTests(unittest.TestCase):
                 justifications=justifications,
                 evaluator_provider="openai",
                 evaluator_model="gpt-5.6-sol",
+                evaluator_reasoning_mode="pro",
+                evaluator_reasoning_effort="high",
                 evaluator_prompt_version="meta-evaluator-v1",
                 duration_ms=1234,
                 provider_request_id="resp-auto-1",
@@ -883,6 +885,8 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(automatic.type_label, "Automatische Vorbewertung")
         self.assertEqual(automatic.evaluator_provider, "openai")
         self.assertEqual(automatic.evaluator_model, "gpt-5.6-sol")
+        self.assertEqual(automatic.evaluator_reasoning_mode, "pro")
+        self.assertEqual(automatic.evaluator_reasoning_effort, "high")
         self.assertEqual(
             automatic.evaluator_prompt_version,
             "meta-evaluator-v1",
@@ -1109,6 +1113,18 @@ class TaskStoreTests(unittest.TestCase):
             connection.execute(
                 """
                 ALTER TABLE feedback_evaluations
+                DROP COLUMN evaluator_reasoning_mode
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE feedback_evaluations
+                DROP COLUMN evaluator_reasoning_effort
+                """
+            )
+            connection.execute(
+                """
+                ALTER TABLE feedback_evaluations
                 DROP COLUMN source_evaluation_id
                 """
             )
@@ -1136,6 +1152,8 @@ class TaskStoreTests(unittest.TestCase):
             }
 
         self.assertIn("evaluator_prompt_version", columns)
+        self.assertIn("evaluator_reasoning_mode", columns)
+        self.assertIn("evaluator_reasoning_effort", columns)
         self.assertIn("source_evaluation_id", columns)
         self.assertIn("evaluation_name", columns)
 

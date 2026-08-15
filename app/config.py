@@ -222,7 +222,7 @@ class Settings:
 
     openai_evaluation_model: str = _first_configured_value(
         "OPENAI_EVALUATION_MODEL",
-        fallback="gpt-5.6-sol",
+        fallback="gpt-5.6-terra",
     )
 
     mistral_api_key: str | None = (

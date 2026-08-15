@@ -41,6 +41,10 @@ class DeploymentConfigurationTests(unittest.TestCase):
             "STUDENT_FEEDBACK_PROVIDER=runpod",
             example_environment,
         )
+        self.assertIn(
+            "OPENAI_EVALUATION_MODEL=gpt-5.6-terra",
+            example_environment,
+        )
 
     def test_student_portal_rejects_local_and_runpod_providers(self) -> None:
         for provider in ("ollama", "runpod", "unbekannt"):

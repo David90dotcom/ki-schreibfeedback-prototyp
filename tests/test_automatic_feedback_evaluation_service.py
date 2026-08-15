@@ -32,7 +32,7 @@ class AutomaticFeedbackEvaluationServiceTests(
         self.evaluator.evaluate.return_value = (
             AutomaticEvaluationModelResponse(
                 provider="openai",
-                model="gpt-5.6-sol",
+                model="gpt-5.6-terra",
                 text=json.dumps(
                     {
                         "ratings": {
@@ -58,6 +58,8 @@ class AutomaticFeedbackEvaluationServiceTests(
                     ensure_ascii=False,
                 ),
                 provider_request_id="resp-test",
+                reasoning_mode=None,
+                reasoning_effort="medium",
             )
         )
         self.service = AutomaticFeedbackEvaluationService(
@@ -115,7 +117,9 @@ class AutomaticFeedbackEvaluationServiceTests(
         result = await self.service.evaluate(self.feedback_run)
 
         self.assertEqual(result.provider, "openai")
-        self.assertEqual(result.model, "gpt-5.6-sol")
+        self.assertEqual(result.model, "gpt-5.6-terra")
+        self.assertIsNone(result.reasoning_mode)
+        self.assertEqual(result.reasoning_effort, "medium")
         self.assertEqual(
             result.prompt_version,
             AUTOMATIC_EVALUATION_PROMPT_VERSION,
@@ -123,6 +127,9 @@ class AutomaticFeedbackEvaluationServiceTests(
         self.assertEqual(result.provider_request_id, "resp-test")
         self.assertEqual([rating.score for rating in result.ratings], [2, 3, 2, 1])
         request = self.evaluator.evaluate.await_args.kwargs
+        self.assertIsNone(request["model_name"])
+        self.assertIsNone(request["reasoning_mode"])
+        self.assertEqual(request["reasoning_effort"], "medium")
         self.assertIn(
             "falsch-positive und falsch-negative",
             request["instructions"],
@@ -264,6 +271,19 @@ class AutomaticFeedbackEvaluationServiceTests(
         )
         self.assertIn("Freies Gesamtfeedback", request["input_text"])
         self.assertNotIn("feedback-model", request["input_text"])
+
+    async def test_model_and_reasoning_selection_are_forwarded(self) -> None:
+        await self.service.evaluate(
+            self.feedback_run,
+            model_name="gpt-5.6-luna",
+            reasoning_mode="pro",
+            reasoning_effort="low",
+        )
+
+        request = self.evaluator.evaluate.await_args.kwargs
+        self.assertEqual(request["model_name"], "gpt-5.6-luna")
+        self.assertEqual(request["reasoning_mode"], "pro")
+        self.assertEqual(request["reasoning_effort"], "low")
 
     async def test_evaluate_rejects_undetailed_justification(self) -> None:
         response = json.loads(self.evaluator.evaluate.return_value.text)

@@ -162,9 +162,14 @@
             clientError.hidden = true;
         }
 
+        const modelSelect = form.querySelector(
+            "[data-automatic-evaluation-model]"
+        );
         const model =
-            form.dataset.evaluationModel ||
-            "Das Bewertungsmodell";
+            modelSelect instanceof HTMLSelectElement
+                ? modelSelect.value
+                : form.dataset.evaluationModel ||
+                  "Das Bewertungsmodell";
         const state = {
             button,
             loading,
@@ -202,7 +207,7 @@
                 setLiveMessage(
                     form,
                     "Die gründliche Evidenzprüfung läuft weiterhin …",
-                    "Der pro-Modus kann deutlich länger dauern als die normale Feedback-Erzeugung. Die Anfrage ist weiterhin aktiv."
+                    "Der gewählte Denkaufwand kann länger dauern als die normale Feedback-Erzeugung. Die Anfrage ist weiterhin aktiv."
                 );
             }, SLOW_EVALUATION_DELAY_MS),
             window.setTimeout(() => {

@@ -633,6 +633,8 @@ class TaskStore:
         queue_duration_ms: float | None = None,
         execution_duration_ms: float | None = None,
         evaluation_name: str | None = None,
+        evaluator_reasoning_mode: str | None = None,
+        evaluator_reasoning_effort: str | None = None,
     ) -> StoredFeedbackEvaluation:
         try:
             ratings = MANUAL_META_EVALUATION_RUBRIC.build_ratings(
@@ -648,6 +650,18 @@ class TaskStore:
         normalized_provider = evaluator_provider.strip()
         normalized_model = evaluator_model.strip()
         normalized_prompt_version = evaluator_prompt_version.strip()
+        normalized_reasoning_mode = (
+            evaluator_reasoning_mode.strip().lower()
+            if isinstance(evaluator_reasoning_mode, str)
+            and evaluator_reasoning_mode.strip()
+            else None
+        )
+        normalized_reasoning_effort = (
+            evaluator_reasoning_effort.strip().lower()
+            if isinstance(evaluator_reasoning_effort, str)
+            and evaluator_reasoning_effort.strip()
+            else None
+        )
 
         if (
             not normalized_provider
@@ -664,6 +678,19 @@ class TaskStore:
                 "Die Dauer der automatischen Vorbewertung ist ungültig."
             )
 
+        if any(
+            len(value) > 32
+            for value in (
+                normalized_reasoning_mode,
+                normalized_reasoning_effort,
+            )
+            if value is not None
+        ):
+            raise FeedbackEvaluationValidationError(
+                "Denkmodus oder Denkaufwand der automatischen "
+                "Vorbewertung sind ungültig."
+            )
+
         return await asyncio.to_thread(
             self._create_automatic_feedback_evaluation_sync,
             str(uuid4()),
@@ -672,6 +699,8 @@ class TaskStore:
             normalized_name,
             normalized_provider,
             normalized_model,
+            normalized_reasoning_mode,
+            normalized_reasoning_effort,
             normalized_prompt_version,
             duration_ms,
             queue_duration_ms,
@@ -2114,6 +2143,8 @@ class TaskStore:
                                     rubric_version,
                                     evaluator_provider,
                                     evaluator_model,
+                                    evaluator_reasoning_mode,
+                                    evaluator_reasoning_effort,
                                     evaluator_prompt_version,
                                     source_evaluation_id,
                                     duration_ms,
@@ -2122,7 +2153,7 @@ class TaskStore:
                                     provider_request_id
                                 )
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                                        ?, ?)
+                                        ?, ?, ?, ?)
                                 """,
                                 (
                                     imported_evaluation_id,
@@ -2133,6 +2164,8 @@ class TaskStore:
                                     evaluation.rubric_version,
                                     evaluation.evaluator_provider,
                                     evaluation.evaluator_model,
+                                    evaluation.evaluator_reasoning_mode,
+                                    evaluation.evaluator_reasoning_effort,
                                     evaluation.evaluator_prompt_version,
                                     (
                                         evaluation_ids.get(
@@ -2258,6 +2291,8 @@ class TaskStore:
             ratings=ratings,
             evaluator_provider=None,
             evaluator_model=None,
+            evaluator_reasoning_mode=None,
+            evaluator_reasoning_effort=None,
             evaluator_prompt_version=None,
             source_evaluation_id=source_evaluation_id,
             duration_ms=None,
@@ -2274,6 +2309,8 @@ class TaskStore:
         evaluation_name: str | None,
         evaluator_provider: str,
         evaluator_model: str,
+        evaluator_reasoning_mode: str | None,
+        evaluator_reasoning_effort: str | None,
         evaluator_prompt_version: str,
         duration_ms: int,
         queue_duration_ms: float | None,
@@ -2288,6 +2325,8 @@ class TaskStore:
             ratings=ratings,
             evaluator_provider=evaluator_provider,
             evaluator_model=evaluator_model,
+            evaluator_reasoning_mode=evaluator_reasoning_mode,
+            evaluator_reasoning_effort=evaluator_reasoning_effort,
             evaluator_prompt_version=evaluator_prompt_version,
             source_evaluation_id=None,
             duration_ms=duration_ms,
@@ -2306,6 +2345,8 @@ class TaskStore:
         ratings: tuple[FeedbackEvaluationRating, ...],
         evaluator_provider: str | None,
         evaluator_model: str | None,
+        evaluator_reasoning_mode: str | None,
+        evaluator_reasoning_effort: str | None,
         evaluator_prompt_version: str | None,
         source_evaluation_id: str | None,
         duration_ms: int | None,
@@ -2376,6 +2417,8 @@ class TaskStore:
                             rubric_version,
                             evaluator_provider,
                             evaluator_model,
+                            evaluator_reasoning_mode,
+                            evaluator_reasoning_effort,
                             evaluator_prompt_version,
                             source_evaluation_id,
                             duration_ms,
@@ -2383,7 +2426,7 @@ class TaskStore:
                             execution_duration_ms,
                             provider_request_id
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             evaluation_id,
@@ -2394,6 +2437,8 @@ class TaskStore:
                             MANUAL_META_EVALUATION_RUBRIC.version,
                             evaluator_provider,
                             evaluator_model,
+                            evaluator_reasoning_mode,
+                            evaluator_reasoning_effort,
                             evaluator_prompt_version,
                             source_evaluation_id,
                             duration_ms,
@@ -2677,6 +2722,8 @@ class TaskStore:
                 rubric_version TEXT NOT NULL,
                 evaluator_provider TEXT,
                 evaluator_model TEXT,
+                evaluator_reasoning_mode TEXT,
+                evaluator_reasoning_effort TEXT,
                 evaluator_prompt_version TEXT,
                 source_evaluation_id TEXT,
                 duration_ms INTEGER CHECK (
@@ -2831,6 +2878,22 @@ class TaskStore:
                 """
             )
 
+        if "evaluator_reasoning_mode" not in evaluation_columns:
+            connection.execute(
+                """
+                ALTER TABLE feedback_evaluations
+                ADD COLUMN evaluator_reasoning_mode TEXT
+                """
+            )
+
+        if "evaluator_reasoning_effort" not in evaluation_columns:
+            connection.execute(
+                """
+                ALTER TABLE feedback_evaluations
+                ADD COLUMN evaluator_reasoning_effort TEXT
+                """
+            )
+
         if "source_evaluation_id" not in evaluation_columns:
             connection.execute(
                 """
@@ -2890,6 +2953,8 @@ class TaskStore:
                    rubric_version,
                    evaluator_provider,
                    evaluator_model,
+                   evaluator_reasoning_mode,
+                   evaluator_reasoning_effort,
                    evaluator_prompt_version,
                    source_evaluation_id,
                    duration_ms,
@@ -2943,6 +3008,12 @@ class TaskStore:
             ratings=ratings,
             evaluator_provider=row["evaluator_provider"],
             evaluator_model=row["evaluator_model"],
+            evaluator_reasoning_mode=row[
+                "evaluator_reasoning_mode"
+            ],
+            evaluator_reasoning_effort=row[
+                "evaluator_reasoning_effort"
+            ],
             evaluator_prompt_version=row["evaluator_prompt_version"],
             source_evaluation_id=row["source_evaluation_id"],
             duration_ms=row["duration_ms"],

@@ -1567,16 +1567,18 @@ class TaskManagementTests(unittest.TestCase):
         )
         result = AutomaticFeedbackEvaluationResult(
             provider="openai",
-            model="gpt-5.6-sol",
+            model="gpt-5.6-luna",
             prompt_version=AUTOMATIC_EVALUATION_PROMPT_VERSION,
             duration_ms=2345,
             provider_request_id="resp-auto-web",
             ratings=ratings,
+            reasoning_mode=None,
+            reasoning_effort="low",
         )
         configured_provider = SimpleNamespace(
             configured=True,
             provider_name="openai",
-            model_name="gpt-5.6-sol",
+            model_name="gpt-5.6-terra",
         )
 
         with (
@@ -1619,6 +1621,17 @@ class TaskManagementTests(unittest.TestCase):
                 overview.text,
             )
             self.assertIn(
+                "Bewertungsmodell und Denkaufwand",
+                overview.text,
+            )
+            self.assertIn("GPT-5.6 Luna – günstig", overview.text)
+            self.assertIn("GPT-5.6 Terra – ausgewogen", overview.text)
+            self.assertIn("GPT-5.6 Sol – höchste Leistung", overview.text)
+            self.assertIn(
+                "Standard – kein erzwungener Pro-Modus",
+                overview.text,
+            )
+            self.assertIn(
                 "an die OpenAI API übertragen",
                 overview.text,
             )
@@ -1630,7 +1643,10 @@ class TaskManagementTests(unittest.TestCase):
                 ),
                 data={
                     "csrf_token": self.csrf_token,
-                    "evaluation_name": "Sol max – Vorprüfung",
+                    "evaluation_model": "gpt-5.6-luna",
+                    "evaluation_reasoning_mode": "",
+                    "evaluation_reasoning_effort": "low",
+                    "evaluation_name": "Luna low – Vorprüfung",
                 },
                 follow_redirects=False,
             )
@@ -1646,6 +1662,17 @@ class TaskManagementTests(unittest.TestCase):
                 ),
             )
             evaluate.assert_awaited_once()
+            self.assertEqual(
+                evaluate.await_args.kwargs["model_name"],
+                "gpt-5.6-luna",
+            )
+            self.assertIsNone(
+                evaluate.await_args.kwargs["reasoning_mode"]
+            )
+            self.assertEqual(
+                evaluate.await_args.kwargs["reasoning_effort"],
+                "low",
+            )
 
             prerated_overview = self.client.get(
                 (
@@ -1668,12 +1695,14 @@ class TaskManagementTests(unittest.TestCase):
             "meta-automatic-result-success",
             prerated_overview.text,
         )
-        self.assertIn("gpt-5.6-sol", prerated_overview.text)
+        self.assertIn("gpt-5.6-luna", prerated_overview.text)
         self.assertIn(
             AUTOMATIC_EVALUATION_PROMPT_VERSION,
             prerated_overview.text,
         )
-        self.assertIn("Sol max – Vorprüfung", prerated_overview.text)
+        self.assertIn("Luna low – Vorprüfung", prerated_overview.text)
+        self.assertIn("Denkaufwand", prerated_overview.text)
+        self.assertIn("low", prerated_overview.text)
         self.assertIn("Bewertung löschen", prerated_overview.text)
         self.assertIn(
             "data-confirm-evaluation-delete",
@@ -1689,6 +1718,11 @@ class TaskManagementTests(unittest.TestCase):
             self.store.get_feedback_run_for_evaluation(feedback_run_id)
         ).latest_automatic_evaluation
         self.assertIsNotNone(automatic_evaluation)
+        self.assertIsNone(automatic_evaluation.evaluator_reasoning_mode)
+        self.assertEqual(
+            automatic_evaluation.evaluator_reasoning_effort,
+            "low",
+        )
         automatic_evaluation_id = (
             automatic_evaluation.evaluation_id
             if automatic_evaluation is not None
@@ -1745,7 +1779,7 @@ class TaskManagementTests(unittest.TestCase):
         self.assertEqual(stored_run.evaluations[1].evaluation_type, "automatic")
         self.assertEqual(
             stored_run.evaluations[1].evaluation_name,
-            "Sol max – Vorprüfung",
+            "Luna low – Vorprüfung",
         )
         self.assertEqual(stored_run.evaluations[1].ratings[0].score, 2)
 

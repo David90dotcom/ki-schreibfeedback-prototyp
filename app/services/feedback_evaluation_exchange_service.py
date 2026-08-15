@@ -99,6 +99,8 @@ class FeedbackEvaluationExchangeService:
             "evaluation_name",
             "evaluator_provider",
             "evaluator_model",
+            "evaluator_reasoning_mode",
+            "evaluator_reasoning_effort",
             "evaluation_duration_ms",
             "evaluation_queue_duration_ms",
             "evaluation_execution_duration_ms",
@@ -241,6 +243,12 @@ class FeedbackEvaluationExchangeService:
             "rubric_version": evaluation.rubric_version,
             "evaluator_provider": evaluation.evaluator_provider,
             "evaluator_model": evaluation.evaluator_model,
+            "evaluator_reasoning_mode": (
+                evaluation.evaluator_reasoning_mode
+            ),
+            "evaluator_reasoning_effort": (
+                evaluation.evaluator_reasoning_effort
+            ),
             "evaluator_prompt_version": (
                 evaluation.evaluator_prompt_version
             ),
@@ -496,6 +504,16 @@ class FeedbackEvaluationExchangeService:
             f"{label}: evaluator_prompt_version",
             200,
         )
+        evaluator_reasoning_mode = cls._optional_text(
+            data.get("evaluator_reasoning_mode"),
+            f"{label}: evaluator_reasoning_mode",
+            32,
+        )
+        evaluator_reasoning_effort = cls._optional_text(
+            data.get("evaluator_reasoning_effort"),
+            f"{label}: evaluator_reasoning_effort",
+            32,
+        )
 
         if evaluation_type == AUTOMATIC_EVALUATION_TYPE and not all(
             (
@@ -529,6 +547,8 @@ class FeedbackEvaluationExchangeService:
             ratings=ratings,
             evaluator_provider=evaluator_provider,
             evaluator_model=evaluator_model,
+            evaluator_reasoning_mode=evaluator_reasoning_mode,
+            evaluator_reasoning_effort=evaluator_reasoning_effort,
             evaluator_prompt_version=evaluator_prompt_version,
             source_evaluation_id=cls._optional_text(
                 data.get("source_evaluation_id"),
@@ -615,6 +635,16 @@ class FeedbackEvaluationExchangeService:
             "evaluator_model": (
                 FeedbackEvaluationExchangeService._csv_safe_text(
                     evaluation.evaluator_model or ""
+                )
+            ),
+            "evaluator_reasoning_mode": (
+                FeedbackEvaluationExchangeService._csv_safe_text(
+                    evaluation.evaluator_reasoning_mode or ""
+                )
+            ),
+            "evaluator_reasoning_effort": (
+                FeedbackEvaluationExchangeService._csv_safe_text(
+                    evaluation.evaluator_reasoning_effort or ""
                 )
             ),
             "evaluation_duration_ms": (

@@ -66,6 +66,7 @@ from app.llm.openai_client import (
 from app.llm.openai_evaluation_client import (
     OPENAI_EVALUATION_REASONING_EFFORT,
     OPENAI_EVALUATION_REASONING_MODE,
+    OPENAI_EVALUATION_REASONING_MODES,
     OpenAIAutomaticEvaluationProvider,
 )
 from app.llm.runpod_client import (
@@ -198,6 +199,11 @@ OPENAI_REASONING_EFFORT_OPTIONS = (
     ("high", "High – hoher Denkaufwand"),
     ("xhigh", "XHigh – sehr hoher Denkaufwand"),
     ("max", "Max – maximale Denktiefe"),
+)
+
+OPENAI_EVALUATION_REASONING_MODE_OPTIONS = (
+    ("", "Standard – kein erzwungener Pro-Modus"),
+    ("pro", "Pro – gründliche Prüfung"),
 )
 
 MISTRAL_MODEL_CATALOG = (
@@ -465,6 +471,25 @@ def _openai_model_options() -> list[tuple[str, str]]:
         if model_name != configured_model
     )
 
+    return options
+
+
+def _openai_evaluation_model_options() -> list[tuple[str, str]]:
+    """Liefert die freigegebenen Modelle für die Meta-Bewertung."""
+
+    labels = dict(OPENAI_MODEL_CATALOG)
+    configured_model = settings.openai_evaluation_model
+    options = [
+        (
+            configured_model,
+            labels.get(configured_model, configured_model),
+        )
+    ]
+    options.extend(
+        (model_name, label)
+        for model_name, label in OPENAI_MODEL_CATALOG
+        if model_name != configured_model
+    )
     return options
 
 
@@ -1410,6 +1435,41 @@ def _validate_openai_reasoning_effort(
     return normalized
 
 
+def _validate_openai_evaluation_model(model_name: str) -> str:
+    normalized = _validate_model_name(
+        model_name,
+        "",
+        settings.openai_evaluation_model,
+    )
+    allowed_models = {
+        model
+        for model, _label in _openai_evaluation_model_options()
+    }
+
+    if normalized not in allowed_models:
+        raise ValueError(
+            "Bitte wähle ein freigegebenes OpenAI-Bewertungsmodell."
+        )
+
+    return normalized
+
+
+def _validate_openai_evaluation_reasoning_mode(
+    reasoning_mode: str,
+) -> str | None:
+    normalized = reasoning_mode.strip().lower()
+
+    if not normalized:
+        return None
+
+    if normalized not in OPENAI_EVALUATION_REASONING_MODES:
+        raise ValueError(
+            "Bitte wähle einen gültigen OpenAI-Denkmodus."
+        )
+
+    return normalized
+
+
 def _validate_runpod_tracking_id(raw_tracking_id: str) -> str:
     """Akzeptiert ausschließlich kanonische UUIDs aus dem Analyseformular."""
 
@@ -2329,11 +2389,20 @@ async def feedback_evaluations_page(
             "automatic_evaluation_model": (
                 automatic_evaluation_provider.model_name
             ),
+            "automatic_evaluation_model_options": (
+                _openai_evaluation_model_options()
+            ),
             "automatic_evaluation_reasoning_mode": (
                 OPENAI_EVALUATION_REASONING_MODE
             ),
+            "automatic_evaluation_reasoning_mode_options": (
+                OPENAI_EVALUATION_REASONING_MODE_OPTIONS
+            ),
             "automatic_evaluation_reasoning_effort": (
                 OPENAI_EVALUATION_REASONING_EFFORT
+            ),
+            "automatic_evaluation_reasoning_effort_options": (
+                OPENAI_REASONING_EFFORT_OPTIONS
             ),
             "automatic_evaluation_prompt_version": (
                 AUTOMATIC_EVALUATION_PROMPT_VERSION
@@ -2694,6 +2763,15 @@ async def save_feedback_run_for_evaluation(
 async def create_automatic_feedback_evaluation(
     request: Request,
     feedback_run_id: UUID,
+    evaluation_model: str = Form(
+        "",
+        max_length=MAX_MODEL_NAME_CHARS,
+    ),
+    evaluation_reasoning_mode: str = Form("", max_length=16),
+    evaluation_reasoning_effort: str = Form(
+        OPENAI_EVALUATION_REASONING_EFFORT,
+        max_length=16,
+    ),
     evaluation_name: str = Form(
         "",
         max_length=MAX_EVALUATION_NAME_CHARS,
@@ -2706,13 +2784,29 @@ async def create_automatic_feedback_evaluation(
     _require_valid_csrf_token(request, csrf_token)
 
     try:
+        selected_model = _validate_openai_evaluation_model(
+            evaluation_model
+        )
+        selected_reasoning_mode = (
+            _validate_openai_evaluation_reasoning_mode(
+                evaluation_reasoning_mode
+            )
+        )
+        selected_reasoning_effort = (
+            _validate_openai_reasoning_effort(
+                evaluation_reasoning_effort
+            )
+        )
         stored_feedback_run = (
             await task_store.get_feedback_run_for_evaluation(
                 str(feedback_run_id)
             )
         )
         result = await automatic_feedback_evaluation_service.evaluate(
-            stored_feedback_run
+            stored_feedback_run,
+            model_name=selected_model,
+            reasoning_mode=selected_reasoning_mode,
+            reasoning_effort=selected_reasoning_effort,
         )
         await task_store.create_automatic_feedback_evaluation(
             feedback_run_id=str(feedback_run_id),
@@ -2726,6 +2820,8 @@ async def create_automatic_feedback_evaluation(
             },
             evaluator_provider=result.provider,
             evaluator_model=result.model,
+            evaluator_reasoning_mode=result.reasoning_mode,
+            evaluator_reasoning_effort=result.reasoning_effort,
             evaluator_prompt_version=result.prompt_version,
             duration_ms=result.duration_ms,
             provider_request_id=result.provider_request_id,

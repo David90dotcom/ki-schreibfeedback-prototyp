@@ -5,10 +5,13 @@ from typing import Any, Protocol
 
 from openai import AsyncOpenAI
 
+from app.llm.openai_client import OPENAI_REASONING_EFFORTS
+
 
 OPENAI_EVALUATION_PROVIDER = "openai"
-OPENAI_EVALUATION_REASONING_MODE = "pro"
-OPENAI_EVALUATION_REASONING_EFFORT = "high"
+OPENAI_EVALUATION_REASONING_MODE: str | None = None
+OPENAI_EVALUATION_REASONING_EFFORT = "medium"
+OPENAI_EVALUATION_REASONING_MODES = ("pro",)
 OPENAI_EVALUATION_MAX_OUTPUT_TOKENS = 25000
 
 
@@ -20,6 +23,8 @@ class AutomaticEvaluationModelResponse:
     model: str
     text: str
     provider_request_id: str | None
+    reasoning_mode: str | None = None
+    reasoning_effort: str | None = None
 
 
 class AutomaticEvaluationProvider(Protocol):
@@ -35,6 +40,11 @@ class AutomaticEvaluationProvider(Protocol):
         input_text: str,
         response_schema: dict[str, Any],
         response_schema_name: str,
+        model_name: str | None = None,
+        reasoning_mode: str | None = OPENAI_EVALUATION_REASONING_MODE,
+        reasoning_effort: str | None = (
+            OPENAI_EVALUATION_REASONING_EFFORT
+        ),
     ) -> AutomaticEvaluationModelResponse:
         """Bewertet ein Feedback und liefert streng strukturiertes JSON."""
         ...
@@ -65,6 +75,11 @@ class OpenAIAutomaticEvaluationProvider:
         input_text: str,
         response_schema: dict[str, Any],
         response_schema_name: str,
+        model_name: str | None = None,
+        reasoning_mode: str | None = OPENAI_EVALUATION_REASONING_MODE,
+        reasoning_effort: str | None = (
+            OPENAI_EVALUATION_REASONING_EFFORT
+        ),
     ) -> AutomaticEvaluationModelResponse:
         if not self.api_key:
             raise RuntimeError(
@@ -72,18 +87,40 @@ class OpenAIAutomaticEvaluationProvider:
                 "verfügbar. Hinterlege OPENAI_API_KEY in der .env-Datei."
             )
 
-        client = AsyncOpenAI(api_key=self.api_key)
-        response = await client.responses.create(
-            model=self.model_name,
-            instructions=instructions,
-            input=input_text,
-            reasoning={
-                "mode": OPENAI_EVALUATION_REASONING_MODE,
-                "effort": OPENAI_EVALUATION_REASONING_EFFORT,
-            },
-            max_output_tokens=OPENAI_EVALUATION_MAX_OUTPUT_TOKENS,
-            store=False,
-            text={
+        effective_model = (model_name or self.model_name).strip()
+        normalized_reasoning_mode = (
+            reasoning_mode.strip().lower()
+            if isinstance(reasoning_mode, str)
+            else ""
+        )
+        normalized_reasoning_effort = (
+            reasoning_effort.strip().lower()
+            if isinstance(reasoning_effort, str)
+            else ""
+        )
+
+        if not effective_model:
+            raise ValueError("Das Bewertungsmodell darf nicht leer sein.")
+        if (
+            normalized_reasoning_mode
+            and normalized_reasoning_mode
+            not in OPENAI_EVALUATION_REASONING_MODES
+        ):
+            raise ValueError("Der ausgewählte Denkmodus ist ungültig.")
+        if (
+            normalized_reasoning_effort
+            and normalized_reasoning_effort
+            not in OPENAI_REASONING_EFFORTS
+        ):
+            raise ValueError("Der ausgewählte Denkaufwand ist ungültig.")
+
+        request: dict[str, Any] = {
+            "model": effective_model,
+            "instructions": instructions,
+            "input": input_text,
+            "max_output_tokens": OPENAI_EVALUATION_MAX_OUTPUT_TOKENS,
+            "store": False,
+            "text": {
                 "verbosity": "high",
                 "format": {
                     "type": "json_schema",
@@ -92,7 +129,18 @@ class OpenAIAutomaticEvaluationProvider:
                     "schema": response_schema,
                 },
             },
-        )
+        }
+        reasoning: dict[str, str] = {}
+
+        if normalized_reasoning_mode:
+            reasoning["mode"] = normalized_reasoning_mode
+        if normalized_reasoning_effort:
+            reasoning["effort"] = normalized_reasoning_effort
+        if reasoning:
+            request["reasoning"] = reasoning
+
+        client = AsyncOpenAI(api_key=self.api_key)
+        response = await client.responses.create(**request)
 
         if response.status != "completed":
             raise RuntimeError(
@@ -111,7 +159,7 @@ class OpenAIAutomaticEvaluationProvider:
         actual_model = (
             response.model.strip()
             if isinstance(response.model, str) and response.model.strip()
-            else self.model_name
+            else effective_model
         )
         request_id = (
             response.id.strip()
@@ -124,4 +172,6 @@ class OpenAIAutomaticEvaluationProvider:
             model=actual_model,
             text=response_text,
             provider_request_id=request_id,
+            reasoning_mode=normalized_reasoning_mode or None,
+            reasoning_effort=normalized_reasoning_effort or None,
         )

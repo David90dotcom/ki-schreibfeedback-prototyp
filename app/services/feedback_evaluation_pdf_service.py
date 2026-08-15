@@ -397,6 +397,16 @@ class FeedbackEvaluationPdfService:
                                 or "Nicht verfügbar",
                             ),
                             (
+                                "Denkmodus",
+                                evaluation.evaluator_reasoning_mode
+                                or "Standard",
+                            ),
+                            (
+                                "Denkaufwand",
+                                evaluation.evaluator_reasoning_effort
+                                or "Modellstandard",
+                            ),
+                            (
                                 "Prompt-Version",
                                 evaluation.evaluator_prompt_version
                                 or "Nicht verfügbar",

@@ -180,6 +180,8 @@ class StoredFeedbackEvaluation:
     queue_duration_ms: float | None
     execution_duration_ms: float | None
     provider_request_id: str | None
+    evaluator_reasoning_mode: str | None = None
+    evaluator_reasoning_effort: str | None = None
 
     @property
     def type_label(self) -> str:

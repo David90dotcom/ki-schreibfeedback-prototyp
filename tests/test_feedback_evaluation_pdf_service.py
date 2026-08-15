@@ -47,6 +47,8 @@ class FeedbackEvaluationPdfServiceTests(unittest.TestCase):
             ratings=ratings,
             evaluator_provider="openai",
             evaluator_model="gpt-5.6-sol",
+            evaluator_reasoning_mode="pro",
+            evaluator_reasoning_effort="high",
             evaluator_prompt_version="meta-evaluator-v1",
             source_evaluation_id=None,
             duration_ms=2345,

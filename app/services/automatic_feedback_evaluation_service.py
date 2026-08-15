@@ -13,6 +13,8 @@ from app.domain.feedback_evaluation import (
     StoredFeedbackRun,
 )
 from app.llm.openai_evaluation_client import (
+    OPENAI_EVALUATION_REASONING_EFFORT,
+    OPENAI_EVALUATION_REASONING_MODE,
     AutomaticEvaluationProvider,
 )
 
@@ -36,6 +38,8 @@ class AutomaticFeedbackEvaluationResult:
     duration_ms: int
     provider_request_id: str | None
     ratings: tuple[FeedbackEvaluationRating, ...]
+    reasoning_mode: str | None = None
+    reasoning_effort: str | None = None
 
 
 class AutomaticFeedbackEvaluationService:
@@ -51,6 +55,12 @@ class AutomaticFeedbackEvaluationService:
     async def evaluate(
         self,
         feedback_run: StoredFeedbackRun,
+        *,
+        model_name: str | None = None,
+        reasoning_mode: str | None = OPENAI_EVALUATION_REASONING_MODE,
+        reasoning_effort: str | None = (
+            OPENAI_EVALUATION_REASONING_EFFORT
+        ),
     ) -> AutomaticFeedbackEvaluationResult:
         instructions = self._build_instructions()
         input_text = self._build_input_text(feedback_run)
@@ -61,6 +71,9 @@ class AutomaticFeedbackEvaluationService:
             input_text=input_text,
             response_schema=response_schema,
             response_schema_name=AUTOMATIC_EVALUATION_SCHEMA_NAME,
+            model_name=model_name,
+            reasoning_mode=reasoning_mode,
+            reasoning_effort=reasoning_effort,
         )
         duration_ms = int((perf_counter() - started_at) * 1000)
         ratings = self._parse_response(response.text)
@@ -72,6 +85,8 @@ class AutomaticFeedbackEvaluationService:
             duration_ms=duration_ms,
             provider_request_id=response.provider_request_id,
             ratings=ratings,
+            reasoning_mode=response.reasoning_mode,
+            reasoning_effort=response.reasoning_effort,
         )
 
     @staticmethod

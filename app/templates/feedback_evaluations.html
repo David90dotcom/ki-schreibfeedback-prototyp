@@ -357,14 +357,15 @@
                             <strong>Automatische Vorbewertung</strong>
                         </span>
                         <span class="meta-model-badge">
-                            {{ automatic_evaluation_model }}
+                            {{ automatic_evaluation_model }} ·
+                            {{ automatic_evaluation_reasoning_effort }}
                         </span>
                     </summary>
 
                     <div class="meta-automatic-content">
 
                         <p>
-                            Ein getrenntes starkes Bewertungsmodell prüft jede
+                            Ein getrenntes Bewertungsmodell prüft jede
                             Feedbackaussage gegen Aufgabe, Aufgabenmaterial,
                             optionalen Originaltext, Kriterien und Schülertext.
                             Es bewertet dieselben vier Qualitätskriterien von
@@ -393,13 +394,13 @@
                             <dd>{{ automatic_evaluation_provider }}</dd>
                         </div>
                         <div>
-                            <dt>Bewertungsmodell</dt>
+                            <dt>Standardmodell</dt>
                             <dd>{{ automatic_evaluation_model }}</dd>
                         </div>
                         <div>
-                            <dt>Denkmodus</dt>
+                            <dt>Standard-Denkaufwand</dt>
                             <dd>
-                                {{ automatic_evaluation_reasoning_mode }} ·
+                                {{ automatic_evaluation_reasoning_mode or "Standard" }} ·
                                 {{ automatic_evaluation_reasoning_effort }}
                             </dd>
                         </div>
@@ -437,6 +438,79 @@
                                 value="{{ csrf_token }}"
                             >
 
+                            <details class="meta-automatic-settings">
+                                <summary>
+                                    Bewertungsmodell und Denkaufwand
+                                </summary>
+                                <p class="hint">
+                                    Standard: {{ automatic_evaluation_model }} ·
+                                    {{ automatic_evaluation_reasoning_mode or "Standardmodus" }} ·
+                                    {{ automatic_evaluation_reasoning_effort }}.
+                                    Für Vergleichsläufe kann diese Kombination
+                                    gezielt geändert werden.
+                                </p>
+                                <div class="meta-automatic-settings-grid">
+                                    <label
+                                        for="automatic-evaluation-model-{{ feedback_run.feedback_run_id }}"
+                                    >
+                                        Bewertungsmodell
+                                        <select
+                                            id="automatic-evaluation-model-{{ feedback_run.feedback_run_id }}"
+                                            name="evaluation_model"
+                                            required
+                                            data-automatic-evaluation-model
+                                        >
+                                            {% for model_name, model_label in automatic_evaluation_model_options %}
+                                                <option
+                                                    value="{{ model_name }}"
+                                                    {% if model_name == automatic_evaluation_model %}selected{% endif %}
+                                                >
+                                                    {{ model_label }}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                    </label>
+
+                                    <label
+                                        for="automatic-evaluation-reasoning-mode-{{ feedback_run.feedback_run_id }}"
+                                    >
+                                        Denkmodus
+                                        <select
+                                            id="automatic-evaluation-reasoning-mode-{{ feedback_run.feedback_run_id }}"
+                                            name="evaluation_reasoning_mode"
+                                        >
+                                            {% for mode, mode_label in automatic_evaluation_reasoning_mode_options %}
+                                                <option
+                                                    value="{{ mode }}"
+                                                    {% if mode == (automatic_evaluation_reasoning_mode or "") %}selected{% endif %}
+                                                >
+                                                    {{ mode_label }}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                    </label>
+
+                                    <label
+                                        for="automatic-evaluation-reasoning-effort-{{ feedback_run.feedback_run_id }}"
+                                    >
+                                        Denkaufwand
+                                        <select
+                                            id="automatic-evaluation-reasoning-effort-{{ feedback_run.feedback_run_id }}"
+                                            name="evaluation_reasoning_effort"
+                                        >
+                                            {% for effort, effort_label in automatic_evaluation_reasoning_effort_options %}
+                                                <option
+                                                    value="{{ effort }}"
+                                                    {% if effort == automatic_evaluation_reasoning_effort %}selected{% endif %}
+                                                >
+                                                    {{ effort_label }}
+                                                </option>
+                                            {% endfor %}
+                                        </select>
+                                    </label>
+                                </div>
+                            </details>
+
                             <label
                                 class="meta-evaluation-name-label"
                                 for="automatic-evaluation-name-{{ feedback_run.feedback_run_id }}"
@@ -449,7 +523,7 @@
                                 type="text"
                                 maxlength="{{ max_evaluation_name_chars }}"
                                 autocomplete="off"
-                                placeholder="z. B. Sol max – Vergleichslauf 1"
+                                placeholder="z. B. Vergleichslauf 1"
                             >
                             <p class="hint meta-evaluation-name-hint">
                                 Leer lassen, wenn die automatische Bezeichnung
@@ -605,6 +679,18 @@
                                                 <div>
                                                     <dt>Bewertungsmodell</dt>
                                                     <dd>{{ evaluation.evaluator_model }}</dd>
+                                                </div>
+                                                <div>
+                                                    <dt>Denkmodus</dt>
+                                                    <dd>
+                                                        {{ evaluation.evaluator_reasoning_mode or "Standard" }}
+                                                    </dd>
+                                                </div>
+                                                <div>
+                                                    <dt>Denkaufwand</dt>
+                                                    <dd>
+                                                        {{ evaluation.evaluator_reasoning_effort or "Modellstandard" }}
+                                                    </dd>
                                                 </div>
                                                 <div>
                                                     <dt>Bewertungsdauer</dt>

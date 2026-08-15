@@ -96,6 +96,8 @@ async def _create_evaluated_feedback_run(store: TaskStore):
         justifications=justifications,
         evaluator_provider="openai",
         evaluator_model="gpt-test",
+        evaluator_reasoning_mode="pro",
+        evaluator_reasoning_effort="high",
         evaluator_prompt_version="meta-prompt-test",
         duration_ms=2_500,
         queue_duration_ms=50.0,
@@ -175,6 +177,8 @@ class FeedbackEvaluationExchangeServiceTests(unittest.TestCase):
             manual.source_evaluation_id,
             automatic.evaluation_id,
         )
+        self.assertEqual(automatic.evaluator_reasoning_mode, "pro")
+        self.assertEqual(automatic.evaluator_reasoning_effort, "high")
 
     def test_csv_contains_metrics_and_scores_but_no_free_text(self) -> None:
         content = FeedbackEvaluationExchangeService.export_csv(
@@ -205,6 +209,11 @@ class FeedbackEvaluationExchangeServiceTests(unittest.TestCase):
             "3",
         )
         self.assertEqual(automatic_row["average_score"], "2.0")
+        self.assertEqual(automatic_row["evaluator_reasoning_mode"], "pro")
+        self.assertEqual(
+            automatic_row["evaluator_reasoning_effort"],
+            "high",
+        )
         self.assertEqual(manual_row["average_score"], "2.25")
         self.assertNotIn(self.feedback_run.student_text, decoded)
         self.assertNotIn("Ausführlicher Feedbacktext", decoded)
@@ -262,6 +271,14 @@ class FeedbackEvaluationExchangeServiceTests(unittest.TestCase):
         self.assertEqual(
             imported_manual.source_evaluation_id,
             imported_automatic.evaluation_id,
+        )
+        self.assertEqual(
+            imported_automatic.evaluator_reasoning_mode,
+            "pro",
+        )
+        self.assertEqual(
+            imported_automatic.evaluator_reasoning_effort,
+            "high",
         )
         self.assertNotEqual(
             imported_automatic.evaluation_id,
