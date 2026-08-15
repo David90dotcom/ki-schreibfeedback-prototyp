@@ -1095,6 +1095,12 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn(CRITERION_WISE_PIPELINE_VERSION, overview.text)
         self.assertIn("Getrennte Modellaufrufe", overview.text)
         self.assertIn("je ein Aufruf pro Kriterium", overview.text)
+        self.assertIn(
+            "Einordnung im Feedbacklauf:",
+            overview.text,
+        )
+        self.assertIn("Weitgehend erkennbar", overview.text)
+        self.assertNotIn("Überwiegend erfüllt", overview.text)
 
     def test_criterion_wise_feedback_is_server_default_for_task(
         self,

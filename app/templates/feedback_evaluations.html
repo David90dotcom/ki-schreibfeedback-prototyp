@@ -266,11 +266,23 @@
                                 <h3>Verwendete Feedback-Kriterien</h3>
                                 <ol class="meta-source-criteria">
                                     {% for criterion in feedback_run.task_snapshot.rubric.criteria %}
+                                        {% set criterion_result = namespace(status="") %}
+                                        {% for feedback_item in feedback_run.feedback_payload.criteria %}
+                                            {% if feedback_item.criterion_id == criterion.criterion_id %}
+                                                {% set criterion_result.status = feedback_item.status %}
+                                            {% endif %}
+                                        {% endfor %}
                                         <li>
                                             <strong>
                                                 {{ criterion.title or ("Kriterium " ~ loop.index) }}
                                             </strong>
                                             <span>{{ criterion.text }}</span>
+                                            {% if criterion_result.status %}
+                                                <small class="meta-source-criterion-status">
+                                                    Einordnung im Feedbacklauf:
+                                                    {{ criterion_result.status | criterion_status_display_label }}
+                                                </small>
+                                            {% endif %}
                                         </li>
                                     {% endfor %}
                                 </ol>

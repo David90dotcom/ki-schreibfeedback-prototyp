@@ -2121,6 +2121,14 @@ fieldset > label:first-of-type {
     margin-top: 3px;
 }
 
+.meta-source-criterion-status {
+    display: block;
+    margin-top: 5px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.4;
+}
+
 .meta-feedback-details {
     margin: 18px 0;
     overflow: hidden;
