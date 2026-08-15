@@ -30,8 +30,10 @@ from app.services.feedback_service import (
     FeedbackResult,
 )
 from app.services.rubric_feedback_service import (
+    EVIDENCE_REPAIR_PROMPT_VERSION,
     RUBRIC_FEEDBACK_PROMPT_VERSION,
     CriterionFeedbackResult,
+    EvidenceRepairAttempt,
     RubricFeedbackResult,
 )
 from app.services.task_store import TaskStore, TaskStoreError
@@ -846,6 +848,17 @@ class TaskManagementTests(unittest.TestCase):
             execution_duration_ms=180.0,
             provider_request_id="refresh-request",
             reasoning_effort="high",
+            evidence_repair_attempts=(
+                EvidenceRepairAttempt(
+                    criterion_id=first_criterion.criterion_id,
+                    prompt_version=EVIDENCE_REPAIR_PROMPT_VERSION,
+                    outcome="accepted",
+                    duration_ms=30,
+                    initial_provider_request_id="refresh-request-initial",
+                    provider_request_id="refresh-request",
+                    resolved_to_assessable=True,
+                ),
+            ),
         )
 
         with patch.object(
@@ -920,6 +933,13 @@ class TaskManagementTests(unittest.TestCase):
             selected.generation_context["criterion_refreshes"]["count"],
             1,
         )
+        refresh_item = selected.generation_context[
+            "criterion_refreshes"
+        ]["items"][0]
+        self.assertEqual(
+            refresh_item["evidence_repair_attempts"][0]["outcome"],
+            "accepted",
+        )
 
         overview = self.client.get("/feedback-evaluations")
         self.assertIn("Einzelaktualisierungen", overview.text)
@@ -959,6 +979,17 @@ class TaskManagementTests(unittest.TestCase):
             criterion_request_count=2,
             criterion_request_durations_ms=(180, 240),
             criterion_provider_request_ids=("request-1", "request-2"),
+            evidence_repair_attempts=(
+                EvidenceRepairAttempt(
+                    criterion_id=task.rubric.criteria[0].criterion_id,
+                    prompt_version=EVIDENCE_REPAIR_PROMPT_VERSION,
+                    outcome="accepted",
+                    duration_ms=40,
+                    initial_provider_request_id="request-1a",
+                    provider_request_id="request-1b",
+                    resolved_to_assessable=True,
+                ),
+            ),
         )
 
         with (
@@ -1005,6 +1036,8 @@ class TaskManagementTests(unittest.TestCase):
             "Kriterienweise Analyse abgeschlossen",
             response.text,
         )
+        self.assertIn("Reguläre Kriterienaufrufe", response.text)
+        self.assertIn("Zusätzliche Belegreparaturen", response.text)
         self.assertIn("180 ms", response.text)
         self.assertIn("240 ms", response.text)
 

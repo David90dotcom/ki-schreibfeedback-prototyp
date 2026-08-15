@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import unittest
+from dataclasses import replace
 from datetime import datetime, timezone
 
 from app.domain.rubric import (
@@ -12,6 +13,7 @@ from app.domain.rubric import (
 )
 from app.llm.base import LLMResponse
 from app.services.rubric_feedback_service import (
+    EVIDENCE_REPAIR_PROMPT_VERSION,
     EVIDENCE_VALIDATION_VERSION,
     MISSING_NEXT_STEP_FALLBACK,
     PARTIAL_RESULT_OVERALL_FEEDBACK,
@@ -69,6 +71,38 @@ class _RubricProvider:
         )
 
 
+class _QueuedRubricProvider:
+    provider_name = "mistral"
+    model_name = "mistral-small-latest"
+
+    def __init__(self, *responses: str) -> None:
+        self.responses = list(responses)
+        self.prompts: list[str] = []
+        self.response_schema_names: list[str] = []
+
+    async def generate(
+        self,
+        prompt: str,
+        *,
+        response_schema: dict[str, object] | None = None,
+        response_schema_name: str = "structured_response",
+    ) -> LLMResponse:
+        del response_schema
+        self.prompts.append(prompt)
+        self.response_schema_names.append(response_schema_name)
+        position = len(self.prompts)
+
+        return LLMResponse(
+            provider=self.provider_name,
+            model=self.model_name,
+            text=self.responses.pop(0),
+            queue_duration_ms=10.0 * position,
+            execution_duration_ms=25.0 * position,
+            provider_request_id=f"request-{position}",
+            worker_id=f"worker-{position}",
+        )
+
+
 def _task() -> FeedbackTask:
     timestamp = datetime.now(timezone.utc)
     return FeedbackTask(
@@ -98,6 +132,43 @@ def _task() -> FeedbackTask:
         ),
         created_at=timestamp,
         updated_at=timestamp,
+    )
+
+
+def _single_criterion_task() -> FeedbackTask:
+    task = _task()
+    return replace(
+        task,
+        rubric=replace(
+            task.rubric,
+            criteria=(task.rubric.criteria[0],),
+        ),
+    )
+
+
+def _single_criterion_response(
+    *,
+    status: str,
+    quote: str | None,
+    feedback: str,
+    next_step: str,
+) -> str:
+    return json.dumps(
+        {
+            "criteria": [
+                {
+                    "criterion_id": "K1",
+                    "status": status,
+                    "evidence_quotes": (
+                        [] if quote is None else [quote]
+                    ),
+                    "feedback": feedback,
+                    "next_step": next_step,
+                }
+            ],
+            "overall_feedback": "Einzelkriterium geprüft.",
+        },
+        ensure_ascii=False,
     )
 
 
@@ -224,7 +295,11 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             provider.prompts[0],
         )
         self.assertIn(
-            "keinen passenden Ausschnitt sicher und wörtlich",
+            "nicht nur deshalb, weil das wortgleiche Kopieren",
+            provider.prompts[0],
+        )
+        self.assertIn(
+            "bessere der beiden Stufen",
             provider.prompts[0],
         )
         self.assertIn(
@@ -339,6 +414,147 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             generation_context["unverified_criterion_count"],
             0,
         )
+
+    def test_repairs_one_rejected_single_criterion_evidence_quote(
+        self,
+    ) -> None:
+        provider = _QueuedRubricProvider(
+            _single_criterion_response(
+                status="mostly_met",
+                quote="Das Modell formuliert diesen Beleg nur sinngemäß.",
+                feedback="Die Einleitung ist weitgehend vollständig.",
+                next_step="Ergänze noch den fehlenden Autor.",
+            ),
+            _single_criterion_response(
+                status="mostly_met",
+                quote="Ein anonymisierter Schülertext",
+                feedback="Die Einleitung ist weitgehend vollständig.",
+                next_step="Ergänze noch den fehlenden Autor.",
+            ),
+        )
+        service = RubricFeedbackService(
+            providers={"mistral": provider},
+            max_input_chars=8000,
+        )
+
+        result = asyncio.run(
+            service.analyze_text(
+                student_text="Ein anonymisierter Schülertext.",
+                task=_single_criterion_task(),
+                provider_key="mistral",
+            )
+        )
+
+        self.assertEqual(len(provider.prompts), 2)
+        self.assertIn(
+            "einmaliger Reparaturdurchgang",
+            provider.prompts[1],
+        )
+        self.assertIn(
+            "Das Modell formuliert diesen Beleg nur sinngemäß.",
+            provider.prompts[1],
+        )
+        self.assertEqual(
+            provider.response_schema_names,
+            ["rubric_feedback", "rubric_feedback"],
+        )
+        self.assertEqual(result.criteria_feedback[0].status, "mostly_met")
+        self.assertTrue(result.criteria_feedback[0].evidence_verified)
+        self.assertEqual(
+            result.criteria_feedback[0].evidence_quotes,
+            ("Ein anonymisierter Schülertext",),
+        )
+        self.assertEqual(result.evidence_warnings, ())
+        self.assertEqual(result.queue_duration_ms, 30.0)
+        self.assertEqual(result.execution_duration_ms, 75.0)
+        self.assertEqual(result.provider_request_id, "request-2")
+        self.assertEqual(len(result.evidence_repair_attempts), 1)
+        attempt = result.evidence_repair_attempts[0]
+        self.assertEqual(attempt.prompt_version, EVIDENCE_REPAIR_PROMPT_VERSION)
+        self.assertEqual(attempt.outcome, "accepted")
+        self.assertTrue(attempt.resolved_to_assessable)
+        self.assertEqual(attempt.initial_provider_request_id, "request-1")
+        self.assertEqual(attempt.provider_request_id, "request-2")
+
+        repair_context = result.payload()["generation_context"][
+            "evidence_repair"
+        ]
+        self.assertEqual(repair_context["attempt_count"], 1)
+        self.assertEqual(repair_context["accepted_count"], 1)
+        self.assertEqual(
+            repair_context["resolved_to_assessable_count"],
+            1,
+        )
+
+    def test_stops_after_one_failed_evidence_repair_attempt(self) -> None:
+        provider = _QueuedRubricProvider(
+            _single_criterion_response(
+                status="partially_met",
+                quote="Erster erfundener Beleg.",
+                feedback="Angeblicher Befund.",
+                next_step="Angeblicher Schritt.",
+            ),
+            _single_criterion_response(
+                status="partially_met",
+                quote="Zweiter erfundener Beleg.",
+                feedback="Noch ein angeblicher Befund.",
+                next_step="Noch ein angeblicher Schritt.",
+            ),
+        )
+        service = RubricFeedbackService(
+            providers={"mistral": provider},
+            max_input_chars=8000,
+        )
+
+        result = asyncio.run(
+            service.analyze_text(
+                student_text="Ein anonymisierter Schülertext.",
+                task=_single_criterion_task(),
+                provider_key="mistral",
+            )
+        )
+
+        self.assertEqual(len(provider.prompts), 2)
+        self.assertEqual(
+            result.criteria_feedback[0].status,
+            "not_assessable",
+        )
+        self.assertFalse(result.criteria_feedback[0].evidence_verified)
+        self.assertEqual(len(result.evidence_warnings), 1)
+        self.assertEqual(len(result.evidence_repair_attempts), 1)
+        attempt = result.evidence_repair_attempts[0]
+        self.assertEqual(attempt.outcome, "evidence_validation_failed")
+        self.assertFalse(attempt.resolved_to_assessable)
+
+    def test_does_not_retry_genuine_not_assessable_result(self) -> None:
+        provider = _QueuedRubricProvider(
+            _single_criterion_response(
+                status="not_assessable",
+                quote=None,
+                feedback="Die Bewertungsgrundlage reicht nicht aus.",
+                next_step="Prüfe diesen Aspekt selbst.",
+            )
+        )
+        service = RubricFeedbackService(
+            providers={"mistral": provider},
+            max_input_chars=8000,
+        )
+
+        result = asyncio.run(
+            service.analyze_text(
+                student_text="Ein anonymisierter Schülertext.",
+                task=_single_criterion_task(),
+                provider_key="mistral",
+            )
+        )
+
+        self.assertEqual(len(provider.prompts), 1)
+        self.assertEqual(
+            result.criteria_feedback[0].status,
+            "not_assessable",
+        )
+        self.assertEqual(result.evidence_warnings, ())
+        self.assertEqual(result.evidence_repair_attempts, ())
 
     def test_missing_or_empty_next_step_uses_neutral_fallback(
         self,

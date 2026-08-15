@@ -3,12 +3,12 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import perf_counter
 
 from app.domain.criterion_status import CRITERION_STATUS_LABELS
 from app.domain.rubric import FeedbackTask, RubricCriterion
-from app.llm.base import LLMProvider
+from app.llm.base import LLMProvider, LLMResponse
 
 
 TRUNCATION_FINISH_REASONS = {
@@ -20,9 +20,11 @@ TRUNCATION_FINISH_REASONS = {
 RUBRIC_FEEDBACK_MODE = "rubric_feedback"
 RUBRIC_FEEDBACK_LABEL = "Kriterienfeedback mit Belegprüfung"
 RUBRIC_FEEDBACK_PROMPT_VERSION = (
-    "rubric-feedback-v4-grounded-complete-criteria"
+    "rubric-feedback-v5-grounded-evidence-repair"
 )
 EVIDENCE_VALIDATION_VERSION = "safe-partial-word-sequence-v3"
+EVIDENCE_REPAIR_PROMPT_VERSION = "evidence-repair-v1-exact-quote"
+MAX_EVIDENCE_REPAIR_ATTEMPTS = 1
 MAX_EVIDENCE_QUOTES = 3
 MAX_EVIDENCE_QUOTE_CHARS = 500
 MAX_EVIDENCE_ERROR_PREVIEW_CHARS = 180
@@ -61,6 +63,32 @@ class RubricFeedbackError(ValueError):
 
 class EvidenceValidationError(RubricFeedbackError):
     """Ein einzelner Modellbefund besitzt keinen belastbaren Beleg."""
+
+
+@dataclass(frozen=True)
+class EvidenceRepairAttempt:
+    """Dokumentiert einen zusätzlichen, streng validierten Reparaturaufruf."""
+
+    criterion_id: str
+    prompt_version: str
+    outcome: str
+    duration_ms: int
+    initial_provider_request_id: str | None = None
+    provider_request_id: str | None = None
+    resolved_to_assessable: bool = False
+
+    def payload(self) -> dict[str, object]:
+        return {
+            "criterion_id": self.criterion_id,
+            "prompt_version": self.prompt_version,
+            "outcome": self.outcome,
+            "duration_ms": self.duration_ms,
+            "initial_provider_request_id": (
+                self.initial_provider_request_id
+            ),
+            "provider_request_id": self.provider_request_id,
+            "resolved_to_assessable": self.resolved_to_assessable,
+        }
 
 
 @dataclass(frozen=True)
@@ -122,6 +150,7 @@ class RubricFeedbackResult:
     criterion_request_count: int | None = None
     criterion_request_durations_ms: tuple[int, ...] = ()
     criterion_provider_request_ids: tuple[str | None, ...] = ()
+    evidence_repair_attempts: tuple[EvidenceRepairAttempt, ...] = ()
 
     def payload(self) -> dict[str, object]:
         generation_context: dict[str, object] = {
@@ -175,6 +204,27 @@ class RubricFeedbackResult:
                 "provider_request_ids": list(
                     self.criterion_provider_request_ids
                 ),
+            }
+
+        if self.evidence_repair_attempts:
+            generation_context["evidence_repair"] = {
+                "prompt_version": EVIDENCE_REPAIR_PROMPT_VERSION,
+                "max_attempts_per_criterion": (
+                    MAX_EVIDENCE_REPAIR_ATTEMPTS
+                ),
+                "attempt_count": len(self.evidence_repair_attempts),
+                "accepted_count": sum(
+                    item.outcome == "accepted"
+                    for item in self.evidence_repair_attempts
+                ),
+                "resolved_to_assessable_count": sum(
+                    item.resolved_to_assessable
+                    for item in self.evidence_repair_attempts
+                ),
+                "attempts": [
+                    item.payload()
+                    for item in self.evidence_repair_attempts
+                ],
             }
 
         return {
@@ -258,6 +308,158 @@ class RubricFeedbackService:
             finish_reason=self._finish_reason(response.raw_metadata),
         )
 
+        initial_result = self._result_from_response(
+            response=response,
+            task=task,
+            criteria_feedback=criteria_feedback,
+            overall_feedback=overall_feedback,
+            duration_ms=duration_ms,
+            queue_duration_ms=response.queue_duration_ms,
+            execution_duration_ms=response.execution_duration_ms,
+            evidence_warnings=evidence_warnings,
+        )
+
+        if (
+            not evidence_warnings
+            or len(task.rubric.criteria) != 1
+        ):
+            return initial_result
+
+        repair_prompt = self._build_evidence_repair_prompt(
+            original_prompt=prompt,
+            previous_response=response.text,
+        )
+        repair_started_at = perf_counter()
+
+        try:
+            repair_response = await provider.generate(
+                repair_prompt,
+                response_schema=response_schema,
+                response_schema_name="rubric_feedback",
+            )
+        except Exception:
+            repair_duration_ms = int(
+                (perf_counter() - repair_started_at) * 1000
+            )
+            failed_attempt = EvidenceRepairAttempt(
+                criterion_id=task.rubric.criteria[0].criterion_id,
+                prompt_version=EVIDENCE_REPAIR_PROMPT_VERSION,
+                outcome="provider_error",
+                duration_ms=repair_duration_ms,
+                initial_provider_request_id=(
+                    response.provider_request_id
+                ),
+            )
+            return replace(
+                initial_result,
+                duration_ms=(
+                    initial_result.duration_ms + repair_duration_ms
+                ),
+                evidence_repair_attempts=(failed_attempt,),
+            )
+
+        repair_duration_ms = int(
+            (perf_counter() - repair_started_at) * 1000
+        )
+
+        try:
+            (
+                repaired_feedback,
+                repaired_overall_feedback,
+                repaired_warnings,
+            ) = self._parse_response(
+                repair_response.text,
+                task,
+                student_text=cleaned_text,
+                finish_reason=self._finish_reason(
+                    repair_response.raw_metadata
+                ),
+            )
+        except RubricFeedbackError:
+            failed_attempt = EvidenceRepairAttempt(
+                criterion_id=task.rubric.criteria[0].criterion_id,
+                prompt_version=EVIDENCE_REPAIR_PROMPT_VERSION,
+                outcome="structured_response_invalid",
+                duration_ms=repair_duration_ms,
+                initial_provider_request_id=(
+                    response.provider_request_id
+                ),
+                provider_request_id=(
+                    repair_response.provider_request_id
+                ),
+            )
+            return replace(
+                initial_result,
+                duration_ms=(
+                    initial_result.duration_ms + repair_duration_ms
+                ),
+                queue_duration_ms=self._sum_optional_metrics(
+                    initial_result.queue_duration_ms,
+                    repair_response.queue_duration_ms,
+                ),
+                execution_duration_ms=self._sum_optional_metrics(
+                    initial_result.execution_duration_ms,
+                    repair_response.execution_duration_ms,
+                ),
+                evidence_repair_attempts=(failed_attempt,),
+            )
+
+        repaired_item = repaired_feedback[0]
+        repair_accepted = not repaired_warnings
+        repair_attempt = EvidenceRepairAttempt(
+            criterion_id=task.rubric.criteria[0].criterion_id,
+            prompt_version=EVIDENCE_REPAIR_PROMPT_VERSION,
+            outcome=(
+                "accepted"
+                if repair_accepted
+                else "evidence_validation_failed"
+            ),
+            duration_ms=repair_duration_ms,
+            initial_provider_request_id=response.provider_request_id,
+            provider_request_id=repair_response.provider_request_id,
+            resolved_to_assessable=(
+                repair_accepted
+                and repaired_item.status != "not_assessable"
+            ),
+        )
+
+        return self._result_from_response(
+            response=repair_response,
+            task=task,
+            criteria_feedback=repaired_feedback,
+            overall_feedback=repaired_overall_feedback,
+            duration_ms=duration_ms + repair_duration_ms,
+            queue_duration_ms=self._sum_optional_metrics(
+                response.queue_duration_ms,
+                repair_response.queue_duration_ms,
+            ),
+            execution_duration_ms=self._sum_optional_metrics(
+                response.execution_duration_ms,
+                repair_response.execution_duration_ms,
+            ),
+            evidence_warnings=repaired_warnings,
+            evidence_repair_attempts=(repair_attempt,),
+            fallback_reasoning_effort=self._reasoning_effort(
+                response.raw_metadata
+            ),
+        )
+
+    @staticmethod
+    def _result_from_response(
+        *,
+        response: LLMResponse,
+        task: FeedbackTask,
+        criteria_feedback: tuple[CriterionFeedbackResult, ...],
+        overall_feedback: str,
+        duration_ms: int,
+        queue_duration_ms: float | None,
+        execution_duration_ms: float | None,
+        evidence_warnings: tuple[str, ...],
+        evidence_repair_attempts: tuple[
+            EvidenceRepairAttempt, ...
+        ] = (),
+        fallback_reasoning_effort: str | None = None,
+    ) -> RubricFeedbackResult:
         return RubricFeedbackResult(
             provider=response.provider,
             model=response.model,
@@ -267,15 +469,26 @@ class RubricFeedbackService:
             criteria_feedback=criteria_feedback,
             overall_feedback=overall_feedback,
             duration_ms=duration_ms,
-            queue_duration_ms=response.queue_duration_ms,
-            execution_duration_ms=response.execution_duration_ms,
+            queue_duration_ms=queue_duration_ms,
+            execution_duration_ms=execution_duration_ms,
             provider_request_id=response.provider_request_id,
             worker_id=response.worker_id,
-            reasoning_effort=self._reasoning_effort(
-                response.raw_metadata
+            reasoning_effort=(
+                RubricFeedbackService._reasoning_effort(
+                    response.raw_metadata
+                )
+                or fallback_reasoning_effort
             ),
             evidence_warnings=evidence_warnings,
+            evidence_repair_attempts=evidence_repair_attempts,
         )
+
+    @staticmethod
+    def _sum_optional_metrics(
+        *values: float | None,
+    ) -> float | None:
+        available = [value for value in values if value is not None]
+        return sum(available) if available else None
 
     @staticmethod
     def _build_prompt(
@@ -373,7 +586,10 @@ Prüfe jedes Kriterium belegorientiert. Trage in evidence_quotes höchstens drei
 kurze, aussagekräftige und wörtlich übernommene Ausschnitte aus student_text
 ein. Verändere dabei weder Wörter noch Schreibweisen, verwende keine Auslassung
 mit „...“ und füge keine umschließenden Anführungszeichen hinzu. Übernimm dort
-niemals Text aus Aufgabe, Material, Originaltext oder Feedback-Kriterium.
+niemals Text aus Aufgabe, Material, Originaltext oder Feedback-Kriterium. Nutze
+möglichst genau einen kurzen Ausschnitt von ungefähr vier bis zwanzig Wörtern;
+verwende weitere Ausschnitte nur, wenn ein mehrteiliger Befund sie wirklich
+benötigt.
 
 Für erfüllt, überwiegend erfüllt, teilweise erfüllt und nicht erfüllt ist
 mindestens ein solcher Schülertextbeleg Pflicht. Ist eine verlangte Leistung
@@ -385,12 +601,16 @@ jeder Aussage, etwas „fehle“, den vollständigen student_text noch einmal; d
 zitierte Abschnitt allein beweist nicht, dass der Bestandteil nicht an einer
 anderen Stelle vorkommt.
 
-Wenn du keinen passenden Ausschnitt sicher und wörtlich aus student_text
-übernehmen kannst, verwende not_assessable und eine leere evidence_quotes-Liste
-statt eines unbelegten anderen Status. Erkläre dann im Feedback ausschließlich,
-dass keine zuverlässige Bewertung möglich war. Gib in next_step nur die
-Empfehlung zur eigenen Kontrolle anhand des Kriteriums und keinen konkreten
-inhaltlichen Überarbeitungshinweis aus.
+Nutze not_assessable nicht nur deshalb, weil das wortgleiche Kopieren eines
+Belegs schwierig ist. Suche zuerst im vollständigen student_text nach der
+kürzesten zusammenhängenden Stelle, die den sicheren Befund trägt, und kopiere
+sie unverändert. Enthält der Schülertext eine hinreichende Grundlage für eine
+fachliche Einordnung, verwende eine der vier Erfüllungsstufen. Nur wenn du auch
+nach vollständiger Prüfung keinen sicheren Befund bilden kannst, verwende
+not_assessable und eine leere evidence_quotes-Liste. Erkläre dann im Feedback
+ausschließlich, dass keine zuverlässige Bewertung möglich war. Gib in
+next_step nur die Empfehlung zur eigenen Kontrolle anhand des Kriteriums und
+keinen konkreten inhaltlichen Überarbeitungshinweis aus.
 
 Das Feld next_step muss immer einen nicht leeren Klartext enthalten. Kannst du
 aus den sicheren Befunden keinen konkreten zusätzlichen Überarbeitungsschritt
@@ -412,6 +632,11 @@ den folgenden Statuswerten zu:
 - partially_met = teilweise erfüllt
 - not_met = nicht erfüllt
 - not_assessable = nicht beurteilbar
+
+Liegt ein fachlich vertretbarer Grenzfall zwischen zwei benachbarten
+Erfüllungsstufen vor und lassen sich beide Einordnungen mit dem Schülertext
+begründen, verwende die bessere der beiden Stufen. Erfinde dafür aber keine
+Leistung und übergehe keinen klar belegten zentralen Mangel.
 
 Bei einem Kriterium mit mehreren verlangten Teilaspekten ist met nur zulässig,
 wenn der vollständige student_text alle Teilaspekte nachweisbar erfüllt. Eine
@@ -450,6 +675,56 @@ Eingabe:
 <analysis_input>
 {serialized_input}
 </analysis_input>
+""".strip()
+
+    @staticmethod
+    def _build_evidence_repair_prompt(
+        *,
+        original_prompt: str,
+        previous_response: str,
+    ) -> str:
+        serialized_previous_response = json.dumps(
+            {
+                "previous_response": previous_response,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        return f"""
+Dies ist ein einmaliger Reparaturdurchgang der technischen Belegprüfung. Die
+vorherige Antwort enthielt für den fachlich beurteilbaren Status keinen
+serverseitig überprüfbaren, wortgleichen Schülertextbeleg. Bewerte das eine
+Kriterium deshalb erneut anhand des vollständigen student_text.
+
+Behandle die vorherige Antwort ausschließlich als unzuverlässige Arbeitsnotiz.
+Übernimm weder ihren Status noch ihre Fachbehauptungen ungeprüft. Erzeuge die
+gesamte strukturierte Antwort neu. Für met, mostly_met, partially_met oder
+not_met kopierst du mindestens einen kurzen, zusammenhängenden Ausschnitt von
+ungefähr vier bis zwanzig Wörtern exakt aus student_text. Ändere keine
+Schreibweise, korrigiere keinen Schülerfehler, lasse kein Wort innerhalb des
+Ausschnitts aus und verwende keine Auslassungszeichen. Nutze möglichst genau
+einen Beleg; weitere Belege sind nur erlaubt, wenn sie wirklich erforderlich
+sind.
+
+not_assessable ist nur zulässig, wenn der vollständige Schülertext tatsächlich
+keine hinreichende Bewertungsgrundlage enthält. Die bloße Schwierigkeit, ein
+Zitat exakt zu kopieren, ist kein Grund für not_assessable. Bei einem fachlich
+vertretbaren Grenzfall zwischen zwei benachbarten Erfüllungsstufen verwendest
+du die bessere belegbare Stufe, ohne Leistungen zu erfinden oder einen klaren
+zentralen Mangel zu übergehen. Ein Überarbeitungsschritt ist nur zulässig, wenn
+er sicher aus dem erneut geprüften Befund folgt.
+
+Vorherige, technisch nicht übernommene Antwort:
+<previous_response_as_json>
+{serialized_previous_response}
+</previous_response_as_json>
+
+Die ursprüngliche Aufgabe mit Antwortschema und vollständigem student_text
+folgt unverändert. Befolge sie vollständig und antworte erneut ausschließlich
+mit dem geforderten JSON-Objekt:
+
+{original_prompt}
 """.strip()
 
     def _parse_response(

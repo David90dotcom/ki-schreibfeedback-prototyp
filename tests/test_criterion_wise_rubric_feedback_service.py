@@ -263,6 +263,61 @@ class CriterionWiseRubricFeedbackServiceTests(unittest.TestCase):
             (None, "request-2"),
         )
 
+    def test_aggregates_one_successful_evidence_repair(self) -> None:
+        provider = _QueuedProvider(
+            _response(
+                status="partially_met",
+                quote="Nur sinngemäß formulierter Beleg",
+                feedback="Der Titel ist vorhanden.",
+                next_step="Ergänze den Autor.",
+            ),
+            _response(
+                status="partially_met",
+                quote="nenne ich den Titel",
+                feedback="Der Titel ist vorhanden.",
+                next_step="Ergänze den Autor.",
+            ),
+            _response(
+                status="mostly_met",
+                quote="erkläre ich ein sprachliches Bild",
+                feedback="Das sprachliche Bild wird erläutert.",
+                next_step="Präzisiere die Wirkung.",
+            ),
+        )
+        service = CriterionWiseRubricFeedbackService(
+            providers={"ollama": provider},
+            max_input_chars=8000,
+        )
+
+        result = asyncio.run(
+            service.analyze_text(
+                student_text=STUDENT_TEXT,
+                task=_task(),
+                provider_key="ollama",
+            )
+        )
+
+        self.assertEqual(len(provider.prompts), 3)
+        self.assertIn("Reparaturdurchgang", provider.prompts[1])
+        self.assertEqual(
+            [item.status for item in result.criteria_feedback],
+            ["partially_met", "mostly_met"],
+        )
+        self.assertEqual(result.evidence_warnings, ())
+        self.assertEqual(result.criterion_request_count, 2)
+        self.assertEqual(
+            result.criterion_provider_request_ids,
+            ("request-2", "request-3"),
+        )
+        self.assertEqual(result.queue_duration_ms, 60.0)
+        self.assertEqual(result.execution_duration_ms, 120.0)
+        self.assertEqual(len(result.evidence_repair_attempts), 1)
+        self.assertTrue(
+            result.evidence_repair_attempts[0].resolved_to_assessable
+        )
+        context = result.payload()["generation_context"]
+        self.assertEqual(context["evidence_repair"]["attempt_count"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

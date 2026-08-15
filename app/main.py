@@ -2589,6 +2589,10 @@ async def refresh_feedback_run_criterion(
                 single_result.execution_duration_ms
             ),
             provider_request_id=single_result.provider_request_id,
+            evidence_repair_attempts=tuple(
+                item.payload()
+                for item in single_result.evidence_repair_attempts
+            ),
         )
         criterion_position = next(
             position

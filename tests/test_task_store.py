@@ -554,6 +554,13 @@ class TaskStoreTests(unittest.TestCase):
                 queue_duration_ms=5.0,
                 execution_duration_ms=170.0,
                 provider_request_id="request-refresh",
+                evidence_repair_attempts=(
+                    {
+                        "criterion_id": first_criterion.criterion_id,
+                        "prompt_version": "evidence-repair-v1",
+                        "outcome": "accepted",
+                    },
+                ),
             )
         )
 
@@ -599,6 +606,12 @@ class TaskStoreTests(unittest.TestCase):
         self.assertEqual(
             refresh_context["items"][0]["provider_request_id"],
             "request-refresh",
+        )
+        self.assertEqual(
+            refresh_context["items"][0][
+                "evidence_repair_attempts"
+            ][0]["outcome"],
+            "accepted",
         )
 
     def test_feedback_run_refresh_rejects_changed_or_selected_run(

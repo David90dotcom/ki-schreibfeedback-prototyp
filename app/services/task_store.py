@@ -472,6 +472,9 @@ class TaskStore:
         queue_duration_ms: float | None,
         execution_duration_ms: float | None,
         provider_request_id: str | None,
+        evidence_repair_attempts: tuple[
+            dict[str, object], ...
+        ] = (),
     ) -> int:
         """Ersetzt genau einen Befund eines noch veränderbaren Laufs."""
 
@@ -497,6 +500,7 @@ class TaskStore:
             queue_duration_ms,
             execution_duration_ms,
             provider_request_id,
+            evidence_repair_attempts,
         )
 
     async def count_feedback_runs(
@@ -1472,6 +1476,9 @@ class TaskStore:
         queue_duration_ms: float | None,
         execution_duration_ms: float | None,
         provider_request_id: str | None,
+        evidence_repair_attempts: tuple[
+            dict[str, object], ...
+        ],
     ) -> int:
         criterion_id = criterion_payload.get("criterion_id")
 
@@ -1623,6 +1630,10 @@ class TaskStore:
                             "evidence_verified": criterion_payload.get(
                                 "evidence_verified"
                             ),
+                            "evidence_repair_attempts": [
+                                dict(item)
+                                for item in evidence_repair_attempts
+                            ],
                             "refreshed_at": datetime.now(
                                 timezone.utc
                             ).isoformat(),

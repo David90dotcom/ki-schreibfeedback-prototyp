@@ -20,7 +20,9 @@ from app.services.rubric_feedback_service import (
 
 CRITERION_WISE_FEEDBACK_MODE = "rubric_feedback_criterion_wise"
 CRITERION_WISE_FEEDBACK_LABEL = "Kriterienweise Einzelanalyse"
-CRITERION_WISE_PIPELINE_VERSION = "criterion-wise-rubric-feedback-v1"
+CRITERION_WISE_PIPELINE_VERSION = (
+    "criterion-wise-rubric-feedback-v2-evidence-repair"
+)
 CRITERION_WISE_OVERALL_FEEDBACK = (
     "Die Rückmeldungen wurden für jedes Kriterium getrennt erzeugt und "
     "anschließend technisch zusammengeführt. Bearbeite zuerst die konkret "
@@ -251,6 +253,11 @@ class CriterionWiseRubricFeedbackService:
                 criterion_durations_ms
             ),
             criterion_provider_request_ids=tuple(request_ids),
+            evidence_repair_attempts=tuple(
+                attempt
+                for item in successful_results
+                for attempt in item.evidence_repair_attempts
+            ),
         )
 
     @staticmethod

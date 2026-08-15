@@ -103,14 +103,24 @@
                     Jedes Kriterium wurde in einem getrennten Modellaufruf
                     mit dem vollständigen Schülertext analysiert. Dadurch
                     werden Befunde verschiedener Kriterien weniger leicht
-                    miteinander vermischt.
+                    miteinander vermischt. Falls ein Pflichtbeleg technisch
+                    nicht überprüfbar war, durfte die Anwendung genau einen
+                    zusätzlichen Reparaturaufruf für dieses Kriterium starten.
                 </p>
 
                 <dl class="analysis-pipeline-metrics">
                     <div>
-                        <dt>Modellaufrufe</dt>
+                        <dt>Reguläre Kriterienaufrufe</dt>
                         <dd>{{ result.criterion_request_count }}</dd>
                     </div>
+                    {% if result.evidence_repair_attempts %}
+                        <div>
+                            <dt>Zusätzliche Belegreparaturen</dt>
+                            <dd>
+                                {{ result.evidence_repair_attempts | length }}
+                            </dd>
+                        </div>
+                    {% endif %}
                     <div>
                         <dt>Prompt-Version</dt>
                         <dd>{{ result.criterion_prompt_version }}</dd>
@@ -123,7 +133,7 @@
                         <ol>
                             {% for duration in result.criterion_request_durations_ms %}
                                 <li>
-                                    Kriterium {{ loop.index }}:
+                                    Kriterium {{ loop.index }} insgesamt:
                                     {{ duration | duration_ms }}
                                 </li>
                             {% endfor %}
