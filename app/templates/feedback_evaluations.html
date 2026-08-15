@@ -293,11 +293,15 @@
                             </h3>
                             {% if feedback_run.is_standard_feedback %}
                                 <div class="feedback">
-                                    {{ feedback_run.feedback_payload.overall_feedback | feedback_markdown }}
+                                    {{ feedback_run.feedback_payload.overall_feedback
+                                        | criterion_status_display_text
+                                        | feedback_markdown }}
                                 </div>
                             {% else %}
                                 <p>
-                                    {{ feedback_run.feedback_payload.overall_feedback | feedback_inline_markdown }}
+                                    {{ feedback_run.feedback_payload.overall_feedback
+                                        | criterion_status_display_text
+                                        | feedback_inline_markdown }}
                                 </p>
                             {% endif %}
                         </section>

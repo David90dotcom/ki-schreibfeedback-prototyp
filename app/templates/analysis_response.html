@@ -221,12 +221,12 @@
                     {% if result.evidence_warnings | length == 1 %}
                         Ein Kriterienbefund konnte nicht zuverlässig
                         am Schülertext belegt werden und wurde deshalb
-                        als „Nicht beurteilbar“ übernommen.
+                        als „Keine sichere Einordnung“ angezeigt.
                     {% else %}
                         {{ result.evidence_warnings | length }}
                         Kriterienbefunde konnten nicht zuverlässig am
                         Schülertext belegt werden und wurden deshalb
-                        als „Nicht beurteilbar“ übernommen.
+                        als „Keine sichere Einordnung“ angezeigt.
                     {% endif %}
                     Die übrigen belegten Rückmeldungen bleiben erhalten.
                 </p>
@@ -257,6 +257,14 @@
             </section>
         {% endif %}
 
+        <p
+            class="criterion-feedback-orientation-note"
+            data-feedback-orientation-note
+        >
+            Die farbigen Markierungen geben eine kriterienbezogene
+            Orientierung und stellen keine Note dar.
+        </p>
+
         <div class="criterion-feedback-list">
             {% for item in result.criteria_feedback %}
                 {% set criterion_position = loop.index %}
@@ -267,7 +275,9 @@
         <section class="overall-feedback">
             <h3>Zusammenfassung</h3>
             <p data-overall-feedback-text>
-                {{- result.overall_feedback | feedback_inline_markdown -}}
+                {{- result.overall_feedback
+                    | criterion_status_display_text
+                    | feedback_inline_markdown -}}
             </p>
         </section>
 

@@ -1474,6 +1474,13 @@ fieldset > label:first-of-type {
     gap: 14px;
 }
 
+.criterion-feedback-orientation-note {
+    margin: 0 0 12px;
+    color: var(--muted);
+    font-size: 0.9rem;
+    line-height: 1.45;
+}
+
 .criterion-refresh-help {
     margin-bottom: 14px;
     padding: 13px 15px;

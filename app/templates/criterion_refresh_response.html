@@ -10,7 +10,11 @@
     {% include "criterion_feedback_card.html" %}
 
     <template data-criterion-refresh-overall>
-        <p>{{ overall_feedback | feedback_inline_markdown }}</p>
+        <p>
+            {{- overall_feedback
+                | criterion_status_display_text
+                | feedback_inline_markdown -}}
+        </p>
     </template>
 
     <span

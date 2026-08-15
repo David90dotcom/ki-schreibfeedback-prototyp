@@ -31,6 +31,10 @@ from app.config import (
     APP_MODE_PRODUCTION,
     settings,
 )
+from app.domain.criterion_status import (
+    criterion_status_display_label,
+    criterion_status_display_text,
+)
 from app.domain.student_account import (
     IssuedStudentAccessCode,
     MAX_STUDENT_ACCOUNT_LABEL_CHARS,
@@ -330,6 +334,12 @@ templates.env.filters["duration_ms"] = _format_duration_ms
 templates.env.filters["datetime_utc"] = _format_datetime_utc
 templates.env.filters["meta_score"] = _format_meta_score
 templates.env.filters["meta_score_hue"] = _meta_score_hue
+templates.env.filters[
+    "criterion_status_display_label"
+] = criterion_status_display_label
+templates.env.filters[
+    "criterion_status_display_text"
+] = criterion_status_display_text
 templates.env.globals[
     "static_asset_version"
 ] = STATIC_ASSET_VERSION

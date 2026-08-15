@@ -402,7 +402,7 @@ class TaskManagementTests(unittest.TestCase):
                 for criterion in task.rubric.criteria
             ),
             overall_feedback=(
-                "Ein Teil konnte nicht sicher geprüft werden."
+                "Ein Teil ist als „Nicht beurteilbar“ markiert."
             ),
             duration_ms=350,
             reasoning_effort="max",
@@ -469,7 +469,15 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIsNotNone(unchanged_task)
         self.assertEqual(unchanged_task.material, task.material)
         self.assertIn("Einleitung: Grundangaben", response.text)
-        self.assertIn("Überwiegend erfüllt", response.text)
+        self.assertIn("Weitgehend erkennbar", response.text)
+        self.assertIn("Keine sichere Einordnung", response.text)
+        self.assertIn(
+            "data-feedback-orientation-note",
+            response.text,
+        )
+        self.assertIn("keine Note dar", response.text)
+        self.assertNotIn("Überwiegend erfüllt", response.text)
+        self.assertNotIn("Nicht beurteilbar", response.text)
         self.assertIn("criterion-status-mostly_met", response.text)
         self.assertIn("criterion-status-not_assessable", response.text)
         self.assertIn("Hinweis zur Belegprüfung", response.text)
@@ -513,7 +521,7 @@ class TaskManagementTests(unittest.TestCase):
             response.text,
         )
         self.assertIn(
-            "Ein Teil konnte nicht sicher geprüft werden.",
+            "Ein Teil ist als „Keine sichere Einordnung“ markiert.",
             response.text,
         )
         self.assertNotIn("**Feedback**", response.text)
@@ -633,7 +641,7 @@ class TaskManagementTests(unittest.TestCase):
             overview.text,
         )
         self.assertIn(
-            "Ein Teil konnte nicht sicher geprüft werden.",
+            "Ein Teil ist als „Keine sichere Einordnung“ markiert.",
             overview.text,
         )
         self.assertIn(
@@ -900,7 +908,8 @@ class TaskManagementTests(unittest.TestCase):
             task.snapshot(),
         )
         self.assertIn("Neu und gezielt geprüft.", response.text)
-        self.assertIn("Überwiegend erfüllt", response.text)
+        self.assertIn("Weitgehend erkennbar", response.text)
+        self.assertNotIn("Überwiegend erfüllt", response.text)
         self.assertIn("data-refresh-criterion", response.text)
         self.assertIn(
             "einzeln neu analysiert und im",

@@ -16,14 +16,22 @@
 <section class="card result student-result" data-student-analysis-result>
     <h2>Dein Feedback</h2>
 
+    <p
+        class="criterion-feedback-orientation-note"
+        data-feedback-orientation-note
+    >
+        Die farbigen Markierungen geben eine kriterienbezogene
+        Orientierung und stellen keine Note dar.
+    </p>
+
     {% if result.evidence_warnings %}
         <section class="analysis-evidence-warning" role="status">
             <h3>Ein Hinweis zur Auswertung</h3>
             <p>
                 Mindestens eine Rückmeldung konnte nicht sicher an deinem
-                Text überprüft werden und ist deshalb als „Nicht
-                beurteilbar“ markiert. Prüfe diesen Punkt zusätzlich selbst
-                oder frage deine Lehrkraft.
+                Text überprüft werden und ist deshalb mit „Keine sichere
+                Einordnung“ gekennzeichnet. Prüfe diesen Punkt zusätzlich
+                selbst oder frage deine Lehrkraft.
             </p>
         </section>
     {% endif %}
@@ -38,7 +46,11 @@
 
     <section class="overall-feedback">
         <h3>Zusammenfassung</h3>
-        <p>{{ result.overall_feedback | feedback_inline_markdown }}</p>
+        <p>
+            {{- result.overall_feedback
+                | criterion_status_display_text
+                | feedback_inline_markdown -}}
+        </p>
     </section>
 </section>
 {% endif %}

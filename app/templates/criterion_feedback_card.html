@@ -3,13 +3,19 @@
     data-criterion-feedback-card
     data-criterion-id="{{ item.criterion_id }}"
 >
+    {% set display_status_label =
+        item.status | criterion_status_display_label
+    %}
     <div class="criterion-feedback-header">
         <h3>
             {{ item.criterion_title or ("Kriterium " ~ criterion_position) }}
         </h3>
 
-        <span class="criterion-status-badge">
-            {{ item.status_label }}
+        <span
+            class="criterion-status-badge"
+            aria-label="Rückmeldestufe: {{ display_status_label }}"
+        >
+            {{ display_status_label }}
         </span>
     </div>
 
