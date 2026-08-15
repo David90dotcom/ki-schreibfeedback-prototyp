@@ -159,14 +159,25 @@ class RubricExchangeManagementTests(unittest.TestCase):
         )
         tasks = asyncio.run(self.store.list_tasks())
         self.assertEqual(len(tasks), 2)
-        self.assertEqual(tasks[0].title, source.title)
-        self.assertNotEqual(tasks[0].task_id, source.task_id)
+        self.assertIn(
+            source.task_id,
+            {task.task_id for task in tasks},
+        )
+        imported_tasks = [
+            task
+            for task in tasks
+            if task.task_id != source.task_id
+        ]
+        self.assertEqual(len(imported_tasks), 1)
+        imported = imported_tasks[0]
+        self.assertEqual(imported.title, source.title)
+        self.assertNotEqual(imported.task_id, source.task_id)
         self.assertNotEqual(
-            tasks[0].rubric.rubric_id,
+            imported.rubric.rubric_id,
             source.rubric.rubric_id,
         )
         self.assertEqual(
-            [item.title for item in tasks[0].rubric.criteria],
+            [item.title for item in imported.rubric.criteria],
             [item.title for item in source.rubric.criteria],
         )
 
