@@ -142,9 +142,9 @@
                 <div>
                     <h2>{{ account.label }}</h2>
                     <p class="hint">
-                        Erstellt {{ account.created_at | datetime_utc }}
+                        Erstellt {{ account.created_at | datetime_de }}
                         {% if account.last_login_at %}
-                            · Letzte Anmeldung {{ account.last_login_at | datetime_utc }}
+                            · Letzte Anmeldung {{ account.last_login_at | datetime_de }}
                         {% else %}
                             · Noch nicht angemeldet
                         {% endif %}

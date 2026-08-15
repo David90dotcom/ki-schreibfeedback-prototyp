@@ -188,12 +188,12 @@
                     {% endif %}
                     <div>
                         <dt>Erzeugt</dt>
-                        <dd>{{ feedback_run.created_at | datetime_utc }}</dd>
+                        <dd>{{ feedback_run.created_at | datetime_de }}</dd>
                     </div>
                     <div>
                         <dt>Für Bewertung gespeichert</dt>
                         <dd>
-                            {{ feedback_run.selected_for_evaluation_at | datetime_utc }}
+                            {{ feedback_run.selected_for_evaluation_at | datetime_de }}
                         </dd>
                     </div>
                 </dl>
@@ -651,7 +651,7 @@
                                                 </span>
                                             {% endif %}
                                             <span class="meta-evaluation-created-at">
-                                                {{ evaluation.created_at | datetime_utc }}
+                                                {{ evaluation.created_at | datetime_de }}
                                             </span>
                                         </span>
                                     </summary>

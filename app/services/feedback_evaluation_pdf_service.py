@@ -30,6 +30,7 @@ from app.domain.feedback_evaluation import (
     StoredFeedbackEvaluation,
     StoredFeedbackRun,
 )
+from app.datetime_format import format_datetime_german
 
 
 _FONT_DIRECTORY = Path(reportlab.__file__).resolve().parent / "fonts"
@@ -113,7 +114,7 @@ def _normalize_datetime(value: datetime) -> datetime:
 
 
 def _format_datetime(value: datetime) -> str:
-    return _normalize_datetime(value).strftime("%d.%m.%Y, %H:%M UTC")
+    return format_datetime_german(value)
 
 
 def _format_duration(value: float | int | None) -> str:

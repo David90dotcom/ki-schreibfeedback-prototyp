@@ -48,6 +48,7 @@ from app.domain.feedback_evaluation import (
     META_EVALUATION_SCORE_OPTIONS,
 )
 from app.domain.rubric import FeedbackTask
+from app.datetime_format import format_datetime_german
 from app.feedback_markdown import (
     render_feedback_inline_markdown,
     render_feedback_markdown,
@@ -260,18 +261,6 @@ def _format_duration_ms(value: float | int | None) -> str:
     return f"{minutes} min {formatted_seconds} s"
 
 
-def _format_datetime_utc(value: datetime | None) -> str:
-    if value is None:
-        return "Nicht verfügbar"
-
-    normalized = (
-        value.replace(tzinfo=timezone.utc)
-        if value.tzinfo is None
-        else value.astimezone(timezone.utc)
-    )
-    return normalized.strftime("%d.%m.%Y, %H:%M UTC")
-
-
 def _format_meta_score(value: float | int | None) -> str:
     if value is None:
         return "Nicht verfügbar"
@@ -337,7 +326,7 @@ templates.env.filters[
     "feedback_inline_markdown"
 ] = render_feedback_inline_markdown
 templates.env.filters["duration_ms"] = _format_duration_ms
-templates.env.filters["datetime_utc"] = _format_datetime_utc
+templates.env.filters["datetime_de"] = format_datetime_german
 templates.env.filters["meta_score"] = _format_meta_score
 templates.env.filters["meta_score_hue"] = _meta_score_hue
 templates.env.filters[
