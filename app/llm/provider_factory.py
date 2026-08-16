@@ -367,7 +367,7 @@ def create_default_provider_factory(
         provider_id="runpod",
         builder=lambda: RunPodProvider(
             api_key=settings.runpod_api_key,
-            endpoint_id=settings.runpod_endpoint_rtx5090_id,
+            endpoint_id=settings.runpod_endpoint_id,
             model_name=settings.runpod_model,
             job_timeout_seconds=(
                 settings.runpod_job_timeout_seconds
@@ -378,10 +378,10 @@ def create_default_provider_factory(
         ),
         configuration_check=lambda: bool(
             settings.runpod_api_key
-            and settings.runpod_endpoint_rtx5090_id
+            and settings.runpod_endpoint_id
         ),
         configuration_error=(
-            "RUNPOD_API_KEY oder RUNPOD_ENDPOINT_RTX5090_ID ist "
+            "RUNPOD_API_KEY oder RUNPOD_ENDPOINT_ID ist "
             "nicht gesetzt. Prüfe die lokale .env-Datei."
         ),
     )
