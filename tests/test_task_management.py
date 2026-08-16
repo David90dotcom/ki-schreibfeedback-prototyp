@@ -2126,8 +2126,15 @@ class TaskManagementTests(unittest.TestCase):
             "Vorbewertung abgeschlossen – Ergebnis wird geöffnet",
             script,
         )
-        self.assertIn("window.location.replace(destination)", script)
-        self.assertIn("window.location.href = destination", script)
+        self.assertIn("window.location.reload()", script)
+        self.assertIn(
+            "window.location.replace(destinationUrl)",
+            script,
+        )
+        self.assertIn(
+            "window.location.assign(destinationUrl)",
+            script,
+        )
         self.assertIn("await fetch(form.action", script)
         self.assertIn('"X-Requested-With": "XMLHttpRequest"', script)
         self.assertIn(

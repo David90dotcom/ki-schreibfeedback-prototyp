@@ -129,16 +129,32 @@
             return;
         }
 
+        const destinationUrl = new URL(
+            destination,
+            window.location.href
+        ).toString();
+
         state.settled = true;
         clearFormTimers(state);
         state.message.textContent =
             "Vorbewertung abgeschlossen – Ergebnis wird geöffnet …";
         state.hint.textContent =
             "Die gespeicherte Bewertung wird jetzt geladen.";
+
+        if (window.location.href === destinationUrl) {
+            window.location.reload();
+            return;
+        }
+
         state.navigationTimer = window.setTimeout(() => {
-            window.location.replace(destination);
+            if (window.location.href === destinationUrl) {
+                window.location.reload();
+                return;
+            }
+
+            window.location.replace(destinationUrl);
         }, 1200);
-        window.location.href = destination;
+        window.location.assign(destinationUrl);
     }
 
     async function checkEvaluationStatus(form) {
