@@ -2122,6 +2122,12 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn("EVALUATION_MAX_WAIT_MS", script)
         self.assertIn("checkEvaluationStatus", script)
         self.assertIn('"after_count"', script)
+        self.assertIn(
+            "Vorbewertung abgeschlossen – Ergebnis wird geöffnet",
+            script,
+        )
+        self.assertIn("window.location.replace(destination)", script)
+        self.assertIn("window.location.href = destination", script)
         self.assertIn("await fetch(form.action", script)
         self.assertIn('"X-Requested-With": "XMLHttpRequest"', script)
         self.assertIn(

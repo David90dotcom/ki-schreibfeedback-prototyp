@@ -61,6 +61,7 @@
         window.clearInterval(state.elapsedTimer);
         window.clearInterval(state.statusTimer);
         window.clearTimeout(state.maxWaitTimer);
+        window.clearTimeout(state.navigationTimer);
         state.phaseTimers.forEach((timer) => {
             window.clearTimeout(timer);
         });
@@ -130,12 +131,14 @@
 
         state.settled = true;
         clearFormTimers(state);
-
-        if (!state.abortController.signal.aborted) {
-            state.abortController.abort();
-        }
-
-        window.location.assign(destination);
+        state.message.textContent =
+            "Vorbewertung abgeschlossen – Ergebnis wird geöffnet …";
+        state.hint.textContent =
+            "Die gespeicherte Bewertung wird jetzt geladen.";
+        state.navigationTimer = window.setTimeout(() => {
+            window.location.replace(destination);
+        }, 1200);
+        window.location.href = destination;
     }
 
     async function checkEvaluationStatus(form) {
@@ -288,6 +291,7 @@
             elapsedTimer: 0,
             statusTimer: 0,
             maxWaitTimer: 0,
+            navigationTimer: 0,
             phaseTimers: [],
             statusCheckInFlight: false,
             initialEvaluationCount: Number.isInteger(
