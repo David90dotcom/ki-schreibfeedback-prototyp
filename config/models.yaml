@@ -170,7 +170,7 @@ models:
     provider_id: openai
     provider_model_name: gpt-5.6-terra
     display_name: GPT-5.6 Terra
-    description: Ausgewogenes OpenAI-Modell für spätere Qualitäts- und Leistungsvergleiche.
+    description: Ausgewogenes OpenAI-Modell für Qualitäts- und Leistungsvergleiche.
     role: feedback
     enabled: true
 
@@ -204,7 +204,7 @@ models:
     provider_id: openai
     provider_model_name: gpt-5.6-sol
     display_name: GPT-5.6 Sol
-    description: Leistungsstarkes OpenAI-Modell für spätere Qualitätsvergleiche.
+    description: Leistungsstarkes OpenAI-Modell für Qualitätsvergleiche.
     role: feedback
     enabled: true
 

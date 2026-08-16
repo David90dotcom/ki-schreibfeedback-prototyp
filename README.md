@@ -1,26 +1,30 @@
-# KI-Schreibfeedback-Prototyp 1.0.0-rc1
+# KI-Schreibfeedback-Prototyp 1.0.0
 
-Web-App-Prototyp zur geschützten Erzeugung von Schreibfeedback mit OpenAI, der Mistral-Cloud-API, lokalem Ollama und einem selbst betriebenen Mistral-Small-3.2-24B-Modell über RunPod Serverless. Version 1.0.0-rc1 verwendet eine frei festlegbare Standard-Kriterienvorlage und die kriterienweise Einzelanalyse als übersichtlichen Normalbetrieb. Eine additive Schüleransicht ermöglicht pseudonyme Zugänge per sechsstelligem Code, ohne Provider- oder Forschungsoptionen offenzulegen. Gemeinsame Analyse, Zwei-Pass-Prüfung, kriterienloses Gesamtfeedback, freie Modell-IDs und technische Verbindungsoptionen bleiben im Prüferbereich über „Erweiterte Forschungsoptionen anzeigen“ für gezielte Vergleiche erhalten.
+Webbasierte Lern- und Vergleichsplattform zur geschützten Erzeugung und Untersuchung von kriteriengeleitetem Schreibfeedback. Der Forschungsprototyp unterstützt das lokale Mistral-Small-3.2-24B-Modell über Ollama, OpenAI, die Mistral-Cloud-API und dasselbe 24B-Modell als FP8-Variante über einen einzelnen RunPod-Serverless-Endpoint. Die kriterienweise Einzelanalyse bildet den übersichtlichen Normalbetrieb; gemeinsame Analyse, Zwei-Pass-Prüfung, kriterienloses Gesamtfeedback und erweiterte Modelloptionen bleiben für gezielte Vergleiche verfügbar.
 
-> **Aktueller stabiler Release: Version 0.6.0.** Der unveränderliche Git-Tag `v0.6.0` ist der verbindliche Rückkehrpunkt für das Produktionssystem und die Ausgangsbasis für Version 0.7. Das [Abnahmeprotokoll 0.6.0](docs/abnahme-v0.6.0.md) dokumentiert den geprüften Stand.
+Eine getrennte Schüleransicht ermöglicht pseudonyme Zugänge per sechsstelligem Code, ohne Provider-, Meta- oder Forschungsoptionen offenzulegen. Der Prüferbereich verwaltet Aufgaben und Feedback-Kriterien, speichert ausgewählte Feedbackläufe und unterstützt manuelle sowie optionale automatische Meta-Bewertungen einschließlich JSON-, CSV- und PDF-Export.
 
-## Versionsstand und Ziel
+> **Aktueller stabiler Release: Version 1.0.0.** Der unveränderliche Git-Tag `v1.0.0` bezeichnet den für die Bachelorarbeit eingefrorenen und geprüften Artefaktstand. Das [Abnahmeprotokoll 1.0.0](docs/abnahme-v1.0.0.md) dokumentiert Umfang, Prüfungen und bekannte Grenzen. Eine produktive Demonstrationsinstanz ist unter [llm-lernlabor.de](https://llm-lernlabor.de/) erreichbar; ihre Nutzung erfordert bereitgestellte Zugangsdaten.
+
+Die Anwendung ist ausdrücklich ein Forschungsprototyp und keine autonome Benotungs- oder Entscheidungsplattform. Statusfarben und Rückmeldestufen dienen der formativen Orientierung. Modellantworten müssen fachlich geprüft werden und dürfen nicht ungeprüft als Leistungsbewertung übernommen werden.
+
+## Versionsstand
 
 | Version | Status | Inhalt |
 |---|---|---|
 | **0.3** | abgeschlossen | Provider-Auswahl für Ollama, OpenAI und RunPod, RunPod-Worker, Konfiguration und automatisierte Tests |
 | **0.4** | abgeschlossen | Serverseitige Anmeldung, geschützte Web- und Modellrouten, sichere Sitzungen, Login-Begrenzung und CSRF-Schutz |
 | **0.5.0** | abgeschlossen | Produktives HTTPS-Deployment auf DigitalOcean, Docker Compose mit Caddy sowie RunPod Serverless mit vLLM |
-| **0.6.0** | stabiler Release | Vier serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
-| **0.7** | abgeschlossen | Additive Mistral-API-Anbindung mit Ministral 14B, Small, Medium, Large und freier Modell-ID auf Basis des unveränderten Tags `v0.6.0` |
+| **0.6.0** | historischer Release | Mehrere serverseitig erlaubte GPU-Ziele, sichere Markdown-Ausgabe, Worker-/Jobstatus, Live-Warteanzeige, getrennte Zeiten und gezielter Einzelabbruch |
+| **0.7** | abgeschlossen | Additive Mistral-API-Anbindung, abgestufter Modellkatalog und freie Modell-ID |
 | **0.8** | abgeschlossen | Aufgaben mit jeweils einer Feedback-Vorlage, geordnete Einzelkriterien, SQLite-Verwaltung, portabler Austausch und strukturiertes Feedback pro Kriterium |
 | **0.9a** | abgeschlossen | Bewusste Auswahl von Feedbackläufen, Speicherung des anonymisierten Texts und getrennte Übersicht auf der Meta-Ebene |
 | **0.9b** | abgeschlossen | Manuelle Qualitätsbewertung mit vier Kriterien, Begründungen, versioniertem Bogen und eigenständiger Bewertungshistorie |
 | **0.9c** | abgeschlossen | Optionale automatische Cloud-Vorbewertung mit festem Referenzmodell, detaillierter Evidenzprüfung und anschließender manueller Korrektur als eigener Datensatz |
 | **0.10** | experimenteller Testzweig | Vergleich von gemeinsamer, kriterienweiser und Zwei-Pass-Analyse mit getrennter Quellenrolle und technischer Belegprüfung |
-| **1.0.0-rc1** | Release Candidate | Konfigurierbare Standard-Kriterienvorlage, kriterienweise Analyse als Normalmodus, aufgeräumte Forschungsoberfläche und rollengetrennte Schüleransicht mit sechsstelligen Zugangscodes |
+| **1.0.0** | stabiler Abschlussstand | Konfigurierbare Standardvorlage, kriterienweise Analyse, technische Belegprüfung, formative Statusanzeige, rollengetrennte Schüleransicht, portable Feedback- und Meta-Daten sowie lokale und cloudbasierte Modellvergleiche |
 
-Version 0.5.0 bleibt als historischer erster Produktionsrelease erhalten. Version 0.6.0 ist der neue stabile Standard; Modell-Payload und vLLM-Startkonfiguration bleiben gegenüber 0.5.0 unverändert.
+Die Tags `v0.5.0` bis `v1.0.0-rc4` bleiben als historische Zwischenstände erhalten. Fehlerkorrekturen nach Version 1.0.0 werden als neue Patchversion veröffentlicht, ohne den Tag `v1.0.0` nachträglich zu verschieben.
 
 ## Architektur
 
@@ -69,7 +73,7 @@ Im Produktionsmodus ist der lokale Ollama-Provider deaktiviert. Für OpenAI und 
 - optionaler Zwei-Pass-Versuch mit zwei aufeinanderfolgenden Anfragen an dasselbe ausgewählte Modell in den Forschungsoptionen
 - wörtliche Schülertextbelege mit serverseitiger Herkunftsprüfung vor der Übernahme eines Kriterienfeedbacks
 - intern getrenntes Feedback und konkreter Überarbeitungsschritt zu jedem Kriterium, sichtbar als zwei Absätze in einem gemeinsamen Feedbackfeld
-- vier validierte Erfüllungsstufen: erfüllt, überwiegend erfüllt, teilweise erfüllt und nicht erfüllt; zusätzlich der Sonderstatus nicht beurteilbar
+- vier intern validierte Erfüllungsstufen mit den formativen Anzeigen „Klar erkennbar“, „Weitgehend erkennbar“, „Teilweise erkennbar“ und „Noch nicht erkennbar“; zusätzlich „Keine sichere Einordnung“ bei fehlender Bewertungsgrundlage
 - schülerverständlich formuliertes Gesamtfeedback über die Auswahl „Ohne Feedback-Vorlage“
 - speicher- und meta-bewertbare Standardfeedbacks mit dokumentierter Prompt-Version und klarer Kennzeichnung des reduzierten Erzeugungskontexts
 - echtes Löschen unbenutzter und sicheres Archivieren bereits verwendeter Feedback-Vorlagen
@@ -286,11 +290,11 @@ Wie bei OpenAI wird im Produktionsbetrieb ausschließlich der serverseitige Key 
 
 Für RunPod wird ausschließlich ein automatischer 48-GB-GPU-Pool über `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID` und `RUNPOD_DEFAULT_MODEL` konfiguriert. Dedizierte RTX-4090-, RTX-5090- und RTX-6000-Ada-Endpunkte gehören nicht zur endgültigen Anwendung. Der automatische Pool erhöht die Verfügbarkeit, erlaubt aber keine reproduzierbare Zuordnung eines Standardauftrags zu einem bestimmten Grafikkartenmodell.
 
-Das Zielmodell für Version 1.0 lautet `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8`. Es ist eine vLLM-kompatible FP8-Variante derselben Mistral-Small-3.2-24B-Modellgeneration wie das lokal über Ollama eingesetzte Q8-Modell. Das offizielle BF16-/FP16-Modell benötigt laut Modellkarte ungefähr 55 GB GPU-Speicher; die etwa 25,8 GB große FP8-Variante ermöglicht dagegen den vorgesehenen Betrieb auf 32- und 48-GB-GPUs. Eine RTX 4090 mit 24 GB ist für diesen Release nicht freigegeben und ihre Endpoint-ID soll leer bleiben.
+Das Zielmodell für Version 1.0 lautet `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8`. Es ist eine vLLM-kompatible FP8-Variante derselben Mistral-Small-3.2-24B-Modellgeneration wie das lokal über Ollama eingesetzte Q8-Modell. Das offizielle BF16-/FP16-Modell benötigt laut Modellkarte ungefähr 55 GB GPU-Speicher; die etwa 25,8 GB große FP8-Variante ermöglicht dagegen den vorgesehenen Betrieb im automatischen 48-GB-GPU-Pool.
 
 Der Endpoint verwendet das fest gepinnte Worker-Image `runpod/worker-v1-vllm:v2.24.0`, `MAX_MODEL_LEN=8192` und die Mistral-spezifischen Ladeoptionen. Jeder Auftrag enthält eine RunPod-Policy mit `ttl=900000` und `executionTimeout=600000`; damit endet seine gesamte Lebensdauer einschließlich Queue spätestens nach 15 Minuten. Bei einem Anwendungstimeout versucht der Client zusätzlich, den konkreten Auftrag über die Cancel-API zu beenden. `QUANTIZATION` wird nicht gesetzt, weil das FP8-Format bereits im Modell hinterlegt ist.
 
-Container-Build, Endpoint, Queue-Verarbeitung, Scale-to-zero-Kaltstart und Rückgabe des Schreibfeedbacks an die Webanwendung wurden für Version 0.5.0 produktiv geprüft.
+Container-Build, Endpoint, Queue-Verarbeitung, Scale-to-zero-Kaltstart und Rückgabe des Schreibfeedbacks an die Webanwendung wurden im Rahmen der Abnahme von Version 1.0.0 produktiv geprüft.
 
 Für den Prüfungsbetrieb gelten drei voneinander unabhängige Zeitwerte:
 
@@ -302,9 +306,9 @@ Für den Prüfungsbetrieb gelten drei voneinander unabhängige Zeitwerte:
 
 `RUNPOD_IDLE_TIMEOUT_SECONDS=5` dokumentiert den in der RunPod-Konsole einzustellenden Wert; die Web-App kann das externe Endpoint-Setting nicht selbst verändern. Für den Prüferzugang gilt dauerhaft `Minimum workers = 0` und `Maximum workers = 1`: Es läuft damit kein ständig aktiver Worker, zugleich kann höchstens ein Worker Kosten verursachen. Die reduzierte Schüleransicht verwendet RunPod nicht.
 
-Die Health-API funktioniert mit der normalen Queue-Berechtigung. Für die sichtbare Supply-Momentaufnahme und die intern weiterhin vorhandenen technischen Workerdaten benötigt der API-Key zusätzlich lesenden Zugriff auf den GPU-Katalog beziehungsweise die Serverless-Worker-API. Fehlt diese Berechtigung, zeigt die Anwendung „Nicht abrufbar“ und erfindet keine Hardwarezuordnung. Weitere Einzelheiten stehen in [RunPod-Transparenz in Version 0.6](docs/runpod-transparenz-v0.6.md).
+Die Health-API funktioniert mit der normalen Queue-Berechtigung. Für die sichtbare Supply-Momentaufnahme und die intern weiterhin vorhandenen technischen Workerdaten benötigt der API-Key zusätzlich lesenden Zugriff auf den GPU-Katalog beziehungsweise die Serverless-Worker-API. Fehlt diese Berechtigung, zeigt die Anwendung „Nicht abrufbar“ und erfindet keine Hardwarezuordnung. Die [RunPod-Transparenzdokumentation zu Version 0.6](docs/runpod-transparenz-v0.6.md) hält die Entwicklung dieses Diagnosewegs historisch fest.
 
-Die bereinigte 0.6-Oberfläche zeigt diese Verwaltungsdetails vorübergehend nicht an. Zusätzlich registriert sie die Job-ID jedes von der Web-App gestarteten RunPod-Auftrags in der persistenten technischen SQLite-Datei. Unter „Hängende Anfragen verwalten“ lassen sich aktive Jobs einzeln abbrechen. Für ältere oder direkt in RunPod gestartete Jobs kann die Request-ID manuell eingegeben werden. Der Abbruch beendet nur den konkreten Job, nicht den Worker; ein pauschales Leeren der Queue ist nicht Teil der Oberfläche.
+Die reguläre Oberfläche zeigt keine technischen Workerdetails an. Die Anwendung registriert jedoch die Job-ID jedes von ihr gestarteten RunPod-Auftrags in der persistenten technischen SQLite-Datei. Unter „Hängende Anfragen verwalten“ lassen sich aktive Jobs einzeln abbrechen. Für ältere oder direkt in RunPod gestartete Jobs kann die Request-ID manuell eingegeben werden. Der Abbruch beendet nur den konkreten Job, nicht den Worker; ein pauschales Leeren der Queue ist nicht Teil der Oberfläche.
 
 ## Tests
 
@@ -316,34 +320,31 @@ Die automatisierten Tests führen keine echten Modellanfragen aus:
 & ".\.venv\Scripts\python.exe" -m json.tool runpod_worker\test_input.json > $null
 ```
 
-Der aktuelle Entwicklungsstand umfasst 229 erfolgreiche Tests und 51
-erfolgreiche Subtests. Sie decken zusätzlich zur bisherigen Browser- und
-Providerauswahl die SQLite-Verwaltung von Aufgaben und Feedback-Vorlagen, die
-persistente und wechselbare Standard-Kriterienvorlage, den kriterienweisen
-Serverstandard, Kriterienreihenfolge, Duplizieren, Löschen und Archivieren,
-strukturierte Kriterienantworten, die Trennung der Quellenrollen, technisch
-validierte Schülertextbelege, zeichensetzungstolerante Wortfolgen, die sichere
-Ersetzung fehlender oder erfundener Einzelbelege ohne vollständigen
-Laufabbruch, den versionierten Standardfeedback-Prompt, die ausgeblendete
-Technikspeicherung kontextarmer Standardläufe, die explizite Auswahl von
-Feedbackläufen, additive Datenbankmigrationen, versionierte und optional
-benannte Mehrfachbewertungen, das geschützte Einzellöschen, den getrennten
-OpenAI-Responses-Aufruf ohne API-Speicherung, die detaillierte Prompt- und
-Schema-Validierung, automatische Vorbewertungen, deren Verknüpfung mit
-manuellen Korrekturen, die GPT-5.6-Modell- und Reasoning-Auswahl sowie die
-rollengetrennten, rate-limitierten und CSRF-geschützten Schülerzugänge ab. Die
-Schülerkontentests prüfen zusätzlich Einmalcode-Ausgabe, Speicherung ohne
-Klartext, sofortige Sperrung, Code-Erneuerung, Providerfestlegung und die
-Sperre paralleler Läufe. Architektur- und JavaScript-Syntaxprüfung sind
-ebenfalls erfolgreich. Die Tests führen keine echten Modellanfragen aus.
+Der Abschlussstand umfasst 237 erfolgreiche Tests und 57 erfolgreiche
+Subtests. Abgedeckt sind insbesondere Provider- und Modellauswahl,
+Authentifizierung und CSRF-Schutz, Aufgaben- und Vorlagenverwaltung,
+Schülerzugänge, strukturierte Kriterienantworten, technische Belegprüfung,
+Einzelaktualisierung, Feedback- und Meta-Datenspeicherung, Import und Export,
+manuelle und automatische Meta-Bewertung, PDF-Ausgabe, RunPod-Jobverwaltung,
+additive SQLite-Migrationen sowie die Abschluss-Synchronisierung einer langen
+Meta-Anfrage zwischen Browser und Server. Die zusätzliche Architekturprüfung
+validiert vier Provider, acht Modelle, das strukturierte Analyseformat, die
+austauschbaren Datenspeicher und den rollengetrennten Schülerzugang. Weder die
+Test-Suite noch die Architekturprüfung führen echte Modellanfragen aus.
 
 ## Abnahme und bekannte Einschränkungen
 
+- [Abnahmeprotokoll für Version 1.0.0](docs/abnahme-v1.0.0.md)
+- [Deployment-Ablauf für Version 1.0.0](docs/deployment-v1.0.0.md)
 - [Abnahmeprotokoll für Version 0.6.0](docs/abnahme-v0.6.0.md)
 - [Abnahmeprotokoll für Version 0.5.0](docs/abnahme-v0.5.0.md)
 - [Bekannte Einschränkungen](docs/known-issues.md)
 
-Die Modellantwort wird in Version 0.6 mit einer engen, sicheren Markdown-Konfiguration dargestellt. HTML, aktive Links, Bilder und Code-Markup aus Modellantworten werden nicht aktiviert. Die verbleibende zentrale Einschränkung ist der hostabhängige RunPod-Cold-Start; die Anwendung macht ihn transparent, kann ihn aber nicht verhindern.
+Modellantworten werden mit einer engen Markdown-Konfiguration dargestellt;
+Raw HTML, aktive Links, Bilder und Code-Markup werden nicht aktiviert. Die
+wesentlichen verbleibenden Grenzen sind die probabilistische Fachbewertung
+durch Sprachmodelle, die notwendige menschliche Prüfung und die externe
+Verfügbarkeit beziehungsweise Kaltstartzeit von RunPod Serverless.
 
 ## Sicherheit und Datenschutz
 

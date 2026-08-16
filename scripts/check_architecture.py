@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 
 async def run_checks() -> None:
-    print("Prüfe die neue Version-0.3-Architektur")
+    print("Prüfe die Architektur von Version 1.0.0")
     print("Es werden keine Modell-APIs aufgerufen.\n")
 
     print("[1/8] Python-Importe")

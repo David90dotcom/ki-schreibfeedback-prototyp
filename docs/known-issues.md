@@ -1,59 +1,58 @@
-# Bekannte Einschränkungen
+# Bekannte Einschränkungen von Version 1.0.0
 
-## UI-005-01: Markdown wird als Rohtext dargestellt
+Die folgenden Punkte sind für den Forschungsprototyp bekannt und nicht
+release-blockierend. Sie werden bei der Interpretation der Evaluation
+berücksichtigt.
 
-| Feld | Bewertung |
-|---|---|
-| Betroffene Version | 0.5.0 |
-| Bereich | Ergebnisdarstellung |
-| Priorität | niedrig |
-| Release-blockierend | nein |
-| Status | in Version 0.6 behoben |
+## Fachliche Grenzen der Modellantworten
 
-### Beobachtung
+Sprachmodelle erzeugen probabilistische Ausgaben. Die technische Belegprüfung
+kontrolliert, ob ein angeführter Ausschnitt tatsächlich im Schülertext
+vorkommt. Sie kann jedoch nicht deterministisch nachweisen, dass die daraus
+abgeleitete fachliche Bewertung logisch richtig ist. Besonders bei guten
+Texten kann künstlicher Verbesserungsdruck zu überkritischen oder
+halluzinierten Hinweisen führen. Bei unzureichender Bewertungsgrundlage ist
+deshalb die neutrale Stufe „Keine sichere Einordnung“ vorgesehen.
 
-Das Modell strukturiert Antworten teilweise mit Markdown-Zeichen wie `###`, `**` und `---`. Die Webanwendung gibt das Feedback derzeit escaped innerhalb eines `<pre>`-Elements aus. Dadurch bleibt die Antwort sicher lesbar, die Markdown-Zeichen werden jedoch nicht typografisch formatiert.
+Die Plattform ist keine autonome Benotungsinstanz. Feedback, Statusstufen und
+automatische Meta-Vorbewertungen müssen fachlich durch eine Lehrkraft geprüft
+werden.
 
-### Auswirkung
+## Externe Provider und RunPod-Kaltstarts
 
-Die fachliche Rückmeldung ist vollständig verfügbar. Betroffen ist ausschließlich die visuelle Darstellung; Erzeugung, Übertragung und Speicherung des Feedbacks funktionieren unverändert.
+Verfügbarkeit, Antwortzeit und Modellverhalten externer APIs liegen nicht
+vollständig unter Kontrolle der Anwendung. Beim RunPod-Serverless-Endpoint
+können Queue- und Kaltstartzeiten stark schwanken oder einzelne Worker während
+der Initialisierung ausfallen. Version 1.0.0 begrenzt den Betrieb auf einen
+automatischen 48-GB-GPU-Pool, höchstens einen Worker, 15 Minuten Job-TTL und
+fünf Sekunden Idle-Timeout. Die Anwendung zeigt den Status an und versucht
+überlange Aufträge gezielt abzubrechen, kann externe Infrastrukturfehler aber
+nicht verhindern.
 
-### Vorgesehene Verbesserung
+## Prototypischer Einzelinstanzbetrieb
 
-Version 0.6 verwendet einen sicheren Markdown-Renderer mit enger Element- und Attribut-Allowlist. HTML, aktive Links, Bilder und Code-Markup werden nicht aktiviert; automatisierte Sicherheitstests decken diese Fälle ab.
+Die produktive Bereitstellung verwendet eine einzelne Webinstanz und eine
+lokale SQLite-Datenbank. Die Begrenzung fehlgeschlagener Loginversuche und die
+Sperre paralleler Schülerläufe besitzen teilweise prozesslokalen Zustand. Eine
+horizontale Skalierung auf mehrere Webinstanzen würde dafür einen gemeinsam
+genutzten Zustandsdienst und eine dafür ausgelegte Datenbank erfordern.
 
-## RUNPOD-006-01: Hostabhängige Cold-Start-Abstürze
+Sitzungen laufen nach dem konfigurierten Zeitraum ab. Noch nicht abgesendete
+Formulare werden ausschließlich im Browser gehalten und nach Navigation,
+Neuladen oder erneuter Anmeldung nicht automatisch wiederhergestellt.
 
-| Feld | Bewertung |
-|---|---|
-| Betroffene Version | 0.6 |
-| Bereich | RunPod Serverless / vLLM |
-| Priorität | mittel |
-| Release-blockierend | nein |
-| Status | transparent gemacht, extern verbleibend |
+## Datenschutz und Versuchsdaten
 
-### Beobachtung
+Für Untersuchungen dürfen nur erfundene oder vollständig anonymisierte Texte
+verwendet werden. Bei Auswahl eines Cloudproviders werden die für den Aufruf
+benötigten Inhalte an den jeweiligen Anbieter übertragen. Die Anwendung
+reduziert und trennt gespeicherte Daten, ersetzt aber keine schulische
+Datenschutzprüfung, Auftragsverarbeitungsvereinbarung oder Rechtsgrundlage.
 
-Einzelne neu bereitgestellte Worker können beim vLLM-/Triton-Warm-up mit einem CUDA-Fehler abbrechen. RunPod kann anschließend einen Ersatzworker starten; ein bereits erfolgreich gestarteter warmer Worker verarbeitet weitere Anfragen zuverlässig und deutlich schneller.
+## Historische Einschränkungen
 
-### Behandlung in der Anwendung
-
-Die Anwendung verlängert ihr eigenes Queue-/Cold-Start-Limit auf 1200 Sekunden, zeigt Endpointstatus und laufende Wartezeit und trennt nach Erfolg `delayTime` von `executionTime`. Das RunPod-Idle-Timeout wird für den Prüfungsbetrieb auf 3600 Sekunden festgelegt. Diese Maßnahmen verbessern Transparenz und Nutzbarkeit, beseitigen aber keinen externen CUDA-/Hostfehler.
-
-## RUNPOD-006-02: Fremde oder ältere Queue-Jobs sind nicht automatisch auflistbar
-
-| Feld | Bewertung |
-|---|---|
-| Betroffene Version | 0.6 |
-| Bereich | RunPod Serverless / Auftragsverwaltung |
-| Priorität | niedrig |
-| Release-blockierend | nein |
-| Status | durch manuellen Einzelabbruch behandelt |
-
-### Beobachtung
-
-RunPods dokumentierte Queue-API liefert über `/health` nur aggregierte Anzahlen. Sie stellt keine öffentliche Operation bereit, mit der die Web-App sämtliche einzelnen Job-IDs eines Endpoints nachträglich abrufen kann.
-
-### Behandlung in der Anwendung
-
-Neue Aufträge werden unmittelbar nach `/run` technisch und ohne Schülertext persistent registriert und können automatisch aufgelistet werden. Für Jobs, die vor dieser Funktion oder außerhalb der Web-App entstanden sind, kann die Request-ID manuell eingegeben und über `/cancel/{job_id}` einzeln abgebrochen werden. `/purge-queue` wird nicht angeboten, weil die Operation alle wartenden Jobs des Endpoints betreffen würde.
+Frühere Releases mit mehreren dedizierten RunPod-Endpunkten und HTTP/3 sind
+nicht der aktuelle Betriebsstand. Version 1.0.0 verwendet einen einzelnen
+automatischen Pool und beschränkt Caddy auf HTTP/1.1 und HTTP/2. Historische
+Details bleiben über die älteren Release-Tags und Abnahmeprotokolle
+reproduzierbar.

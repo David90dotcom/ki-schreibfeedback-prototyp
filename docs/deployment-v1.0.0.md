@@ -1,13 +1,16 @@
-# Deployment-Ablauf für Version 1.0.0-rc1
+# Deployment-Ablauf für Version 1.0.0
 
-Dieser Ablauf verwendet ausschließlich den vorhandenen automatischen 48-GB-GPU-Pool. Dedizierte RTX-4090-, RTX-5090- und RTX-6000-Ada-Endpunkte werden nach dem Leeren ihrer Queues und dem Beenden aller Worker gelöscht. Damit verbleibt genau ein ergänzender RunPod-Providerweg.
+Dieser Ablauf verwendet ausschließlich den vorhandenen automatischen
+48-GB-GPU-Pool. Dedizierte RTX-4090-, RTX-5090- und RTX-6000-Ada-Endpunkte sind
+nicht Bestandteil von Version 1.0.0. Damit verbleibt genau ein ergänzender
+RunPod-Providerweg.
 
 ## 1. Zielkonfiguration
 
 | Bereich | Wert |
 |---|---|
-| Web-App-Branch | `release/1.0.0-rc1` |
-| Web-App-Image | `ki-schreibfeedback-web:1.0.0-rc1` |
+| Web-App-Stand | Tag `v1.0.0` auf `main` |
+| Web-App-Image | `ki-schreibfeedback-web:1.0.0` |
 | RunPod-Worker | `runpod/worker-v1-vllm:v2.24.0` |
 | Serverless-Modell | `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8` |
 | Lokales Ollama-Modell | `mistral-small3.2:24b-instruct-2506-q8_0` |
@@ -19,9 +22,9 @@ Dieser Ablauf verwendet ausschließlich den vorhandenen automatischen 48-GB-GPU-
 
 Die FP8-Variante umfasst ungefähr 25,8 GB Modellgewichte. Das offizielle BF16-/FP16-Modell benötigt ungefähr 55 GB GPU-Speicher und passt deshalb nicht in die vorhandene Einzel-GPU-Strategie mit 32 beziehungsweise 48 GB. Die Quantisierungsform wird in den Versuchsdaten dokumentiert: lokal Q8 über Ollama, Serverless FP8 über vLLM.
 
-## 2. Bestehende RunPod-Endpoints aktualisieren
+## 2. RunPod-Endpoint-Konfiguration
 
-Nur der automatische Pool behält seine ID. Sein Template verwendet:
+Der automatische Pool verwendet:
 
 ```text
 Container image: runpod/worker-v1-vllm:v2.24.0
@@ -55,30 +58,35 @@ Der automatische Pool erhöht die Chance, dass Prüfer trotz schwankender GPU-Su
 
 ## 3. RunPod vor der Umschaltung prüfen
 
-1. `Maximum workers` unmittelbar vor dem beaufsichtigten Test von `0` auf `1` setzen.
+1. Prüfen, dass `Minimum workers = 0` und `Maximum workers = 1` gesetzt sind.
 2. Beim automatischen Pool unter „Requests“ den Inhalt von `runpod_worker/test_input.json` absenden.
 3. Prüfen, dass der Job `COMPLETED` erreicht und unter `choices[0].message.content` ein JSON-Objekt mit dem Feld `feedback` zurückkommt.
 4. Queue-Zeit, tatsächliche GPU, Ausführungszeit und Worker-Logs dokumentieren.
 5. Nach dem Test die Queue kontrollieren; `Maximum workers = 1` bleibt für den Prüferzugang bestehen, `Minimum workers = 0` verhindert einen dauerhaft aktiven Worker.
 6. Nach dem Idle Timeout prüfen, dass kein Worker `Running` oder `Initializing` bleibt.
 
-Erst nach diesem Test wird DigitalOcean umgestellt. Schlägt bereits der Start mit `CUDA out of memory` fehl, zunächst einen 48-GB-Pool verwenden und `MAX_MODEL_LEN` nicht erhöhen.
+Erst nach diesem Test wird DigitalOcean umgestellt. Schlägt bereits der Start
+mit `CUDA out of memory` fehl, GPU-Pool und Template-Konfiguration prüfen und
+`MAX_MODEL_LEN` nicht erhöhen.
 
 ## 4. DigitalOcean vorbereiten
 
 Auf dem Server in das Projektverzeichnis wechseln und den Release-Branch laden:
 
 ```bash
-git fetch origin
-git switch release/1.0.0-rc1
-git pull --ff-only
-git status --short
+git fetch --tags origin
+git switch main
+git pull --ff-only origin main
+git status --short --branch
+git describe --tags --exact-match
 ```
 
-`git status --short` muss leer bleiben. Vor dem Container-Neubau eine SQLite-Sicherung innerhalb des persistenten Volumes anlegen:
+`git status --short` muss leer bleiben und `git describe` muss `v1.0.0`
+ausgeben. Vor dem Container-Neubau eine datierte SQLite-Sicherung innerhalb
+des persistenten Volumes anlegen:
 
 ```bash
-sudo docker compose exec -T web python -c 'import sqlite3; source=sqlite3.connect("/app/data/analysis_runs.sqlite3"); target=sqlite3.connect("/app/data/analysis_runs-pre-1.0.0-rc1.sqlite3"); source.backup(target); target.close(); source.close()'
+sudo docker compose exec -T web python -c 'import datetime, sqlite3; stamp=datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S"); source=sqlite3.connect("/app/data/analysis_runs.sqlite3"); path=f"/app/data/analysis_runs-pre-1.0.0-{stamp}.sqlite3"; target=sqlite3.connect(path); source.backup(target); target.close(); source.close(); print("Sicherung erstellt:", path)'
 ```
 
 Anschließend in der serverseitigen `.env` ausschließlich die ID des Pools eintragen:
@@ -104,7 +112,7 @@ Zuerst die Compose-Datei ohne Ausgabe der Secrets validieren, dann das Web-Image
 ```bash
 sudo docker compose config --quiet
 sudo docker compose build --pull web
-sudo docker compose up -d --remove-orphans
+sudo docker compose up -d --remove-orphans --wait
 sudo docker compose ps
 sudo docker compose logs --tail=100 web caddy
 ```
@@ -160,11 +168,21 @@ Zusätzlich Modellname, Gesamtdauer, Queue-Zeit und Ausführungszeit für die Ba
 
 ## 7. Rückkehrweg
 
-Falls das neue Serverless-Modell nicht stabil läuft, bleibt die neue Web-App bestehen. In der DigitalOcean-`.env` werden lediglich die vorherige Endpoint-ID und der dazu passende frühere Modellname wiederhergestellt. Danach genügt:
+Bei einer reinen Störung des externen RunPod-Dienstes bleibt die Web-App
+bestehen; für weitere Versuche werden OpenAI oder Mistral verwendet und
+RunPods `Maximum workers` kann vorübergehend auf `0` gesetzt werden. Falls der
+neue Webstand selbst einen blockierenden Fehler zeigt, kann kurzfristig der
+vorherige Release Candidate ausgecheckt und neu gebaut werden:
 
 ```bash
-sudo docker compose up -d --force-recreate web
+git fetch --tags origin
+git switch --detach v1.0.0-rc4
+sudo docker compose build web
+sudo docker compose up -d --no-deps --force-recreate --wait web
 sudo docker compose logs --tail=100 web
 ```
 
-Die SQLite-Sicherung wird nur benötigt, falls unabhängig vom Modellwechsel ein Datenbankproblem festgestellt wird. Sie wird nicht vorsorglich über die aktuelle Datenbank kopiert.
+Die SQLite-Sicherung wird nur benötigt, falls unabhängig vom Codewechsel ein
+Datenbankproblem festgestellt wird. Sie wird nicht vorsorglich über die
+aktuelle Datenbank kopiert. Fehlerkorrekturen werden anschließend auf `main`
+als neue Patchversion veröffentlicht.

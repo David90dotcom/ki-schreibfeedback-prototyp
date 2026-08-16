@@ -134,7 +134,7 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertIn('data-active-model', response.text)
         self.assertIn('data-active-reasoning', response.text)
         self.assertIn('class="page-footer"', response.text)
-        self.assertIn("Version 1.0.0-rc5", response.text)
+        self.assertIn("Version 1.0.0", response.text)
         self.assertIn(
             'data-analysis-pipeline-option',
             response.text,

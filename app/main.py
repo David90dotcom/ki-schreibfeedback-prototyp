@@ -151,7 +151,7 @@ from app.services.two_pass_rubric_feedback_service import (
 
 
 BASE_DIR = Path(__file__).resolve().parent
-APP_VERSION = "1.0.0-rc5"
+APP_VERSION = "1.0.0"
 CUSTOM_MODEL_VALUE = "__custom__"
 OLLAMA_FALLBACK_BASE_URL = "http://localhost:11434"
 MAX_MODEL_NAME_CHARS = 200

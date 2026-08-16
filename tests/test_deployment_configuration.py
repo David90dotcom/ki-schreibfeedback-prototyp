@@ -21,12 +21,29 @@ class DeploymentConfigurationTests(unittest.TestCase):
         self.assertIn("protocols h1 h2", caddyfile)
         self.assertNotIn("protocols h1 h2 h3", caddyfile)
 
-    def test_compose_does_not_publish_https_udp_port(self) -> None:
+    def test_release_configuration_is_consistent_and_disables_http3(
+        self,
+    ) -> None:
         compose = (PROJECT_ROOT / "compose.yaml").read_text(
+            encoding="utf-8"
+        )
+        main_module = (PROJECT_ROOT / "app" / "main.py").read_text(
+            encoding="utf-8"
+        )
+        readme = (PROJECT_ROOT / "README.md").read_text(
             encoding="utf-8"
         )
 
         self.assertNotIn('"443:443/udp"', compose)
+        self.assertIn(
+            "image: ki-schreibfeedback-web:1.0.0",
+            compose,
+        )
+        self.assertIn('APP_VERSION = "1.0.0"', main_module)
+        self.assertIn(
+            "# KI-Schreibfeedback-Prototyp 1.0.0",
+            readme,
+        )
 
     def test_example_environment_uses_safe_student_provider(self) -> None:
         example_environment = (PROJECT_ROOT / ".env.example").read_text(
