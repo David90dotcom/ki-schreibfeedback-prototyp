@@ -187,6 +187,11 @@ class WebAuthenticationTests(unittest.TestCase):
         for path in (
             "/api/ollama/models",
             "/api/runpod/status",
+            (
+                "/api/feedback-runs/"
+                "00000000-0000-0000-0000-000000000001/"
+                "automatic-evaluations/status"
+            ),
         ):
             with self.subTest(path=path):
                 response = self.client.get(path)

@@ -61,6 +61,19 @@ body {
     color: var(--muted);
 }
 
+.page-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 8px;
+    padding: 18px 8px 4px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    border-top: 1px solid #e4e7ec;
+}
+
 .session-controls {
     display: flex;
     align-items: center;
@@ -281,6 +294,50 @@ textarea {
     background: #ffffff;
     border: 1px solid var(--border);
     border-radius: 10px;
+}
+
+.active-configuration {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin-top: 10px;
+}
+
+.active-configuration[hidden] {
+    display: none;
+}
+
+.active-configuration-label {
+    margin-right: 2px;
+    color: var(--muted);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.045em;
+    text-transform: uppercase;
+}
+
+.configuration-chip {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 3px 9px;
+    color: #344054;
+    font-size: 0.78rem;
+    font-weight: 650;
+    line-height: 1.25;
+    background: #f8fafc;
+    border: 1px solid #d8dee8;
+    border-radius: 999px;
+}
+
+.configuration-chip[hidden] {
+    display: none;
+}
+
+.configuration-chip-muted {
+    color: var(--muted);
+    background: #ffffff;
 }
 
 textarea {

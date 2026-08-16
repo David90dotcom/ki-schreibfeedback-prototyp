@@ -42,6 +42,14 @@ class DeploymentConfigurationTests(unittest.TestCase):
             example_environment,
         )
         self.assertIn(
+            "OPENAI_DEFAULT_MODEL=gpt-5.6-terra",
+            example_environment,
+        )
+        self.assertNotIn(
+            "OPENAI_DEFAULT_MODEL=gpt-5.6-luna",
+            example_environment,
+        )
+        self.assertIn(
             "OPENAI_EVALUATION_MODEL=gpt-5.6-terra",
             example_environment,
         )

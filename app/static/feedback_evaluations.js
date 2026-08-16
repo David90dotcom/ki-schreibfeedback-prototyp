@@ -4,6 +4,8 @@
     const MODEL_CHECK_DELAY_MS = 3000;
     const SLOW_EVALUATION_DELAY_MS = 30000;
     const VERY_SLOW_EVALUATION_DELAY_MS = 90000;
+    const EVALUATION_STATUS_POLL_INTERVAL_MS = 2000;
+    const EVALUATION_MAX_WAIT_MS = 15 * 60 * 1000;
     const forms = document.querySelectorAll(
         "[data-automatic-evaluation-form]"
     );
@@ -57,6 +59,8 @@
 
     function clearFormTimers(state) {
         window.clearInterval(state.elapsedTimer);
+        window.clearInterval(state.statusTimer);
+        window.clearTimeout(state.maxWaitTimer);
         state.phaseTimers.forEach((timer) => {
             window.clearTimeout(timer);
         });
@@ -72,7 +76,13 @@
         );
 
         if (state) {
+            state.settled = true;
             clearFormTimers(state);
+
+            if (!state.abortController.signal.aborted) {
+                state.abortController.abort();
+            }
+
             formStates.delete(form);
         }
 
@@ -109,6 +119,100 @@
             behavior: "smooth",
             block: "nearest",
         });
+    }
+
+    function finishWithRedirect(form, destination) {
+        const state = formStates.get(form);
+
+        if (!state || state.settled) {
+            return;
+        }
+
+        state.settled = true;
+        clearFormTimers(state);
+
+        if (!state.abortController.signal.aborted) {
+            state.abortController.abort();
+        }
+
+        window.location.assign(destination);
+    }
+
+    async function checkEvaluationStatus(form) {
+        const state = formStates.get(form);
+
+        if (
+            !state ||
+            state.settled ||
+            state.statusCheckInFlight
+        ) {
+            return false;
+        }
+
+        const statusUrlValue =
+            form.dataset.automaticEvaluationStatusUrl;
+
+        if (!statusUrlValue) {
+            return false;
+        }
+
+        state.statusCheckInFlight = true;
+
+        try {
+            const statusUrl = new URL(
+                statusUrlValue,
+                window.location.href
+            );
+            statusUrl.searchParams.set(
+                "after_count",
+                String(state.initialEvaluationCount)
+            );
+            const response = await fetch(statusUrl.toString(), {
+                headers: {
+                    Accept: "application/json",
+                },
+                cache: "no-store",
+            });
+            const responseUrl = new URL(
+                response.url,
+                window.location.href
+            );
+
+            if (
+                response.status === 401 ||
+                responseUrl.pathname === "/login"
+            ) {
+                finishWithRedirect(form, "/login");
+                return true;
+            }
+
+            if (!response.ok) {
+                return false;
+            }
+
+            const payload = await response.json();
+
+            if (
+                payload.status === "completed" &&
+                typeof payload.redirect_url === "string"
+            ) {
+                const destination = new URL(
+                    payload.redirect_url,
+                    window.location.href
+                );
+                finishWithRedirect(form, destination.toString());
+                return true;
+            }
+        } catch (error) {
+            console.debug(
+                "Status der automatischen Vorbewertung momentan nicht lesbar.",
+                error
+            );
+        } finally {
+            state.statusCheckInFlight = false;
+        }
+
+        return false;
     }
 
     async function submitWithVisibleProgress(event) {
@@ -170,6 +274,10 @@
                 ? modelSelect.value
                 : form.dataset.evaluationModel ||
                   "Das Bewertungsmodell";
+        const parsedEvaluationCount = Number.parseInt(
+            form.dataset.automaticEvaluationCount || "0",
+            10
+        );
         const state = {
             button,
             loading,
@@ -178,7 +286,17 @@
             startedAt: Date.now(),
             liveMessage: "Bewertungsdaten werden an OpenAI übertragen …",
             elapsedTimer: 0,
+            statusTimer: 0,
+            maxWaitTimer: 0,
             phaseTimers: [],
+            statusCheckInFlight: false,
+            initialEvaluationCount: Number.isInteger(
+                parsedEvaluationCount
+            )
+                ? parsedEvaluationCount
+                : 0,
+            abortController: new AbortController(),
+            settled: false,
         };
 
         formStates.set(form, state);
@@ -218,6 +336,23 @@
                 );
             }, VERY_SLOW_EVALUATION_DELAY_MS)
         );
+        state.statusTimer = window.setInterval(
+            () => void checkEvaluationStatus(form),
+            EVALUATION_STATUS_POLL_INTERVAL_MS
+        );
+        state.maxWaitTimer = window.setTimeout(() => {
+            const currentState = formStates.get(form);
+
+            if (!currentState || currentState.settled) {
+                return;
+            }
+
+            resetForm(form);
+            showClientError(
+                form,
+                "Der Abschluss konnte innerhalb von 15 Minuten nicht bestätigt werden. Lade die Seite neu und prüfe zuerst, ob die Vorbewertung bereits gespeichert wurde, bevor du sie erneut startest."
+            );
+        }, EVALUATION_MAX_WAIT_MS);
 
         try {
             const response = await fetch(form.action, {
@@ -227,6 +362,7 @@
                     Accept: "text/html",
                     "X-Requested-With": "XMLHttpRequest",
                 },
+                signal: state.abortController.signal,
             });
 
             const responseUrl = new URL(
@@ -238,7 +374,7 @@
                 response.redirected &&
                 responseUrl.pathname === "/login"
             ) {
-                window.location.assign(responseUrl.toString());
+                finishWithRedirect(form, responseUrl.toString());
                 return;
             }
 
@@ -257,14 +393,29 @@
                 responseUrl.hash = `feedback-run-${feedbackRunId}`;
             }
 
-            window.location.assign(responseUrl.toString());
+            finishWithRedirect(form, responseUrl.toString());
         } catch (error) {
-            const errorMessage =
-                error instanceof Error
-                    ? error.message
-                    : "Die automatische Vorbewertung konnte nicht gestartet werden.";
-            resetForm(form);
-            showClientError(form, errorMessage);
+            const currentState = formStates.get(form);
+
+            if (
+                !currentState ||
+                currentState.settled ||
+                (error instanceof DOMException &&
+                    error.name === "AbortError")
+            ) {
+                return;
+            }
+
+            console.warn(
+                "Die lange Meta-Anfrage wurde unterbrochen; der gespeicherte Abschluss wird weiter geprüft.",
+                error
+            );
+            setLiveMessage(
+                form,
+                "Die Verbindung zur langen Anfrage wurde unterbrochen …",
+                "Die Anwendung prüft weiter, ob die Vorbewertung serverseitig gespeichert wurde. Bitte starte keine zweite Bewertung."
+            );
+            void checkEvaluationStatus(form);
         }
     }
 

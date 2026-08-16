@@ -129,6 +129,12 @@ class BrowserModelSelectionTests(unittest.TestCase):
         self.assertNotIn("Warmhaltefenster", response.text)
         self.assertNotIn("Technische Workerdetails", response.text)
         self.assertIn('id="analysis-response"', response.text)
+        self.assertIn('data-active-configuration', response.text)
+        self.assertIn('data-active-provider', response.text)
+        self.assertIn('data-active-model', response.text)
+        self.assertIn('data-active-reasoning', response.text)
+        self.assertIn('class="page-footer"', response.text)
+        self.assertIn("Version 1.0.0-rc5", response.text)
         self.assertIn(
             'data-analysis-pipeline-option',
             response.text,

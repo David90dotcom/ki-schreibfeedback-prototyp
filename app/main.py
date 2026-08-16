@@ -138,6 +138,7 @@ from app.services.student_analysis_gate import (
 )
 from app.services.task_store import (
     FeedbackEvaluationDeleteConflictError,
+    FeedbackRunNotFoundError,
     FeedbackRunRefreshError,
     MAX_MATERIAL_CHARS,
     TaskNotFoundError,
@@ -150,6 +151,7 @@ from app.services.two_pass_rubric_feedback_service import (
 
 
 BASE_DIR = Path(__file__).resolve().parent
+APP_VERSION = "1.0.0-rc5"
 CUSTOM_MODEL_VALUE = "__custom__"
 OLLAMA_FALLBACK_BASE_URL = "http://localhost:11434"
 MAX_MODEL_NAME_CHARS = 200
@@ -338,6 +340,7 @@ templates.env.filters[
 templates.env.globals[
     "static_asset_version"
 ] = STATIC_ASSET_VERSION
+templates.env.globals["app_version"] = APP_VERSION
 
 
 feedback_service = FeedbackService(
@@ -1085,6 +1088,20 @@ def _feedback_evaluation_notice(
     return FEEDBACK_EVALUATION_NOTICES.get(
         notice,
         (None, None),
+    )
+
+
+def _automatic_evaluation_result_url(
+    feedback_run_id: UUID | str,
+    *,
+    notice: str,
+) -> str:
+    """Verweist auf den betroffenen Lauf in der Bewertungsübersicht."""
+
+    return (
+        f"/feedback-evaluations?notice={notice}"
+        f"&automatic_feedback_run_id={feedback_run_id}"
+        f"#feedback-run-{feedback_run_id}"
     )
 
 
@@ -2746,6 +2763,62 @@ async def save_feedback_run_for_evaluation(
     )
 
 
+@app.get(
+    "/api/feedback-runs/{feedback_run_id}/"
+    "automatic-evaluations/status"
+)
+async def automatic_feedback_evaluation_status(
+    request: Request,
+    response: Response,
+    feedback_run_id: UUID,
+    after_count: int = Query(default=0, ge=0, le=1_000_000),
+) -> dict[str, object]:
+    """Meldet, ob seit dem Browserstart eine Vorbewertung gespeichert wurde."""
+
+    if _authenticated_user(request) is None:
+        raise HTTPException(
+            status_code=401,
+            detail={"message": "Anmeldung erforderlich."},
+        )
+
+    response.headers["Cache-Control"] = "no-store"
+
+    try:
+        feedback_run = await task_store.get_feedback_run_for_evaluation(
+            str(feedback_run_id)
+        )
+    except FeedbackRunNotFoundError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"message": str(exc)},
+        ) from exc
+    except TaskStoreError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": (
+                    "Der Status der automatischen Vorbewertung konnte "
+                    "momentan nicht gelesen werden."
+                )
+            },
+        ) from exc
+
+    evaluation_count = feedback_run.automatic_evaluation_count
+    completed = evaluation_count > after_count
+    payload: dict[str, object] = {
+        "status": "completed" if completed else "pending",
+        "evaluation_count": evaluation_count,
+    }
+
+    if completed:
+        payload["redirect_url"] = _automatic_evaluation_result_url(
+            feedback_run_id,
+            notice="automatic-evaluation-saved",
+        )
+
+    return payload
+
+
 @app.post(
     "/feedback-runs/{feedback_run_id}/automatic-evaluations"
 )
@@ -2824,10 +2897,9 @@ async def create_automatic_feedback_evaluation(
         notice = "automatic-evaluation-failed"
 
     return RedirectResponse(
-        url=(
-            f"/feedback-evaluations?notice={notice}"
-            f"&automatic_feedback_run_id={feedback_run_id}"
-            f"#feedback-run-{feedback_run_id}"
+        url=_automatic_evaluation_result_url(
+            feedback_run_id,
+            notice=notice,
         ),
         status_code=303,
     )

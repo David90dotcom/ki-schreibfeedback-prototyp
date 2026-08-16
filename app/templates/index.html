@@ -341,6 +341,30 @@
             {% endfor %}
         </select>
 
+        <div
+            class="active-configuration"
+            data-active-configuration
+            aria-live="polite"
+            hidden
+        >
+            <span class="active-configuration-label">
+                Aktive Konfiguration
+            </span>
+            <span
+                class="configuration-chip"
+                data-active-provider
+            ></span>
+            <span
+                class="configuration-chip"
+                data-active-model
+            ></span>
+            <span
+                class="configuration-chip configuration-chip-muted"
+                data-active-reasoning
+                hidden
+            ></span>
+        </div>
+
         {% if ollama_available %}
             <section
                 id="ollama-settings"

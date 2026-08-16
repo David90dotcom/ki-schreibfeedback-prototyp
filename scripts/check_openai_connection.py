@@ -22,7 +22,7 @@ def main() -> int:
     model = _get_first_nonempty_environment_value(
         "OPENAI_DEFAULT_MODEL",
         "OPENAI_MODEL",
-        default="gpt-5.6-luna",
+        default="gpt-5.6-terra",
     )
 
     if not api_key:

@@ -227,7 +227,7 @@ async def run_checks() -> None:
         student_feedback_configuration = (
             await task_store.get_student_feedback_configuration(
                 fallback_provider="openai",
-                fallback_model="gpt-5.6-luna",
+                fallback_model="gpt-5.6-terra",
             )
         )
 

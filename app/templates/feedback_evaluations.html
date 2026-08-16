@@ -444,6 +444,8 @@
                             data-automatic-evaluation-form
                             data-evaluation-model="{{ automatic_evaluation_model }}"
                             data-feedback-run-id="{{ feedback_run.feedback_run_id }}"
+                            data-automatic-evaluation-count="{{ feedback_run.automatic_evaluation_count }}"
+                            data-automatic-evaluation-status-url="{{ url_for('automatic_feedback_evaluation_status', feedback_run_id=feedback_run.feedback_run_id) }}"
                         >
                             <input
                                 type="hidden"

@@ -171,6 +171,7 @@ OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_DEFAULT_MODEL=mistral-small3.2:24b-instruct-2506-q8_0
 
 OPENAI_API_KEY=
+OPENAI_DEFAULT_MODEL=gpt-5.6-terra
 OPENAI_EVALUATION_MODEL=gpt-5.6-terra
 MISTRAL_API_KEY=
 RUNPOD_API_KEY=
@@ -269,7 +270,7 @@ Die Standardadresse lautet `http://localhost:11434`. Die frei änderbare Adresse
 
 ### OpenAI
 
-Das in der `.env` konfigurierte Modell ist vorausgewählt. Für vergleichende Analysen stehen `gpt-5.6-luna` (günstig), `gpt-5.6-terra` (ausgewogen) und `gpt-5.6-sol` (höchste Modellleistung) direkt zur Auswahl. Davon getrennt lässt sich der Reasoning-Aufwand von `none`, `low`, `medium`, `high` und `xhigh` bis `max` einstellen. Die Kombination GPT-5.6 Sol mit `max` ist der stärkste angebotene Qualitätslauf, kann aber deutlich länger dauern und höhere Kosten erzeugen. Über „Andere Modell-ID …“ lässt sich weiterhin eine zukünftige Modell-ID eintragen; „Modellstandard“ überlässt die Denktiefe dem ausgewählten Modell.
+Das in der `.env` konfigurierte Modell ist vorausgewählt; die Beispielkonfiguration verwendet `gpt-5.6-terra` als ausgewogenen Standard. Für vergleichende Analysen stehen außerdem `gpt-5.6-luna` (günstig) und `gpt-5.6-sol` (höchste Modellleistung) direkt zur Auswahl. Davon getrennt lässt sich der Reasoning-Aufwand von `none`, `low`, `medium`, `high` und `xhigh` bis `max` einstellen. Die Kombination GPT-5.6 Sol mit `max` ist der stärkste angebotene Qualitätslauf, kann aber deutlich länger dauern und höhere Kosten erzeugen. Über „Andere Modell-ID …“ lässt sich weiterhin eine zukünftige Modell-ID eintragen; „Modellstandard“ überlässt die Denktiefe dem ausgewählten Modell.
 
 Standardmäßig wird der serverseitig konfigurierte OpenAI-Key verwendet. Für lokale Entwicklungstests kann alternativ ein Key für einen einzelnen Aufruf eingegeben werden. Dieser alternative Key wird nicht gespeichert und nach dem Absenden nicht erneut angezeigt.
 

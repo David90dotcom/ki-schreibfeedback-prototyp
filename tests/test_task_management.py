@@ -1635,6 +1635,17 @@ class TaskManagementTests(unittest.TestCase):
                 overview.text,
             )
             self.assertIn(
+                'data-automatic-evaluation-count="0"',
+                overview.text,
+            )
+            self.assertIn(
+                (
+                    f"/api/feedback-runs/{feedback_run_id}/"
+                    "automatic-evaluations/status"
+                ),
+                overview.text,
+            )
+            self.assertIn(
                 "data-automatic-evaluation-client-error",
                 overview.text,
             )
@@ -1656,6 +1667,27 @@ class TaskManagementTests(unittest.TestCase):
             self.assertIn(
                 "an die OpenAI API übertragen",
                 overview.text,
+            )
+
+            status_path = (
+                f"/api/feedback-runs/{feedback_run_id}/"
+                "automatic-evaluations/status"
+            )
+            pending_status = self.client.get(
+                f"{status_path}?after_count=0"
+            )
+
+            self.assertEqual(pending_status.status_code, 200)
+            self.assertEqual(
+                pending_status.headers["cache-control"],
+                "no-store",
+            )
+            self.assertEqual(
+                pending_status.json(),
+                {
+                    "status": "pending",
+                    "evaluation_count": 0,
+                },
             )
 
             automatic_response = self.client.post(
@@ -1694,6 +1726,34 @@ class TaskManagementTests(unittest.TestCase):
             self.assertEqual(
                 evaluate.await_args.kwargs["reasoning_effort"],
                 "low",
+            )
+
+            completed_status = self.client.get(
+                f"{status_path}?after_count=0"
+            )
+            self.assertEqual(completed_status.status_code, 200)
+            self.assertEqual(
+                completed_status.json(),
+                {
+                    "status": "completed",
+                    "evaluation_count": 1,
+                    "redirect_url": (
+                        "/feedback-evaluations?notice="
+                        "automatic-evaluation-saved"
+                        f"&automatic_feedback_run_id={feedback_run_id}"
+                        f"#feedback-run-{feedback_run_id}"
+                    ),
+                },
+            )
+            current_status = self.client.get(
+                f"{status_path}?after_count=1"
+            )
+            self.assertEqual(
+                current_status.json(),
+                {
+                    "status": "pending",
+                    "evaluation_count": 1,
+                },
             )
 
             prerated_overview = self.client.get(
@@ -2058,6 +2118,10 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn("updateElapsed", script)
         self.assertIn("setInterval", script)
         self.assertIn("SLOW_EVALUATION_DELAY_MS", script)
+        self.assertIn("EVALUATION_STATUS_POLL_INTERVAL_MS", script)
+        self.assertIn("EVALUATION_MAX_WAIT_MS", script)
+        self.assertIn("checkEvaluationStatus", script)
+        self.assertIn('"after_count"', script)
         self.assertIn("await fetch(form.action", script)
         self.assertIn('"X-Requested-With": "XMLHttpRequest"', script)
         self.assertIn(
@@ -2072,6 +2136,10 @@ class TaskManagementTests(unittest.TestCase):
         self.assertIn("data-confirm-feedback-run-remove", script)
         self.assertIn("Der gespeicherte Schülertext wird entfernt", script)
         self.assertIn("window.confirm", script)
+        self.assertIn(
+            "Die Anwendung prüft weiter, ob die Vorbewertung serverseitig gespeichert wurde",
+            script,
+        )
 
     def test_manual_evaluation_requires_valid_csrf_token(self) -> None:
         task = self._create_task()

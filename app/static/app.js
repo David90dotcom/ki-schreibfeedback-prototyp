@@ -47,6 +47,21 @@
     const modelSelects = form.querySelectorAll(
         "[data-model-select]"
     );
+    const activeConfiguration = form.querySelector(
+        "[data-active-configuration]"
+    );
+    const activeProviderChip = form.querySelector(
+        "[data-active-provider]"
+    );
+    const activeModelChip = form.querySelector(
+        "[data-active-model]"
+    );
+    const activeReasoningChip = form.querySelector(
+        "[data-active-reasoning]"
+    );
+    const openaiReasoningEffortSelect = form.querySelector(
+        "#openai-reasoning-effort"
+    );
     const ollamaBaseUrlInput = form.querySelector(
         "#ollama-base-url"
     );
@@ -299,6 +314,78 @@
         updatePipelineOptionAvailability();
     }
 
+    function compactConfigurationLabel(value) {
+        return (value || "")
+            .replace(/\s+/g, " ")
+            .trim()
+            .replace(/^(Cloud|Lokal):\s*/, "")
+            .replace(/\s+\(Standard aus \.env\)$/, "");
+    }
+
+    function updateActiveConfiguration() {
+        if (
+            !activeConfiguration ||
+            !activeProviderChip ||
+            !activeModelChip ||
+            !activeReasoningChip
+        ) {
+            return;
+        }
+
+        const selectedProvider = providerSelect.value;
+        const activePanel = [...providerPanels].find(
+            (panel) =>
+                panel.dataset.providerPanel === selectedProvider
+        );
+        const selectedProviderOption =
+            providerSelect.selectedOptions[0];
+        const modelSelect = activePanel?.querySelector(
+            "[data-model-select]"
+        );
+        let modelLabel = "";
+
+        if (modelSelect instanceof HTMLSelectElement) {
+            if (modelSelect.value === CUSTOM_MODEL_VALUE) {
+                const customInput = activePanel?.querySelector(
+                    "[data-custom-model-input]"
+                );
+                modelLabel =
+                    customInput?.value.trim() || "Eigene Modell-ID";
+            } else {
+                modelLabel = compactConfigurationLabel(
+                    modelSelect.selectedOptions[0]?.textContent
+                );
+            }
+        } else if (selectedProvider === "runpod") {
+            modelLabel = "Automatischer 48-GB-GPU-Pool";
+        }
+
+        activeProviderChip.textContent = compactConfigurationLabel(
+            selectedProviderOption?.textContent
+        );
+        activeModelChip.textContent = modelLabel;
+        activeModelChip.hidden = !modelLabel;
+
+        if (
+            selectedProvider === "openai" &&
+            openaiReasoningEffortSelect instanceof HTMLSelectElement
+        ) {
+            activeReasoningChip.textContent =
+                openaiReasoningEffortSelect.value
+                    ? compactConfigurationLabel(
+                          openaiReasoningEffortSelect.selectedOptions[0]
+                              ?.textContent
+                      )
+                    : "Standard";
+            activeReasoningChip.hidden = false;
+        } else {
+            activeReasoningChip.textContent = "";
+            activeReasoningChip.hidden = true;
+        }
+
+        activeConfiguration.hidden = false;
+    }
+
     function updateCustomModelField(modelSelect) {
         const panel = modelSelect.closest(
             "[data-provider-panel]"
@@ -361,6 +448,7 @@
 
         updateAdvancedOptionsVisibility();
         updatePipelineOptionAvailability();
+        updateActiveConfiguration();
     }
 
     function setOllamaStatus(message, status) {
@@ -2134,8 +2222,25 @@
     modelSelects.forEach((modelSelect) => {
         modelSelect.addEventListener("change", () => {
             updateCustomModelField(modelSelect);
+            updateActiveConfiguration();
         });
     });
+
+    form
+        .querySelectorAll("[data-custom-model-input]")
+        .forEach((customModelInput) => {
+            customModelInput.addEventListener(
+                "input",
+                updateActiveConfiguration
+            );
+        });
+
+    if (openaiReasoningEffortSelect) {
+        openaiReasoningEffortSelect.addEventListener(
+            "change",
+            updateActiveConfiguration
+        );
+    }
 
     if (loadOllamaModelsButton) {
         loadOllamaModelsButton.addEventListener(

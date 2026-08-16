@@ -217,7 +217,7 @@ class Settings:
     openai_model: str = _first_configured_value(
         "OPENAI_DEFAULT_MODEL",
         "OPENAI_MODEL",
-        fallback="gpt-5.6-luna",
+        fallback="gpt-5.6-terra",
     )
 
     openai_evaluation_model: str = _first_configured_value(

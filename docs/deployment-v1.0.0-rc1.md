@@ -11,6 +11,7 @@ Dieser Ablauf verwendet ausschließlich den vorhandenen automatischen 48-GB-GPU-
 | RunPod-Worker | `runpod/worker-v1-vllm:v2.24.0` |
 | Serverless-Modell | `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8` |
 | Lokales Ollama-Modell | `mistral-small3.2:24b-instruct-2506-q8_0` |
+| OpenAI-Standardmodell | `gpt-5.6-terra` |
 | Serverless-Endpoint | automatischer Pool kompatibler 48-GB-GPUs |
 | Dedizierte Endpoints | nicht Bestandteil der endgültigen Anwendung |
 | Sicherheitsgrenze | 15 Minuten Job-TTL, 10 Minuten Ausführung, 5 Sekunden Idle, höchstens ein Worker |
@@ -88,6 +89,7 @@ RUNPOD_DEFAULT_MODEL=RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8
 RUNPOD_JOB_TIMEOUT_SECONDS=900
 RUNPOD_IDLE_TIMEOUT_SECONDS=5
 STUDENT_FEEDBACK_PROVIDER=mistral
+OPENAI_DEFAULT_MODEL=gpt-5.6-terra
 ```
 
 `STUDENT_FEEDBACK_PROVIDER` legt nur die Erstkonfiguration fest. Eine spätere
@@ -144,14 +146,15 @@ In der produktiven Oberfläche nacheinander prüfen:
 9. Feedbacklauf lässt sich für die Meta-Bewertung speichern.
 10. Manuelle Bewertung und PDF-Export funktionieren.
 11. Automatische Meta-Vorbewertung wird nur nach dem ausdrücklichen Cloud-Klick gestartet.
-12. Daten und Standardvorlage bleiben nach einem Container-Neustart erhalten.
-13. Unter „Schülerzugänge“ lässt sich ein pseudonymes Konto erstellen; der sechsstellige Code erscheint genau einmal.
-14. Der Code öffnet `/schueler`, dort werden nur aktive Vorlagen, Texteingabe und Schülerfeedback angezeigt.
-15. Unter „Schülerzugänge“ lässt sich eine konfigurierte Mistral- oder OpenAI-Modellvariante als zentrale Schülerkonfiguration speichern.
-16. Eine Schüleranalyse verwendet exakt diese Prüferauswahl; Provider-, Modell- und Forschungsoptionen fehlen in der Schüleransicht vollständig.
-17. Der JSON-Export der Meta-Bewertungen lässt sich in einer zweiten Installation importieren, ohne vorhandene Datensätze zu überschreiben.
-18. Der CSV-Export enthält Laufzeiten und numerische Kriterienwerte, aber keine Schülertexte, Feedbacktexte oder Begründungen.
-17. Nach der Deaktivierung verliert auch eine bereits angemeldete Schülersitzung bei der nächsten Anfrage den Zugriff.
+12. Nach einer unterbrochenen langen Browserantwort erkennt die Statusabfrage eine bereits gespeicherte Meta-Vorbewertung und öffnet sie automatisch.
+13. Daten und Standardvorlage bleiben nach einem Container-Neustart erhalten.
+14. Unter „Schülerzugänge“ lässt sich ein pseudonymes Konto erstellen; der sechsstellige Code erscheint genau einmal.
+15. Der Code öffnet `/schueler`, dort werden nur aktive Vorlagen, Texteingabe und Schülerfeedback angezeigt.
+16. Unter „Schülerzugänge“ lässt sich eine konfigurierte Mistral- oder OpenAI-Modellvariante als zentrale Schülerkonfiguration speichern.
+17. Eine Schüleranalyse verwendet exakt diese Prüferauswahl; Provider-, Modell- und Forschungsoptionen fehlen in der Schüleransicht vollständig.
+18. Der JSON-Export der Meta-Bewertungen lässt sich in einer zweiten Installation importieren, ohne vorhandene Datensätze zu überschreiben.
+19. Der CSV-Export enthält Laufzeiten und numerische Kriterienwerte, aber keine Schülertexte, Feedbacktexte oder Begründungen.
+20. Nach der Deaktivierung verliert auch eine bereits angemeldete Schülersitzung bei der nächsten Anfrage den Zugriff.
 
 Zusätzlich Modellname, Gesamtdauer, Queue-Zeit und Ausführungszeit für die Bachelorarbeit notieren.
 
