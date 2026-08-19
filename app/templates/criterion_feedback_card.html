@@ -19,14 +19,17 @@
         </span>
     </div>
 
+    {% set displayed_feedback = item.display_feedback | default(item.feedback) %}
+    {% set displayed_next_step = item.display_next_step | default(item.next_step) %}
+
     <div class="criterion-feedback-body">
         <h4>Feedback</h4>
         <div class="criterion-feedback-copy">
-            <p>{{ item.feedback | feedback_inline_markdown }}</p>
+            <p>{{ displayed_feedback | feedback_inline_markdown }}</p>
 
-            {% if item.next_step %}
+            {% if displayed_next_step %}
                 <p class="criterion-feedback-next-step">
-                    {{ item.next_step | feedback_inline_markdown }}
+                    {{ displayed_next_step | feedback_inline_markdown }}
                 </p>
             {% endif %}
         </div>

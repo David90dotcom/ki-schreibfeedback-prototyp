@@ -16,6 +16,9 @@ from app.services.rubric_feedback_service import (
     RubricFeedbackResult,
     RubricFeedbackService,
 )
+from app.services.student_feedback_sections import (
+    unverified_student_feedback_sections,
+)
 
 
 CRITERION_WISE_FEEDBACK_MODE = "rubric_feedback_criterion_wise"
@@ -299,6 +302,12 @@ class CriterionWiseRubricFeedbackService:
             next_step=UNVERIFIED_CRITERION_NEXT_STEP,
             evidence_quotes=(),
             evidence_verified=False,
+            student_feedback_sections=(
+                unverified_student_feedback_sections(
+                    explanation=UNVERIFIED_CRITERION_FEEDBACK,
+                    next_step=UNVERIFIED_CRITERION_NEXT_STEP,
+                )
+            ),
         )
 
     @staticmethod

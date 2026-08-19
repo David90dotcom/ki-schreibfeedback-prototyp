@@ -14,7 +14,7 @@ RunPod-Providerweg.
 | RunPod-Worker | `runpod/worker-v1-vllm:v2.24.0` |
 | Serverless-Modell | `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8` |
 | Lokales Ollama-Modell | `mistral-small3.2:24b-instruct-2506-q8_0` |
-| OpenAI-Standardmodell | `gpt-5.6-terra` |
+| OpenAI-Standardmodelle | normales Feedback und Meta-Vorbewertung: `gpt-5.6-luna` |
 | Serverless-Endpoint | automatischer Pool kompatibler 48-GB-GPUs |
 | Dedizierte Endpoints | nicht Bestandteil der endgültigen Anwendung |
 | Sicherheitsgrenze | 15 Minuten Job-TTL, 10 Minuten Ausführung, 5 Sekunden Idle, höchstens ein Worker |
@@ -97,7 +97,8 @@ RUNPOD_DEFAULT_MODEL=RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8
 RUNPOD_JOB_TIMEOUT_SECONDS=900
 RUNPOD_IDLE_TIMEOUT_SECONDS=5
 STUDENT_FEEDBACK_PROVIDER=mistral
-OPENAI_DEFAULT_MODEL=gpt-5.6-terra
+OPENAI_DEFAULT_MODEL=gpt-5.6-luna
+OPENAI_EVALUATION_MODEL=gpt-5.6-luna
 ```
 
 `STUDENT_FEEDBACK_PROVIDER` legt nur die Erstkonfiguration fest. Eine spätere

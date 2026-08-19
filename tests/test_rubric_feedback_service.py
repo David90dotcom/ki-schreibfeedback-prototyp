@@ -257,7 +257,10 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             "Einleitung: Grundangaben",
             provider.prompts[0],
         )
-        self.assertIn("höchstens drei kurze", provider.prompts[0])
+        self.assertIn(
+            "Anzahl der Formulierungshilfen",
+            provider.prompts[0],
+        )
         self.assertIn(
             "Klartext ohne Markdown-Markierungen",
             provider.prompts[0],
@@ -303,11 +306,11 @@ class RubricFeedbackServiceTests(unittest.TestCase):
             provider.prompts[0],
         )
         self.assertIn(
-            "Empfehlung zur eigenen Kontrolle anhand des Kriteriums",
+            "konkrete prozessorientierte Handlung",
             provider.prompts[0],
         )
         self.assertIn(
-            "inhaltlichen Überarbeitungshinweis",
+            "keine inhaltliche Lösung",
             provider.prompts[0],
         )
         self.assertEqual(
@@ -349,7 +352,7 @@ class RubricFeedbackServiceTests(unittest.TestCase):
         assert isinstance(evidence_schema, dict)
         self.assertEqual(evidence_schema["minItems"], 0)
         self.assertEqual(evidence_schema["maxItems"], 3)
-        next_step_schema = item_properties["next_step"]
+        next_step_schema = item_properties["naechster_schritt"]
         assert isinstance(next_step_schema, dict)
         self.assertEqual(next_step_schema["minLength"], 1)
         self.assertIn(
@@ -556,7 +559,7 @@ class RubricFeedbackServiceTests(unittest.TestCase):
         self.assertEqual(result.evidence_warnings, ())
         self.assertEqual(result.evidence_repair_attempts, ())
 
-    def test_missing_or_empty_next_step_uses_neutral_fallback(
+    def test_missing_or_empty_next_step_uses_actionable_fallback(
         self,
     ) -> None:
         for next_step_value in (None, "", "   "):
@@ -606,7 +609,7 @@ class RubricFeedbackServiceTests(unittest.TestCase):
                     MISSING_NEXT_STEP_FALLBACK,
                 )
                 self.assertIn(
-                    "next_step muss immer einen nicht leeren Klartext",
+                    "naechster_schritt muss immer einen nicht leeren Klartext",
                     provider.prompts[0],
                 )
 

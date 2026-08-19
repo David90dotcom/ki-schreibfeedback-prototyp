@@ -26,6 +26,8 @@ OLLAMA_DEFAULT_MODEL = (
     "mistral-small3.2:24b-instruct-2506-q8_0"
 )
 
+OPENAI_DEFAULT_MODEL = "gpt-5.6-luna"
+
 RUNPOD_VLLM_MODEL = (
     "RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8"
 )
@@ -217,12 +219,12 @@ class Settings:
     openai_model: str = _first_configured_value(
         "OPENAI_DEFAULT_MODEL",
         "OPENAI_MODEL",
-        fallback="gpt-5.6-terra",
+        fallback=OPENAI_DEFAULT_MODEL,
     )
 
     openai_evaluation_model: str = _first_configured_value(
         "OPENAI_EVALUATION_MODEL",
-        fallback="gpt-5.6-terra",
+        fallback=OPENAI_DEFAULT_MODEL,
     )
 
     mistral_api_key: str | None = (

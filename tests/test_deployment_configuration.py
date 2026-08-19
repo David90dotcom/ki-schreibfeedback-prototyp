@@ -5,7 +5,10 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from app.config import _configured_student_feedback_provider
+from app.config import (
+    OPENAI_DEFAULT_MODEL,
+    _configured_student_feedback_provider,
+)
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -50,6 +53,7 @@ class DeploymentConfigurationTests(unittest.TestCase):
             encoding="utf-8"
         )
 
+        self.assertEqual(OPENAI_DEFAULT_MODEL, "gpt-5.6-luna")
         self.assertIn(
             "STUDENT_FEEDBACK_PROVIDER=mistral",
             example_environment,
@@ -59,14 +63,18 @@ class DeploymentConfigurationTests(unittest.TestCase):
             example_environment,
         )
         self.assertIn(
-            "OPENAI_DEFAULT_MODEL=gpt-5.6-terra",
-            example_environment,
-        )
-        self.assertNotIn(
             "OPENAI_DEFAULT_MODEL=gpt-5.6-luna",
             example_environment,
         )
+        self.assertNotIn(
+            "OPENAI_DEFAULT_MODEL=gpt-5.6-terra",
+            example_environment,
+        )
         self.assertIn(
+            "OPENAI_EVALUATION_MODEL=gpt-5.6-luna",
+            example_environment,
+        )
+        self.assertNotIn(
             "OPENAI_EVALUATION_MODEL=gpt-5.6-terra",
             example_environment,
         )

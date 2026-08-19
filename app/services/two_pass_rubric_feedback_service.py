@@ -17,11 +17,16 @@ from app.services.rubric_feedback_service import (
     UNVERIFIED_CRITERION_FEEDBACK,
     UNVERIFIED_CRITERION_NEXT_STEP,
 )
+from app.services.student_feedback_sections import (
+    StudentFeedbackSections,
+    open_formulation_helps_for_criterion,
+    unverified_student_feedback_sections,
+)
 
 
 TWO_PASS_FEEDBACK_MODE = "rubric_feedback_two_pass_experimental"
 TWO_PASS_FEEDBACK_LABEL = "Experimentelles Zwei-Pass-Kriterienfeedback"
-TWO_PASS_PIPELINE_VERSION = "grounded-two-pass-v2"
+TWO_PASS_PIPELINE_VERSION = "grounded-two-pass-v3-four-part-feedback"
 TWO_PASS_ANALYSIS_PROMPT_VERSION = "candidate-findings-v2"
 TWO_PASS_REVIEW_PROMPT_VERSION = "restricted-review-v2"
 TWO_PASS_EVIDENCE_VALIDATION_VERSION = (
@@ -330,10 +335,10 @@ class TwoPassRubricFeedbackService:
                                 "exakter Quellenausschnitt oder leer"
                             ),
                             "student_feedback": (
-                                "ein kurzer schülergerechter Satz"
+                                "beleggestützte schülergerechte Rückmeldung"
                             ),
                             "next_step": (
-                                "ein sicherer kurzer Schritt oder leer"
+                                "ein sicherer konkreter Schritt oder leer"
                             ),
                         }
                     ],
@@ -390,10 +395,11 @@ missing_requirement und criterion_mismatch ist source_scope none. Verwende
 task_material oder run_original_text nur, wenn source_quote exakt aus dem
 jeweiligen Feld stammt.
 
-Formuliere student_feedback als genau einen kurzen, verständlichen Satz für die
-angegebene Klassenstufe. Jeder Verbesserungsbefund benötigt außerdem einen
-konkreten next_step, der logisch aus dem Befund folgt, selbstständig umsetzbar
-ist und keine fertige Lösung vorgibt. Kannst du keinen solchen sicheren Schritt
+Formuliere student_feedback verständlich, konkret und beleggestützt für die
+angegebene Klassenstufe. Es gibt dafür keine vorgegebene Satz- oder
+Zeichenbegrenzung. Jeder Verbesserungsbefund benötigt außerdem einen konkreten
+next_step, der logisch aus dem Befund folgt, selbstständig umsetzbar ist und
+keine fertige Lösung vorgibt. Kannst du keinen solchen sicheren Schritt
 formulieren, darfst du den Verbesserungsbefund nicht ausgeben. Bei einer Stärke
 bleibt next_step leer. Verwende in diesen Feldern weder Markdown noch technische
 Statuswerte. Schreibe keine vollständige Musterlösung.
@@ -587,11 +593,9 @@ Eingabe:
                 "student_feedback": {
                     "type": "string",
                     "minLength": 1,
-                    "maxLength": MAX_FINDING_TEXT_CHARS,
                 },
                 "next_step": {
                     "type": "string",
-                    "maxLength": MAX_FINDING_TEXT_CHARS,
                 },
             },
             "required": [
@@ -1218,6 +1222,39 @@ Eingabe:
                 finding.student_quote
                 for finding in accepted
             )
+            student_feedback_sections = StudentFeedbackSections(
+                staerke=(
+                    strengths[0].student_feedback
+                    if strengths
+                    else (
+                        "Eine konkrete Stärke lässt sich aus den "
+                        "bestätigten Befunden noch nicht sicher ableiten."
+                    )
+                ),
+                rueckmeldung=(
+                    " ".join(
+                        finding.student_feedback
+                        for finding in improvements
+                    )
+                    if improvements
+                    else strengths[0].student_feedback
+                ),
+                naechster_schritt=(
+                    next_step
+                    or (
+                        "Prüfe abschließend, ob du diese Stärke im "
+                        "gesamten Text beibehältst."
+                    )
+                ),
+                formulierungshilfen=(
+                    open_formulation_helps_for_criterion(
+                        criterion_title=criterion_title,
+                        criterion_text=criterion.text,
+                    )
+                    if improvements
+                    else ()
+                ),
+            )
 
             results.append(
                 CriterionFeedbackResult(
@@ -1238,6 +1275,9 @@ Eingabe:
                     next_step=next_step,
                     evidence_quotes=evidence_quotes,
                     evidence_verified=True,
+                    student_feedback_sections=(
+                        student_feedback_sections
+                    ),
                 )
             )
 
@@ -1403,6 +1443,12 @@ Eingabe:
             next_step=UNVERIFIED_CRITERION_NEXT_STEP,
             evidence_quotes=(),
             evidence_verified=False,
+            student_feedback_sections=(
+                unverified_student_feedback_sections(
+                    explanation=UNVERIFIED_CRITERION_FEEDBACK,
+                    next_step=UNVERIFIED_CRITERION_NEXT_STEP,
+                )
+            ),
         )
 
     @staticmethod

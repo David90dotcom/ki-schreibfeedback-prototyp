@@ -1887,10 +1887,12 @@ fieldset > label:first-of-type {
 .meta-run-list {
     display: grid;
     gap: 18px;
+    min-width: 0;
 }
 
 .meta-run-card {
     margin-bottom: 0;
+    min-width: 0;
     border-left-width: 5px;
 }
 
@@ -1955,6 +1957,12 @@ fieldset > label:first-of-type {
     background: #ffffff;
     border: 1px solid #ddd6fe;
     border-radius: 10px;
+}
+
+.meta-source-details {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
 }
 
 .analysis-original-text-panel {
@@ -2117,6 +2125,10 @@ fieldset > label:first-of-type {
     background: var(--meta-bg);
 }
 
+.meta-source-details summary {
+    overflow-wrap: anywhere;
+}
+
 .meta-source-details summary:hover,
 .meta-manual-evaluation summary:hover {
     background: #ede9fe;
@@ -2130,9 +2142,21 @@ fieldset > label:first-of-type {
 
 .meta-source-details-content {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 20px;
-    padding: 18px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    padding: clamp(12px, 3vw, 18px);
     border-top: 1px solid #ddd6fe;
+}
+
+.meta-source-details-content > section,
+.meta-source-criteria,
+.meta-source-criteria > li,
+.meta-preserved-text {
+    min-width: 0;
+    max-width: 100%;
 }
 
 .meta-source-details-content h3,
@@ -2163,6 +2187,7 @@ fieldset > label:first-of-type {
     gap: 10px;
     margin: 0;
     padding-left: 24px;
+    overflow-wrap: anywhere;
 }
 
 .meta-source-criteria li {

@@ -16,7 +16,7 @@ didaktischer Nutzbarkeit, ist aber keine autonome Benotungsplattform.
 | Release-Tag | `v1.0.0` |
 | Vorgänger | `v1.0.0-rc4` |
 | Web-Image | `ki-schreibfeedback-web:1.0.0` |
-| OpenAI-Standard | `gpt-5.6-terra`, mittlerer Reasoning-Aufwand |
+| OpenAI-Standards | normales Feedback und Meta-Vorbewertung: `gpt-5.6-luna`, mittlerer Reasoning-Aufwand |
 | Lokales Standardmodell | `mistral-small3.2:24b-instruct-2506-q8_0` |
 | RunPod-Modell | `RedHatAI/Mistral-Small-3.2-24B-Instruct-2506-FP8` |
 | RunPod-Betrieb | ein automatischer 48-GB-GPU-Pool, höchstens ein Worker |
