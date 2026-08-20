@@ -89,7 +89,8 @@ des persistenten Volumes anlegen:
 sudo docker compose exec -T web python -c 'import datetime, sqlite3; stamp=datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S"); source=sqlite3.connect("/app/data/analysis_runs.sqlite3"); path=f"/app/data/analysis_runs-pre-1.0.0-{stamp}.sqlite3"; target=sqlite3.connect(path); source.backup(target); target.close(); source.close(); print("Sicherung erstellt:", path)'
 ```
 
-Anschließend in der serverseitigen `.env` ausschließlich die ID des Pools eintragen:
+Anschließend die folgenden nicht geheimen Betriebswerte in der serverseitigen
+`.env` prüfen beziehungsweise ergänzen:
 
 ```env
 RUNPOD_ENDPOINT_ID=<Endpoint-ID des automatischen Pools>
@@ -99,6 +100,7 @@ RUNPOD_IDLE_TIMEOUT_SECONDS=5
 STUDENT_FEEDBACK_PROVIDER=mistral
 OPENAI_DEFAULT_MODEL=gpt-5.6-luna
 OPENAI_EVALUATION_MODEL=gpt-5.6-luna
+MAX_CRITERION_CHARS=50000
 ```
 
 `STUDENT_FEEDBACK_PROVIDER` legt nur die Erstkonfiguration fest. Eine spätere
@@ -117,6 +119,17 @@ sudo docker compose up -d --remove-orphans --wait
 sudo docker compose ps
 sudo docker compose logs --tail=100 web caddy
 ```
+
+Danach die effektiv im neu gestarteten Webcontainer geladenen, für die
+Standgleichheit relevanten Werte prüfen:
+
+```bash
+sudo docker compose exec -T web python -c 'from app.config import settings; print("Kriterienlänge:", settings.max_criterion_chars); print("Feedback:", settings.openai_model); print("Meta:", settings.openai_evaluation_model)'
+```
+
+Erwartet werden `50000`, `gpt-5.6-luna` und `gpt-5.6-luna`. Damit wird nicht
+nur die eingecheckte Beispielkonfiguration, sondern die tatsächlich vom
+laufenden Container geladene `.env` kontrolliert.
 
 Der Login-Endpunkt muss über HTTPS erreichbar sein:
 
@@ -150,7 +163,7 @@ In der produktiven Oberfläche nacheinander prüfen:
 4. RunPod zeigt im Standardmodus automatisch die aktuelle Supply-Momentaufnahme des GPU-Pools.
 5. RunPod Standard startet die kriterienweise Analyse über den automatischen Pool.
 6. Auch im Experimentmodus wird keine dedizierte GPU-Auswahl angeboten.
-7. Alle Kriterienkarten erscheinen; ein unsicherer Einzelbefund wird höchstens als „Nicht beurteilbar“ ersetzt und bricht nicht den gesamten Lauf ab.
+7. Alle Kriterienkarten erscheinen in der Reihenfolge „Das gelingt dir schon“, kriterienbezogene Einordnung, „Daran kannst du weiterarbeiten“ und – sofern sicher ableitbar – „Formulierungshilfe“; ein unsicherer Einzelbefund wird höchstens als „Nicht beurteilbar“ ersetzt und bricht nicht den gesamten Lauf ab.
 8. Eine einzelne Kriterienkarte lässt sich aktualisieren.
 9. Feedbacklauf lässt sich für die Meta-Bewertung speichern.
 10. Manuelle Bewertung und PDF-Export funktionieren.

@@ -13,6 +13,8 @@ didaktischer Nutzbarkeit, ist aber keine autonome Benotungsplattform.
 | Bereich | Festlegung |
 |---|---|
 | Hauptbranch | `main` |
+| Funktional geprüfter Anwendungscommit | `d0035ef0fa4a633514e46ca426ed186b53a99a78` |
+| Prüfdatum | `20.08.2026` |
 | Release-Tag | `v1.0.0` |
 | Vorgänger | `v1.0.0-rc4` |
 | Web-Image | `ki-schreibfeedback-web:1.0.0` |
@@ -31,6 +33,7 @@ spätere Fehlerkorrektur erhält eine neue Patchversion, beispielsweise
 - verwaltbare Aufgaben und geordnete Feedback-Kriterien
 - kriterienweise Standardanalyse sowie optionale Vergleichsmodi
 - technische Herkunftsprüfung wörtlicher Schülertextbelege
+- viergliedriges Schülerfeedback mit belegter Stärke, kriterienbezogener Einordnung, genau einem nächsten Schritt und passenden Formulierungshilfen
 - formative Kriterienstatus ohne Benotungsanspruch
 - gezielte Aktualisierung einzelner Kriterienkarten
 - pseudonyme Schülerzugänge mit sechsstelligen Codes und zentraler Modellwahl
@@ -56,7 +59,7 @@ git diff --check
 
 Erwartetes Ergebnis des Release-Stands:
 
-- 237 Tests bestanden
+- 241 Tests bestanden
 - 57 Subtests bestanden
 - Architekturprüfung mit acht Prüfschritten erfolgreich
 - vier Provider und acht Modelle validiert
